@@ -45,6 +45,9 @@ let wasmPromise: Promise<Core>,
   activeAsset: Asset | undefined;
 const dbPromise = openStore();
 let latestAnalysisBatch = "";
+let splitState:
+  | { source: number; channel: number; sample: number; threshold: number }
+  | undefined;
 let currentHeaders: Record<string, Header> = {},
   budget = 250000;
 const labels = (a: Asset) =>
@@ -167,6 +170,7 @@ function view(a: Asset, s: Session, cached: boolean): ViewData {
   return {
     key: a.key,
     session: s.key,
+    revision: s.revision,
     name: a.file.name,
     n: a.n,
     duration:
@@ -254,6 +258,10 @@ async function waveformColumn(
   );
 }
 async function handle(m: any): Promise<any> {
+  if (splitState && !["split", "analysis", "wave_density"].includes(m.type))
+    throw new Error(
+      "Finish the waveform split with a left click, or press Escape to cancel.",
+    );
   if (m.type === "load") {
     await saveActive();
     const key = m.assetKey as string,
@@ -289,6 +297,17 @@ async function handle(m: any): Promise<any> {
     active = s;
     activeAsset = a;
     currentHeaders = { tetrode: a.header };
+    if (m.cut) {
+      const file = m.cut as File;
+      const text = await file.slice(0, 65536).text();
+      const end = text.indexOf("Exact_cut_for:");
+      currentHeaders.cut = {
+        file: file.name,
+        ...(end >= 0
+          ? textHeader(text.slice(0, text.indexOf("\n", end)))
+          : { clusters: text.split(/\s+/)[0], label_base: "1" }),
+      };
+    }
     if (m.set) currentHeaders.set = textHeader(await (m.set as File).text());
     if (m.pos)
       currentHeaders.position = parseHeader(
@@ -303,6 +322,89 @@ async function handle(m: any): Promise<any> {
     e = a.e;
   if (m.session && m.session !== s.key)
     throw new Error("The active cut changed; retry the operation.");
+  if (m.type === "split") {
+    try {
+      if (m.phase === "preview") {
+        if (!splitState) {
+          if (
+            !Number.isInteger(m.source) ||
+            m.source < 0 ||
+            m.source >= 1023 ||
+            counts(a)[1023]
+          )
+            throw new Error("No room to insert another cell.");
+          w.engine_edit_begin(e);
+          w.engine_split_cache_begin(e, m.source);
+          splitState = {
+            source: m.source,
+            channel: m.channel,
+            sample: m.sample,
+            threshold: m.threshold,
+          };
+        }
+        if (
+          !Number.isInteger(m.channel) ||
+          m.channel < 0 ||
+          m.channel > 3 ||
+          !Number.isInteger(m.sample) ||
+          m.sample < 0 ||
+          m.sample > 49
+        )
+          throw new Error("Invalid waveform split point.");
+        if (!w.engine_split_cached(e)) {
+          await waveformColumn(a, m.channel, m.sample, m.id);
+          w.engine_split_cache_finish(e);
+        }
+        if (
+          w.engine_split_gate(
+            e,
+            splitState.source,
+            m.channel,
+            m.sample,
+            m.threshold,
+          ) < 0
+        )
+          throw new Error("No room to insert another cell.");
+        splitState = {
+          ...splitState,
+          channel: m.channel,
+          sample: m.sample,
+          threshold: m.threshold,
+        };
+        await replenishWaves(a, splitState.source);
+        await replenishWaves(a, splitState.source + 1);
+      } else if (splitState) {
+        if (m.phase === "cancel") w.engine_edit_rollback(e);
+        else {
+          const changed = w.engine_edit_finish(e);
+          if (changed) {
+            const entry = {
+              id: crypto.randomUUID(),
+              description: `Split cell ${splitState.source} at Ch ${splitState.channel + 1}, sample ${splitState.sample}, > ${splitState.threshold}`,
+              changed,
+            };
+            const patch = copyU8(w, w.engine_patch(e), w.engine_patch_len(e));
+            await put(await dbPromise, `patch:${entry.id}`, patch);
+            s.undo.push(entry);
+            s.redo = [];
+            s.dirty = true;
+          }
+        }
+        w.engine_patch_clear(e);
+        splitState = undefined;
+      }
+      s.revision++;
+      analyses.clear();
+      return view(a, s, true);
+    } catch (error) {
+      w.engine_edit_rollback(e);
+      w.engine_patch_clear(e);
+      splitState = undefined;
+      s.revision++;
+      analyses.clear();
+      throw error;
+    }
+  }
   if (m.type === "budget") {
     budget = m.budget;
     return view(a, s, true);
@@ -314,7 +416,15 @@ async function handle(m: any): Promise<any> {
     let changed = 0;
     try {
       if (m.action === "sort") w.engine_sort(e);
-      else if (m.action === "gate") {
+      else if (m.action === "wave_split") {
+        await waveformColumn(a, m.channel, m.sample, m.id);
+        if (
+          w.engine_split_gate(e, m.source, m.channel, m.sample, m.threshold) < 0
+        )
+          throw new Error(
+            "No room to insert another cell (maximum label 1023).",
+          );
+      } else if (m.action === "gate") {
         await waveformColumn(a, m.channel, m.sample, m.id);
         withU16(w, m.sources, (p, n) =>
           w.engine_gate_apply(
@@ -401,6 +511,13 @@ async function handle(m: any): Promise<any> {
       analyses.clear();
     }
     return view(a, s, true);
+  }
+  if (m.type === "wave_density") {
+    for (const cell of m.cells) await replenishWaves(a, cell);
+    withU16(w, m.cells, (p, n) => w.engine_density(e, p, n));
+    return {
+      texture: copyU16(w, w.engine_density_ptr(e), w.engine_density_len(e)),
+    };
   }
   if (m.type === "analysis") {
     const opts = m.settings as Settings,

@@ -1,40 +1,55 @@
 import { useEffect, useRef, useState } from "react";
 import { drawWaveOverview } from "./gpu";
+import { drawDensity } from "./density-gpu";
 import { AnalysisPlot } from "./plots";
 import { request } from "./client";
+import type { WaveLayout } from "./plot-geometry";
+import { useTileGestures } from "./tile-gestures";
 import {
   color,
   type ViewData,
   type AnalysisData,
   type Settings,
   type PlotMode,
+  type SplitPoint,
 } from "./types";
 export type VisiblePlots = Record<PlotMode, boolean>;
-const ROW = 124;
+const ROW = 124,
+  STRIDE = ROW + 2;
 export function TileWall({
   data,
   settings,
   pos,
   posKey,
   selected,
-  sources,
   shown,
   filter,
   sort,
   onSelect,
-  onSources,
+  splitPoint,
+  grabMode,
+  busy,
+  onHover,
+  onMerge,
+  onWaveSplit,
+  onPopOut,
 }: {
   data: ViewData;
   settings: Settings;
   pos?: File;
   posKey: string;
   selected: number;
-  sources: number[];
   shown: VisiblePlots;
   filter: string;
   sort: boolean;
   onSelect: (n: number) => void;
-  onSources: (n: number[]) => void;
+  splitPoint: SplitPoint | null;
+  grabMode: boolean;
+  busy: boolean;
+  onHover: (n: number | null) => void;
+  onMerge: (a: number, b: number) => void;
+  onWaveSplit: (n: number, ch: number, t: number, v: number) => void;
+  onPopOut: (n: number, x: number, y: number) => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null),
     waveCanvas = useRef<HTMLCanvasElement>(null),
@@ -42,15 +57,61 @@ export function TileWall({
     [maps, setMaps] = useState(new Map<number, AnalysisData>()),
     [scroll, setScroll] = useState(0),
     [height, setHeight] = useState(800),
-    [width, setWidth] = useState(600);
+    [width, setWidth] = useState(800),
+    [density, setDensity] = useState<{
+      key: string;
+      texture: Uint16Array;
+    } | null>(null);
   const all = Array.from(data.counts, (n, i) => ({ n, i }))
-    .filter((c) => c.n > 0 && String(c.i).includes(filter))
-    .sort((a, b) => (sort ? b.n - a.n : a.i - b.i))
+    .filter(
+      (c) =>
+        (c.n > 0 && String(c.i).includes(filter)) ||
+        (splitPoint &&
+          [splitPoint.source, splitPoint.source + 1].includes(c.i)),
+    )
+    .sort((a, b) => (sort && !splitPoint ? b.n - a.n : a.i - b.i))
     .map((c) => c.i);
-  const start = Math.max(0, Math.floor(scroll / ROW) - 1),
-    visible = all.slice(start, start + Math.ceil(height / ROW) + 3),
+  const wavePixels = shown.waveforms ? ROW * 4 : 0,
+    tuningWidth = shown.ac
+      ? 128
+      : (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0),
+    numericWidth = (shown.spatial ? 128 : 0) + tuningWidth,
+    tileWidth = wavePixels + numericWidth + 27,
+    tileStride = tileWidth + 2,
+    columns = Math.max(1, Math.floor((width - 4) / tileStride)),
+    totalRows = Math.ceil(all.length / columns),
+    startRow = Math.max(
+      0,
+      Math.min(totalRows - 1, Math.floor(scroll / STRIDE) - 1),
+    ),
+    start = startRow * columns,
+    visible = all.slice(
+      start,
+      start + (Math.ceil(height / STRIDE) + 3) * columns,
+    ),
+    visibleRows = Math.ceil(visible.length / columns),
+    layout: WaveLayout = {
+      columns,
+      tileStride,
+      rowStride: STRIDE,
+      waveWidth: wavePixels,
+      waveHeight: ROW,
+      inset: 2,
+    },
     signature = visible.join(","),
-    scope = `${data.session}|${data.undo.at(-1)?.id || "original"}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}`;
+    waveScope = `${data.session}|${data.revision}`,
+    scope = `${data.session}|${data.revision}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}`;
+  const gestures = useTileGestures({
+    splitSource: splitPoint?.source,
+    grab: grabMode,
+    busy,
+    scope,
+    onSelect,
+    onMerge,
+    onSplit: onWaveSplit,
+    onPopOut,
+    snapshot: (n) => captureTile(n, `Cell ${n}`)?.toDataURL(),
+  });
   useEffect(() => {
     const ro = new ResizeObserver(() => {
       setHeight(scroller.current!.clientHeight);
@@ -59,6 +120,17 @@ export function TileWall({
     ro.observe(scroller.current!);
     return () => ro.disconnect();
   }, []);
+  useEffect(() => {
+    const index = all.indexOf(selected),
+      row = Math.floor(index / columns),
+      el = scroller.current!;
+    if (
+      index >= 0 &&
+      (row * STRIDE < el.scrollTop ||
+        (row + 1) * STRIDE > el.scrollTop + el.clientHeight)
+    )
+      el.scrollTop = row * STRIDE;
+  }, [selected, data.session, columns]);
   useEffect(() => {
     cache.current.clear();
     setMaps(new Map());
@@ -91,43 +163,118 @@ export function TileWall({
     };
   }, [scope, signature]);
   useEffect(() => {
+    let live = true;
+    if (settings.density && shown.waveforms && visible.length)
+      request<{ texture: Uint16Array }>("wave_density", {
+        session: data.session,
+        cells: visible,
+      })
+        .then((r) => {
+          if (live)
+            setDensity({
+              key: waveScope + "|" + signature,
+              texture: r.texture,
+            });
+        })
+        .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [waveScope, signature, settings.density, shown.waveforms]);
+  useEffect(() => {
     if (!shown.waveforms || !waveCanvas.current) return;
-    return drawWaveOverview(waveCanvas.current, data, visible, 1);
-  }, [data, signature, width, shown.waveforms]);
-  const waveWidth = shown.waveforms
-    ? shown.spatial || shown.direction || shown.speed || shown.ac
-      ? "60%"
-      : "calc(100% - 32px)"
-    : "0%";
+    if (settings.density && density?.key === waveScope + "|" + signature)
+      return drawDensity(
+        waveCanvas.current,
+        density.texture,
+        visible.length,
+        layout,
+      );
+    return drawWaveOverview(waveCanvas.current, data, visible, columns, layout);
+  }, [
+    data,
+    signature,
+    columns,
+    tileStride,
+    shown.waveforms,
+    settings.density,
+    density,
+  ]);
+  const waveWidth = shown.waveforms ? `${ROW * 4}px` : "0px";
   return (
     <div
       className="tile-wall"
+      data-splitting={splitPoint ? splitPoint.source : undefined}
       ref={scroller}
       onScroll={(e) => setScroll(e.currentTarget.scrollTop)}
       aria-label="Cell tile wall"
     >
-      <div className="tile-spacer" style={{ height: all.length * ROW }}>
+      <div
+        className="tile-spacer"
+        style={{ height: totalRows * STRIDE, minWidth: tileWidth + 4 }}
+      >
         <div
           className="tile-window"
-          style={{ top: start * ROW, height: visible.length * ROW }}
+          style={{
+            top: startRow * STRIDE,
+            height: visibleRows * STRIDE,
+            width: columns * tileStride,
+          }}
         >
           {shown.waveforms && (
             <canvas
+              data-density={
+                settings.density && density?.key === waveScope + "|" + signature
+                  ? "ready"
+                  : "pending"
+              }
               ref={waveCanvas}
               className="tile-wave-canvas"
-              style={{ width: waveWidth }}
+              style={{ width: columns * tileStride }}
               aria-label="Cell waveform tile wall"
             />
           )}
           {visible.map((cell, i) => {
-            const a = maps.get(cell);
+            const a = maps.get(cell),
+              paired =
+                !!splitPoint &&
+                [splitPoint.source, splitPoint.source + 1].includes(cell),
+              point = paired
+                ? gestures.split || {
+                    channel: splitPoint!.channel,
+                    sample: splitPoint!.sample,
+                    threshold: splitPoint!.threshold,
+                  }
+                : gestures.split?.cell === cell
+                  ? gestures.split
+                  : null,
+              marker = point
+                ? {
+                    x:
+                      (point.channel + 0.08 + (0.84 * point.sample) / 49) * ROW,
+                    y: ((64 - point.threshold * 0.39) * ROW) / 128,
+                  }
+                : null;
             return (
               <section
                 key={cell}
-                className={`cell-tile ${selected === cell ? "selected" : ""}`}
+                className={`cell-tile ${selected === cell ? "selected" : ""} ${gestures.target === cell ? "merge-target" : ""} ${splitPoint && !paired ? "split-muted" : ""} ${paired ? "split-pair" : ""}`}
                 data-cell={cell}
-                style={{ top: i * ROW, height: ROW }}
-                onClick={() => onSelect(cell)}
+                style={{
+                  top: Math.floor(i / columns) * STRIDE,
+                  left: (i % columns) * tileStride,
+                  width: tileWidth,
+                  height: ROW,
+                }}
+                onPointerDown={(e) => gestures.begin(e, cell)}
+                onContextMenu={(e) => {
+                  if ((e.target as HTMLElement).closest(".tile-waves"))
+                    e.preventDefault();
+                }}
+                onPointerEnter={() => {
+                  if (!grabMode && (!splitPoint || paired)) onHover(cell);
+                }}
+                onPointerLeave={() => onHover(null)}
               >
                 <div className="tile-waves" style={{ width: waveWidth }}>
                   {shown.waveforms && (
@@ -137,6 +284,16 @@ export function TileWall({
                         &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 3
                         &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 4
                       </span>
+                      {marker && (
+                        <svg className="wave-split-marker">
+                          <line x1={marker.x} x2={marker.x} y1="0" y2="100%" />
+                          <line x1="0" x2="100%" y1={marker.y} y2={marker.y} />
+                          <text
+                            x="4"
+                            y="14"
+                          >{`Ch ${point!.channel + 1} · sample ${point!.sample} · ${point!.threshold}`}</text>
+                        </svg>
+                      )}
                       <span className="tile-wave-caption">
                         {data.waveLabels.filter((c) => c === cell).length}{" "}
                         sampled waves
@@ -144,7 +301,10 @@ export function TileWall({
                     </>
                   )}
                 </div>
-                <div className="tile-numeric-plots">
+                <div
+                  className="tile-numeric-plots"
+                  style={{ width: numericWidth }}
+                >
                   {shown.spatial && (
                     <div
                       className="tile-spatial"
@@ -165,7 +325,7 @@ export function TileWall({
                     </div>
                   )}
                   {(shown.direction || shown.speed || shown.ac) && (
-                    <div className="tile-tuning">
+                    <div className="tile-tuning" style={{ width: tuningWidth }}>
                       <div className="tile-tuning-top">
                         {shown.direction && (
                           <div className="tile-direction">
@@ -225,19 +385,6 @@ export function TileWall({
                   >
                     {cell}
                   </button>
-                  <input
-                    aria-label={`Cell ${cell} source`}
-                    type="checkbox"
-                    checked={sources.includes(cell)}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) =>
-                      onSources(
-                        e.target.checked
-                          ? [...sources, cell]
-                          : sources.filter((c) => c !== cell),
-                      )
-                    }
-                  />
                 </div>
                 <div className="tile-caption">
                   <span>{data.counts[cell].toLocaleString()} spikes</span>
@@ -255,6 +402,18 @@ export function TileWall({
         </div>
       </div>
       {!all.length && <div className="no-cells">No matching cells.</div>}
+      {gestures.ghost && (
+        <img
+          className="tile-drag-ghost"
+          alt="Dragging cell"
+          src={gestures.ghost.image}
+          style={{
+            left: gestures.ghost.x,
+            top: gestures.ghost.y,
+            width: gestures.ghost.width,
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -279,18 +438,21 @@ export function captureTile(
   ctx.fillStyle = "black";
   ctx.font = "11px Arial";
   ctx.fillText(title, 6, 17);
-  if (waves) {
-    const w = waves.getBoundingClientRect();
-    const sy = waves.height / w.height;
+  const waveRegion = row.querySelector<HTMLElement>(".tile-waves")!;
+  if (waves && waveRegion.clientWidth) {
+    const w = waves.getBoundingClientRect(),
+      region = waveRegion.getBoundingClientRect(),
+      sx = waves.width / w.width,
+      sy = waves.height / w.height;
     ctx.drawImage(
       waves,
-      0,
+      (region.left - w.left) * sx,
       (rect.top - w.top) * sy,
-      waves.width,
+      region.width * sx,
       rect.height * sy,
-      0,
+      region.left - rect.left,
       28,
-      w.width,
+      region.width,
       rect.height,
     );
   }
@@ -304,11 +466,24 @@ export function captureTile(
       b.height,
     );
   }
-  ctx.font = "10px Arial";
-  ctx.fillText(
-    row.querySelector(".tile-caption")?.textContent || "",
-    5,
-    rect.height + 24,
-  );
+  const caption = row.querySelector<HTMLElement>(".tile-caption");
+  if (caption && getComputedStyle(caption).visibility !== "hidden") {
+    const info = caption.getBoundingClientRect();
+    ctx.fillStyle = "#ffffffe8";
+    ctx.fillRect(
+      info.left - rect.left,
+      info.top - rect.top + 28,
+      info.width,
+      info.height,
+    );
+    ctx.font = "14px Arial";
+    ctx.fillStyle = "#222";
+    for (const [i, line] of [...caption.querySelectorAll("span")].entries())
+      ctx.fillText(
+        line.textContent || "",
+        info.left - rect.left + 6,
+        info.top - rect.top + 45 + i * 18,
+      );
+  }
   return canvas;
 }

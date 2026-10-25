@@ -8,7 +8,9 @@ The replacement starts from the original `gh-pages` implementation at `bf0f51bd7
 
 - Drop files or folders, or use the file/folder picker. Group `.set`, `.pos`, numeric tetrode files, `.cut` and `.clu.N` by trial and tetrode. Add files incrementally and select alternative cuts.
 - Six GPU feature projections, amplitude/time axes, cell isolation, time colouring, additive point density, opacity, point size and a configurable display budget.
-- Four-channel waveform traces and a paged cell overview rendered in one WebGL2 context. Pin up to four cell snapshots for comparison across trials/tetrodes, copy plots, or export PNGs.
+- Compact light desktop layout: files, position and feature projections on the left, a scrolling cell tile wall on the right. Tiles size to visible plots and wrap into columns; numeric details appear on hover. The left pane starts at 350 px and can shrink to 240 px.
+- Four-channel waveforms with cached density images or flag traces, rate maps, direction/speed tuning and autocorrelation in every tile. Hover to see spikes on the position path.
+- Drag a cell tile onto another to merge; right-drag over a waveform to enter split mode, adjust from either tile, then left-click anywhere to finish (Escape cancels). Hold Space and click a tile, position path or feature plot to make a floating comparison copy. Settings and file headers also use movable, resizable windows. Data bins keep their proportions when panes resize.
 - Exact population edits: lasso, paint, waveform-sample threshold, merge, swap and renumber by count. Cell 0 remains noise when renumbering. Every edit supports undo/redo; original disk files are never overwritten.
 - Duplicate a cut into another local cut version. Export `.cut` or legacy 1-based `.clu.N` assignments in original spike order.
 - Spatial firing-rate maps, trajectory/spike overlays, head-direction tuning, speed tuning, temporal autocorrelograms, spike counts, mean rate and refractory interval violations.
@@ -43,7 +45,7 @@ The target workload is approximately **9 million spikes and 100 cells per tetrod
 
 Counts, assignments, lasso/paint/gate edits and cut exports use the **full spike population**. GPU feature views use an evenly spaced sample; waveform views use a stratified reservoir and say so in the interface. Newly split cells have their waveform sample replenished from small file slices. Large/bursty autocorrelograms use bounded reference/pair sampling and are labelled accordingly. Time sliders affect display; cuts operate across the complete recording.
 
-A local Chromium test loaded a synthetic 9-million-spike recording with 100 cells in about **3.6–4.4 seconds**, then merged, undid and exported it. The Wasm-only decoder benchmark processed the same population in about **1.25 seconds**, with about **94 MiB** of Wasm memory. These are measurements on one development machine, not cross-device performance guarantees. See `docs/VALIDATION.md` for commands and scope.
+A local Chromium test loaded a synthetic 9-million-spike recording with 100 cells in about **3.4–4.6 seconds**, then merged, undid and exported it. The Wasm-only decoder benchmark processed the same population in about **1.31 seconds**, with about **94 MiB** of Wasm memory. These are measurements on one development machine, not cross-device performance guarantees. See `docs/VALIDATION.md` for commands and scope.
 
 Undo patches are saved to IndexedDB, with no fixed action limit. History metadata and open-file references live for the current workspace tab. Switching trials, tetrodes or cuts preserves history; refreshing/closing the tab does not restore the workspace. Export modified cuts before closing. Browser storage quota can limit history: an edit is rolled back if its undo patch cannot be stored.
 

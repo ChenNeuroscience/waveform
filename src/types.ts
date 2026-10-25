@@ -35,11 +35,11 @@ export interface Settings {
   speedBin: number;
 }
 export const defaultSettings: Settings = {
-  pointSize: 1.8,
+  pointSize: 1,
   opacity: 0.65,
   budget: 250_000,
   drift: false,
-  density: false,
+  density: true,
   binCm: 3,
   smooth: 1,
   maxRate: 0,
@@ -56,7 +56,14 @@ export interface HistoryEntry {
   description: string;
   changed: number;
 }
+export interface SplitPoint {
+  source: number;
+  channel: number;
+  sample: number;
+  threshold: number;
+}
 export interface ViewData {
+  revision: number;
   key: string;
   session: string;
   name: string;
@@ -80,6 +87,8 @@ export interface ViewData {
   loadMs: number;
 }
 export interface AnalysisData {
+  arenaWidth: number;
+  arenaHeight: number;
   cell: number;
   spatial: Float32Array;
   width: number;

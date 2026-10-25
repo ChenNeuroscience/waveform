@@ -32,6 +32,7 @@ import {
   type AnalysisData,
   type Settings,
   type PlotMode,
+  type SplitPoint,
 } from "./types";
 import video from "../img/demo_youtube.png";
 interface Props {
@@ -49,6 +50,19 @@ interface Props {
   isolate: boolean;
   range: number[];
   shown: VisiblePlots;
+  splitPoint: SplitPoint | null;
+  grabMode: boolean;
+  hoverCell: number | null;
+  onHover: (n: number | null) => void;
+  onMerge: (a: number, b: number) => void;
+  onWaveSplit: (
+    cell: number,
+    channel: number,
+    sample: number,
+    threshold: number,
+  ) => void;
+  onPopOut: (cell: number, x?: number, y?: number) => void;
+  onPopPlot: (kind: "path" | "features", x: number, y: number) => void;
   busy: boolean;
   progress: number;
   message: string;
@@ -59,7 +73,6 @@ interface Props {
   sort: boolean;
   fileInput: RefObject<HTMLInputElement | null>;
   folderInput: RefObject<HTMLInputElement | null>;
-  pins: { id: string; title: string; image: string }[];
   onImport: (f: File[]) => void;
   onTrial: (t: Trial) => void;
   onTet: (n: number) => void;
@@ -88,7 +101,6 @@ interface Props {
   onPin: () => void;
   onCopy: () => void;
   onImage: () => void;
-  onUnpin: (id: string) => void;
   children?: ReactNode;
 }
 const time = (n: number) =>
@@ -96,8 +108,8 @@ const time = (n: number) =>
 export function DesktopShell(p: Props) {
   const root = useRef<HTMLDivElement>(null),
     left = useRef<HTMLDivElement>(null),
-    [split, setSplit] = useState(50),
-    [rows, setRows] = useState([28, 25]);
+    [split, setSplit] = useState(350),
+    [rows, setRows] = useState([200, 300]);
   const ready = !!p.data && !p.busy,
     active = p.trial?.tetrodes.find((t) => t.number === p.tetNum),
     numbers = [
@@ -111,16 +123,25 @@ export function DesktopShell(p: Props) {
     const move = (ev: PointerEvent) => {
       if (part === "horizontal") {
         const b = root.current!.getBoundingClientRect();
-        setSplit(
-          Math.max(28, Math.min(68, ((ev.clientX - b.left) / b.width) * 100)),
-        );
+        setSplit(Math.max(240, Math.min(b.width - 337, ev.clientX - b.left)));
       } else {
-        const b = left.current!.getBoundingClientRect(),
-          v = ((ev.clientY - b.top) / b.height) * 100;
+        const b = left.current!.getBoundingClientRect();
         setRows((old) =>
           part === "files"
-            ? [Math.max(12, Math.min(55, v)), old[1]]
-            : [old[0], Math.max(12, Math.min(50, v - old[0]))],
+            ? [
+                Math.max(
+                  90,
+                  Math.min(b.height - old[1] - 102, ev.clientY - b.top),
+                ),
+                old[1],
+              ]
+            : [
+                old[0],
+                Math.max(
+                  160,
+                  Math.min(b.height - old[0] - 102, b.bottom - ev.clientY),
+                ),
+              ],
         );
       }
     };
@@ -133,7 +154,7 @@ export function DesktopShell(p: Props) {
   };
   return (
     <div
-      className="app desktop-app"
+      className={`app desktop-app ${p.grabMode ? "grab-mode" : ""} ${p.splitPoint ? "splitting" : ""}`}
       onDragOver={(e) => {
         e.preventDefault();
         if (e.dataTransfer.types.includes("Files")) p.onDrag(true);
@@ -298,14 +319,14 @@ export function DesktopShell(p: Props) {
             className="desktop-workspace"
             ref={root}
             style={{
-              gridTemplateColumns: `minmax(280px,${split}fr) 7px minmax(330px,${100 - split}fr)`,
+              gridTemplateColumns: `minmax(240px,${split}px) 7px minmax(330px,1fr)`,
             }}
           >
             <div
               className="left-workspace"
               ref={left}
               style={{
-                gridTemplateRows: `minmax(90px,${rows[0]}fr) 6px minmax(90px,${rows[1]}fr) 6px minmax(160px,${100 - rows[0] - rows[1]}fr)`,
+                gridTemplateRows: `minmax(90px,${rows[0]}px) 6px minmax(90px,1fr) 6px minmax(160px,${rows[1]}px)`,
               }}
             >
               <section className="files-pane">
@@ -361,45 +382,52 @@ export function DesktopShell(p: Props) {
                       </div>
                       <div className="trial-tetrodes">
                         {t.tetrodes.map((e) => (
-                          <button
+                          <div
                             key={e.id}
-                            title={e.file?.name || "No tetrode file"}
-                            disabled={!e.file}
-                            className={
-                              t.id === p.trial?.id && e.number === p.tetNum
-                                ? "active"
-                                : ""
-                            }
-                            onClick={() => p.onRecording(t, e.number)}
+                            className={`tetrode-file-block ${e.number === p.tetNum ? "expanded" : ""}`}
+                            data-tetrode={e.number}
                           >
-                            ~.{e.number}
-                          </button>
+                            {e.file && (
+                              <button
+                                title={e.file.name}
+                                aria-label={`${t.name} tetrode ${e.number}`}
+                                className={
+                                  t.id === p.trial?.id && e.number === p.tetNum
+                                    ? "active"
+                                    : ""
+                                }
+                                onClick={() => p.onRecording(t, e.number)}
+                              >
+                                ~.{e.number}
+                              </button>
+                            )}
+                            {e.file && e.number === p.tetNum && (
+                              <button
+                                title="Unsorted spikes"
+                                className={
+                                  t.id === p.trial?.id && !p.cutId
+                                    ? "active"
+                                    : ""
+                                }
+                                onClick={() => p.onRecording(t, e.number, "")}
+                              >
+                                uncut
+                              </button>
+                            )}
+                            {e.cuts.map((c) => (
+                              <button
+                                key={c.id}
+                                title={c.name}
+                                aria-label={c.name.replace(t.name, "~")}
+                                className={`cut-file ${t.id === p.trial?.id && e.number === p.tetNum && p.cutId === c.id ? "active" : ""}`}
+                                onClick={() => p.onRecording(t, e.number, c.id)}
+                              >
+                                {c.name.replace(t.name, "~")}
+                              </button>
+                            ))}
+                          </div>
                         ))}
                       </div>
-                      {t.id === p.trial?.id && (
-                        <div className="trial-cuts">
-                          <span>Cut:</span>
-                          <button
-                            className={!p.cutId ? "active" : ""}
-                            onClick={() => p.onCut("")}
-                          >
-                            Unsorted
-                          </button>
-                          {active?.cuts.map((c) => (
-                            <button
-                              key={c.id}
-                              className={c.id === p.cutId ? "active" : ""}
-                              title={c.name}
-                              onClick={() => p.onCut(c.id)}
-                            >
-                              {c.name.replace(t.name, "~")}
-                            </button>
-                          ))}
-                          {p.data?.dirty && (
-                            <span className="modified-cut">modified *</span>
-                          )}
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -413,7 +441,11 @@ export function DesktopShell(p: Props) {
               </div>
               <section className="position-pane">
                 <div className="pane-caption">
-                  <span>Position / spikes · cell {p.cell}</span>
+                  <span>
+                    {p.hoverCell === null
+                      ? "Position"
+                      : `Position / spikes · cell ${p.hoverCell}`}
+                  </span>
                   <span>
                     {time((p.data?.duration || 0) * p.range[0])}–
                     {time((p.data?.duration || 0) * p.range[1])}
@@ -466,9 +498,32 @@ export function DesktopShell(p: Props) {
                         />
                         <small>80 cm/s</small>
                       </div>
-                      <div className="position-path">
+                      <div
+                        className="position-path"
+                        data-cell={
+                          p.analysis.cell === p.hoverCell
+                            ? p.hoverCell
+                            : undefined
+                        }
+                        data-spikes={
+                          p.analysis.cell === p.hoverCell
+                            ? p.analysis.spikes.length / 2
+                            : 0
+                        }
+                        onPointerDownCapture={(e) => {
+                          if (p.grabMode && e.button === 0) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            p.onPopPlot("path", e.clientX, e.clientY);
+                          }
+                        }}
+                      >
                         <AnalysisPlot
-                          data={p.analysis}
+                          data={
+                            p.analysis.cell === p.hoverCell
+                              ? p.analysis
+                              : { ...p.analysis, spikes: new Float32Array() }
+                          }
                           mode="path"
                           maxRate={0}
                         />
@@ -616,7 +671,16 @@ export function DesktopShell(p: Props) {
                     · cuts use all spikes
                   </small>
                 </div>
-                <div className="feature-stage">
+                <div
+                  className="feature-stage"
+                  onPointerDownCapture={(e) => {
+                    if (p.grabMode && e.button === 0) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      p.onPopPlot("features", e.clientX, e.clientY);
+                    }
+                  }}
+                >
                   {p.data && (
                     <Clusters
                       data={p.data}
@@ -696,27 +760,6 @@ export function DesktopShell(p: Props) {
                 >
                   <ImageDown size={13} />
                 </button>
-                {p.pins.length > 0 && (
-                  <details className="pinned-comparisons">
-                    <summary>{p.pins.length} pinned</summary>
-                    <div>
-                      {p.pins.map((pin) => (
-                        <section key={pin.id}>
-                          <header>
-                            {pin.title}
-                            <button
-                              aria-label={`Remove pinned ${pin.title}`}
-                              onClick={() => p.onUnpin(pin.id)}
-                            >
-                              <X size={11} />
-                            </button>
-                          </header>
-                          <img alt={pin.title} src={pin.image} />
-                        </section>
-                      ))}
-                    </div>
-                  </details>
-                )}
               </div>
               {p.data ? (
                 <TileWall
@@ -727,12 +770,17 @@ export function DesktopShell(p: Props) {
                     p.trial?.pos ? `${p.trial.id}|${fileId(p.trial.pos)}` : ""
                   }
                   selected={p.cell}
-                  sources={p.sources}
                   shown={p.shown}
                   filter={p.filter}
                   sort={p.sort}
                   onSelect={p.onCell}
-                  onSources={p.onSources}
+                  splitPoint={p.splitPoint}
+                  grabMode={p.grabMode}
+                  busy={!ready}
+                  onHover={p.onHover}
+                  onMerge={p.onMerge}
+                  onWaveSplit={p.onWaveSplit}
+                  onPopOut={p.onPopOut}
                 />
               ) : (
                 <div className="pane-placeholder">
@@ -745,8 +793,10 @@ export function DesktopShell(p: Props) {
       ) : (
         <main className="start-screen">
           <div className="start-drop">
-            <h1>Waveform</h1>
-            <p>Drag and drop recording files here.</p>
+            <h1>drag &amp; drop files here</h1>
+            <p className="recognised-types">
+              the following types of data files are recognised:
+            </p>
             <div className="supported-formats">
               <code>.set</code>
               <code>.pos</code>
@@ -754,6 +804,11 @@ export function DesktopShell(p: Props) {
               <code>.cut</code>
               <code>.clu.N</code>
             </div>
+            <p className="drop-extra">
+              You can drag further files onto the window at any point.
+              <br />
+              Other file types will be ignored.
+            </p>
             <p className="start-actions">
               <button
                 aria-label="Browse files"

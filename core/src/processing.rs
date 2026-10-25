@@ -11,8 +11,8 @@ struct Reservoir {
 #[derive(Default)]
 pub(crate) struct Samples {
     groups: Vec<Reservoir>,
-    indices: Vec<u32>,
-    waves: Vec<i8>,
+    pub(crate) indices: Vec<u32>,
+    pub(crate) waves: Vec<i8>,
     labels: Vec<u16>,
     plan: Vec<u32>,
 }
@@ -80,9 +80,8 @@ impl Samples {
         }
         self.labels = self.indices.iter().map(|&i| labels[i as usize]).collect();
     }
-    fn plan(&mut self, labels: &[u16], cell: u16) {
+    fn plan(&mut self, labels: &[u16], cell: u16, count: usize) {
         self.plan.clear();
-        let count = labels.iter().filter(|&&c| c == cell).count();
         let have = self
             .indices
             .iter()
@@ -133,6 +132,13 @@ pub(crate) struct Gate {
 pub(crate) struct EditState {
     before: Option<Vec<u16>>,
     patch: Vec<u8>,
+    preview: Option<PreviewWaves>,
+}
+struct PreviewWaves {
+    source: u16,
+    indices: Vec<u32>,
+    waves: Vec<i8>,
+    ready: bool,
 }
 pub(crate) struct CutParser {
     labels: Vec<u16>,
@@ -409,12 +415,14 @@ getter!(engine_output, engine_output_len, [output], u8);
 #[no_mangle]
 pub unsafe extern "C" fn engine_sample_plan(e: *mut Engine, cell: u16) {
     let e = &mut *e;
-    e.samples.plan(&e.labels, cell);
+    e.samples
+        .plan(&e.labels, cell, e.counts[cell as usize] as usize);
 }
 #[no_mangle]
 pub unsafe extern "C" fn engine_sample_record(e: *mut Engine, index: u32, p: *const u8) {
     let e = &mut *e;
     let record = slice::from_raw_parts(p, RECORD);
+    e.density.remove(&e.labels[index as usize]);
     e.samples.indices.push(index);
     for c in 0..4 {
         for t in 0..50 {
@@ -449,6 +457,17 @@ pub unsafe extern "C" fn engine_gate_feed(e: *mut Engine, first: usize, p: *cons
     let e = &mut *e;
     let g = e.gates.last_mut().unwrap();
     for (i, r) in slice::from_raw_parts(p, n).chunks_exact(RECORD).enumerate() {
+        if let Some(cache) = e.edit.preview.as_mut().filter(|c| !c.ready) {
+            let index = first + i;
+            if e.edit.before.as_ref().unwrap()[index] == cache.source {
+                cache.indices.push(index as u32);
+                for c in 0..4 {
+                    cache
+                        .waves
+                        .extend(r[c * 54 + 4..c * 54 + 54].iter().map(|&v| v as i8));
+                }
+            }
+        }
         g.column[first + i] = r[g.channel * 54 + 4 + g.sample] as i8;
     }
 }
@@ -480,6 +499,97 @@ pub unsafe extern "C" fn engine_gate_apply(
     e.recount();
     changed
 }
+/// Insert the new half immediately after its source, matching the original tile
+/// split. Higher cell numbers move up together in the same undoable operation.
+#[no_mangle]
+pub unsafe extern "C" fn engine_split_gate(
+    e: *mut Engine,
+    source: u16,
+    channel: usize,
+    sample: usize,
+    threshold: i32,
+) -> i32 {
+    let e = &mut *e;
+    let base = e
+        .edit
+        .before
+        .as_ref()
+        .expect("split begins an edit transaction");
+    if source as usize >= MAX_CELLS - 1 || base.contains(&((MAX_CELLS - 1) as u16)) {
+        return -1;
+    }
+    let cached = e
+        .edit
+        .preview
+        .as_ref()
+        .filter(|c| c.ready && c.source == source);
+    let gate = if cached.is_none() {
+        Some(
+            &e.gates
+                .iter()
+                .find(|g| g.channel == channel && g.sample == sample)
+                .unwrap()
+                .column,
+        )
+    } else {
+        None
+    };
+    let mut above = 0;
+    for (i, (&before, label)) in base.iter().zip(e.labels.iter_mut()).enumerate() {
+        *label = if before > source { before + 1 } else { before };
+        if before == source && gate.is_some_and(|g| g[i] as i32 > threshold) {
+            *label = source + 1;
+            above += 1;
+        }
+    }
+    if let Some(cache) = cached {
+        for (i, &id) in cache.indices.iter().enumerate() {
+            if cache.waves[i * 200 + channel * 50 + sample] as i32 > threshold {
+                e.labels[id as usize] = source + 1;
+                above += 1;
+            }
+        }
+    }
+    e.recount();
+    above
+}
+/// Cache complete source waveforms during the first required column scan. This
+/// keeps further sample/channel adjustments in memory for ordinary cells, with a
+/// 81.6 MB cap; very large groups retain the two-column fallback instead.
+#[no_mangle]
+pub unsafe extern "C" fn engine_split_cache_begin(e: *mut Engine, source: u16) {
+    let e = &mut *e;
+    let n = e.counts[source as usize] as usize;
+    e.edit.preview = if n <= 400000 {
+        Some(PreviewWaves {
+            source,
+            indices: Vec::with_capacity(n),
+            waves: Vec::with_capacity(n * 200),
+            ready: false,
+        })
+    } else {
+        None
+    };
+}
+#[no_mangle]
+pub unsafe extern "C" fn engine_split_cached(e: *mut Engine) -> u32 {
+    (*e).edit.preview.as_ref().is_some_and(|p| p.ready) as u32
+}
+#[no_mangle]
+pub unsafe extern "C" fn engine_split_cache_finish(e: *mut Engine) {
+    let e = &mut *e;
+    if let Some(p) = e.edit.preview.as_mut() {
+        p.ready = p.indices.len()
+            == e.edit
+                .before
+                .as_ref()
+                .unwrap()
+                .iter()
+                .filter(|&&c| c == p.source)
+                .count();
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn engine_brush(
     e: *mut Engine,
@@ -510,6 +620,7 @@ pub unsafe extern "C" fn engine_brush(
 }
 #[no_mangle]
 pub unsafe extern "C" fn engine_edit_begin(e: *mut Engine) {
+    (*e).edit.preview = None;
     (*e).edit.before = Some((*e).labels.clone());
     (*e).edit.patch.clear();
 }
@@ -526,11 +637,13 @@ pub unsafe extern "C" fn engine_edit_rollback(e: *mut Engine) {
         apply_patch(&mut e.labels, &e.edit.patch, false);
     }
     e.edit.patch.clear();
+    e.edit.preview = None;
     e.recount();
 }
 #[no_mangle]
 pub unsafe extern "C" fn engine_patch_clear(e: *mut Engine) {
     (*e).edit.patch = vec![];
+    (*e).edit.preview = None;
 }
 #[no_mangle]
 pub unsafe extern "C" fn engine_patch_apply(
@@ -564,6 +677,8 @@ pub unsafe extern "C" fn engine_export_chunk(e: *mut Engine, first: usize, count
 pub unsafe extern "C" fn engine_resident_bytes(e: *mut Engine) -> usize {
     let e = &*e;
     e.groups.iter().map(|g| g.capacity() * 4).sum::<usize>()
+        + e.density.values().map(|d| d.capacity() * 2).sum::<usize>()
+        + e.density_atlas.capacity() * 2
         + e.times.capacity() * 4
         + e.amplitudes.capacity()
         + e.labels.capacity() * 2
@@ -573,11 +688,70 @@ pub unsafe extern "C" fn engine_resident_bytes(e: *mut Engine) -> usize {
         + e.display.times.capacity() * 4
         + e.display.indices.capacity() * 4
         + e.display.labels.capacity() * 2
+        + e.edit
+            .preview
+            .as_ref()
+            .map(|p| p.waves.capacity() + p.indices.capacity() * 4)
+            .unwrap_or(0)
         + e.gates.iter().map(|g| g.column.capacity()).sum::<usize>()
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tile_split_inserts_a_cell_and_undo_restores_higher_labels() {
+        let mut e = Engine::new(5);
+        e.labels = vec![1, 1, 1, 1, 2];
+        e.recount();
+        e.gates.push(Gate {
+            channel: 0,
+            sample: 14,
+            column: vec![20, 30, 90, 100, 50],
+        });
+        unsafe {
+            engine_edit_begin(&mut e);
+            assert_eq!(engine_split_gate(&mut e, 1, 0, 14, 60), 2);
+            assert_eq!(e.labels, vec![1, 1, 2, 2, 3]);
+            engine_edit_finish(&mut e);
+            assert_eq!(apply_patch(&mut e.labels, &e.edit.patch, false), 0);
+            assert_eq!(e.labels, vec![1, 1, 1, 1, 2]);
+            e.recount();
+            engine_edit_begin(&mut e);
+            assert_eq!(engine_split_gate(&mut e, 1, 0, 14, 127), 0);
+            assert_eq!(e.labels, vec![1, 1, 1, 1, 3]);
+            assert_eq!(engine_split_gate(&mut e, 1, 0, 14, 95), 1);
+            assert_eq!(e.labels, vec![1, 1, 1, 2, 3]);
+            engine_edit_rollback(&mut e);
+            assert_eq!(e.labels, vec![1, 1, 1, 1, 2]);
+        }
+    }
+    #[test]
+    fn split_waveform_cache_reuses_original_membership_across_columns() {
+        let mut e = Engine::new(5);
+        let mut raw = vec![0; 5 * RECORD];
+        for (i, v) in [20, 30, 90, 100, 50].iter().enumerate() {
+            raw[i * RECORD + 4 + 14] = *v;
+            raw[i * RECORD + 54 + 4 + 20] = if i == 3 { 100 } else { 0 };
+        }
+        e.push(&raw);
+        e.labels = vec![1, 1, 1, 1, 2];
+        e.recount();
+        unsafe {
+            engine_edit_begin(&mut e);
+            engine_split_cache_begin(&mut e, 1);
+            engine_gate_begin(&mut e, 0, 14);
+            engine_gate_feed(&mut e, 0, raw.as_ptr(), raw.len());
+            engine_split_cache_finish(&mut e);
+            assert_eq!(engine_split_cached(&mut e), 1);
+            engine_split_gate(&mut e, 1, 0, 14, 60);
+            assert_eq!(e.labels, vec![1, 1, 2, 2, 3]);
+            // No channel 1 gate column was loaded. The complete source cache supplies it.
+            engine_split_gate(&mut e, 1, 1, 20, 60);
+            assert_eq!(e.labels, vec![1, 1, 1, 2, 3]);
+            engine_edit_rollback(&mut e);
+            assert_eq!(e.labels, vec![1, 1, 1, 1, 2]);
+        }
+    }
     #[test]
     fn streaming_cut_is_transactional_and_handles_split_tokens() {
         let mut p = CutParser::new(3, false);

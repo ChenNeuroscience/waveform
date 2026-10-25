@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { fitGrid, projectionFrame } from "./plot-geometry";
 import { ClusterGPU, drawWaves, drawWaveOverview, projections } from "./gpu";
 import {
   color,
@@ -99,16 +100,20 @@ export function Clusters({
           h = b.height / 2,
           col = d.plot % 3,
           row = Math.floor(d.plot / 3),
+          frame = projectionFrame(w, h),
           points = d.points;
         if (tool !== "brush" && points.length < 3) return;
         const poly = points.flatMap(([x, y]) => [
           Math.max(
             0,
-            Math.min(1, ((x - col * w - 22) / (w - 34) - 0.035) / 0.93),
+            Math.min(1, ((x - col * w - frame.x) / frame.width - 0.035) / 0.93),
           ),
           Math.max(
             0,
-            Math.min(1, 1 - ((y - row * h - 26) / (h - 50) - 0.035) / 0.93),
+            Math.min(
+              1,
+              1 - ((y - row * h - frame.y) / frame.height - 0.035) / 0.93,
+            ),
           ),
         ]);
         onPolygon(poly, axes[d.plot][0], axes[d.plot][1]);
@@ -198,7 +203,7 @@ export function WaveformGate({
     <details className="wave-gate">
       <summary>Split by waveform sample</summary>
       <p>
-        Apply a sample threshold to every spike in the checked source cells. The
+        Apply a sample threshold to every spike in the chosen source cells. The
         first use reads one waveform column; repeated cuts reuse it.
       </p>
       <div>
@@ -380,40 +385,64 @@ export function AnalysisPlot({
         c.height = c.clientHeight * dpr;
         const ctx = c.getContext("2d")!;
         ctx.scale(dpr, dpr);
-        const w = c.clientWidth,
+        let w = c.clientWidth,
           h = c.clientHeight;
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, w, h);
+        if (compact && (mode === "ac" || mode === "speed")) {
+          const box = fitGrid(
+            w,
+            h,
+            mode === "ac" ? 128 : 24,
+            mode === "ac" ? 32 : 80,
+          );
+          ctx.translate(box.x, box.y);
+          ctx.scale(box.unit, box.unit);
+          w = mode === "ac" ? 128 : 24;
+          h = mode === "ac" ? 32 : 80;
+        }
         if (mode === "spatial") {
           const scale = maxRate || data.peak || 1,
-            ww = w / data.width,
-            hh = h / data.height;
+            box = fitGrid(w, h, data.width, data.height),
+            ww = box.unit,
+            hh = box.unit;
           for (let i = 0; i < data.spatial.length; i++) {
             const v = data.spatial[i];
             ctx.fillStyle = Number.isFinite(v)
               ? `hsl(${240 - Math.min(1, v / scale) * 240} 100% 50%)`
               : "#ffffff";
             ctx.fillRect(
-              (i % data.width) * ww,
-              Math.floor(i / data.width) * hh,
+              box.x + (i % data.width) * ww,
+              box.y + Math.floor(i / data.width) * hh,
               ww + 0.5,
               hh + 0.5,
             );
           }
         } else if (mode === "path") {
+          const box = fitGrid(
+            w,
+            h,
+            data.arenaWidth || data.width,
+            data.arenaHeight || data.height,
+          );
           ctx.strokeStyle = "#333333";
           ctx.lineWidth = 0.6;
           ctx.beginPath();
           for (let i = 0; i < data.path.length; i += 2) {
-            const x = data.path[i] * w,
-              y = data.path[i + 1] * h;
+            const x = box.x + data.path[i] * box.width,
+              y = box.y + data.path[i + 1] * box.height;
             if (i) ctx.lineTo(x, y);
             else ctx.moveTo(x, y);
           }
           ctx.stroke();
           ctx.fillStyle = "#0044cc";
           for (let i = 0; i < data.spikes.length; i += 2)
-            ctx.fillRect(data.spikes[i] * w, data.spikes[i + 1] * h, 1.6, 1.6);
+            ctx.fillRect(
+              box.x + data.spikes[i] * box.width,
+              box.y + data.spikes[i + 1] * box.height,
+              1.6,
+              1.6,
+            );
         } else if (mode === "direction") {
           const a = data.direction,
             max = Math.max(...a, 1),

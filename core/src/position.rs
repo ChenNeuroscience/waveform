@@ -19,6 +19,7 @@ pub(crate) struct Position {
     min_x: f32,
     min_y: f32,
     timebase: f64,
+    bearing: f32,
 }
 impl Position {
     fn new(
@@ -47,6 +48,7 @@ impl Position {
             min_x,
             min_y,
             timebase,
+            bearing: 0.,
         }
     }
     fn push(&mut self, data: &[u8]) {
@@ -136,30 +138,40 @@ impl Position {
             let dual = leds == 2 && x2[i].is_finite();
             let x = if dual { (x1[i] + x2[i]) / 2. } else { x1[i] };
             let y = if dual { (y1[i] + y2[i]) / 2. } else { y1[i] };
-            let dir = if dual {
-                (y2[i] - y1[i]).atan2(x2[i] - x1[i])
+            let (dx, dy) = if dual {
+                (x2[i] - x1[i], y2[i] - y1[i])
             } else if i > 0 {
-                (y - self.y[i - 1] - self.min_y * 100. / self.ppm)
-                    .atan2(x - self.x[i - 1] - self.min_x * 100. / self.ppm)
+                (x - self.x[i - 1], y - self.y[i - 1])
             } else {
-                0.
+                (0., 0.)
             };
-            let dt = if i > 0 {
-                self.raw.time[i] - self.raw.time[i - 1]
+            let dir = if dx.abs() < 0.001 && dy.abs() < 0.001 {
+                f32::NAN
             } else {
-                0.
+                (dy.atan2(dx) + if dual { self.bearing } else { 0. } + std::f32::consts::PI)
+                    .rem_euclid(2. * std::f32::consts::PI)
+                    - std::f32::consts::PI
             };
-            let speed = if dt > 0. {
-                (x - self.min_x * 100. / self.ppm - self.x[i - 1])
-                    .hypot(y - self.min_y * 100. / self.ppm - self.y[i - 1]) as f64
-                    / dt
-            } else {
-                0.
-            };
-            self.x.push(x - self.min_x * 100. / self.ppm);
-            self.y.push(y - self.min_y * 100. / self.ppm);
+            // LTX coordinates are already relative to the tracked window, as in
+            // the original parser (need_to_subtract_mins=false).
+            self.x.push(x);
+            self.y.push(y);
             self.dir.push(dir);
-            self.speed.push(speed as f32);
+        }
+        if n > 1 && leds == 1 {
+            self.dir[0] = self.dir[1];
+        }
+        for i in 0..n {
+            let dt = if i + 1 < n {
+                self.raw.time[i + 1] - self.raw.time[i]
+            } else {
+                0.
+            };
+            self.speed.push(if dt > 0. {
+                (self.x[i + 1] - self.x[i]).hypot(self.y[i + 1] - self.y[i]) / (dt as f32)
+            } else {
+                f32::NAN
+            });
         }
     }
     fn variant(&self, leds: u32, max_speed: f32, smoothing: f64) -> Self {
@@ -176,6 +188,7 @@ impl Position {
             min_x: self.min_x,
             min_y: self.min_y,
             timebase: self.timebase,
+            bearing: self.bearing,
         };
         p.process(leds, max_speed, smoothing);
         p
@@ -219,7 +232,7 @@ fn smooth(a: &mut [f32], k: usize) {
 }
 #[derive(Default)]
 pub(crate) struct Analysis {
-    meta: [f64; 7],
+    meta: [f64; 9],
     spatial: Vec<f32>,
     path: Vec<f32>,
     spikes: Vec<f32>,
@@ -340,8 +353,12 @@ fn analyse(
                     continue;
                 }
                 occ[b] += dt as f32;
-                od[db(i)] += dt as f32;
-                os[sb(i)] += dt as f32;
+                if p.dir[i].is_finite() {
+                    od[db(i)] += dt as f32;
+                }
+                if p.speed[i].is_finite() {
+                    os[sb(i)] += dt as f32;
+                }
                 if i % p.x.len().div_ceil(12000).max(1) == 0 {
                     path.extend([p.x[i] / p.width, p.y[i] / p.height]);
                 }
@@ -362,8 +379,12 @@ fn analyse(
             }
             if let Some(b) = bin(cursor) {
                 hits[b] += 1.;
-                hd[db(cursor)] += 1.;
-                hs[sb(cursor)] += 1.;
+                if p.dir[cursor].is_finite() {
+                    hd[db(cursor)] += 1.;
+                }
+                if p.speed[cursor].is_finite() {
+                    hs[sb(cursor)] += 1.;
+                }
                 if j % step == 0 {
                     spikes.extend([p.x[cursor] / p.width, p.y[cursor] / p.height]);
                 }
@@ -416,6 +437,8 @@ fn analyse(
                 0.
             },
             sampled as u8 as f64,
+            pos.map(|p| p.width as f64).unwrap_or(0.),
+            pos.map(|p| p.height as f64).unwrap_or(0.),
         ],
         spatial,
         path,
@@ -546,6 +569,7 @@ mod tests {
             min_x: 0.,
             min_y: 0.,
             timebase: 1.,
+            bearing: 0.,
         };
         let mut e = Engine::new(3);
         e.times = vec![100, 1100, 2100];
@@ -564,4 +588,9 @@ mod tests {
         smooth(&mut a, 1);
         assert!((a[2] - 2.).abs() < 1e-6);
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn position_bearing(p: *mut Position, degrees: f32) {
+    (*p).bearing = degrees.to_radians();
 }

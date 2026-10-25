@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { parseHeader, organiseFiles } from "../src/files";
 import { corePromise, decodeCut as readCut, seedEngine } from "./wasm";
-import { analyse } from "../src/position";
+import { analyse, parsePosition } from "../src/position";
 import { defaultSettings } from "../src/types";
+import { fitGrid, projectionFrame } from "../src/plot-geometry";
 describe("LTX import", () => {
   it("keeps folder-scoped File identities across incremental imports", async () => {
     const f = (path: string, text = "") => {
@@ -115,6 +116,53 @@ describe("undo delta integrity", () => {
   });
 });
 describe("analysis", () => {
+  it("uses the position timestamp clock, preserves window-relative coordinates and applies LED bearing", async () => {
+    const w = await corePromise;
+    // The supplied LTX data has a 50 Hz sample rate and 96 kHz timestamp clock.
+    const header =
+      "pos_format t,x1,y1,x2,y2,numpix1,numpix2\nnum_pos_samples 4\npixels_per_metre 100\nsample_rate 50 hz\ntimebase 50 hz\ntimestamp_timebase 96000 hz\nwindow_min_x 30\nwindow_min_y 60\nwindow_max_x 40\nwindow_max_y 70\nbearing_colour_1 135\ndata_start";
+    const raw = new Uint8Array(80),
+      d = new DataView(raw.buffer);
+    for (let i = 0; i < 4; i++) {
+      d.setUint32(i * 20, i * 1920);
+      d.setUint16(i * 20 + 4, i + 1);
+      d.setUint16(i * 20 + 6, 1);
+      d.setUint16(i * 20 + 8, i + 3);
+      d.setUint16(i * 20 + 10, 1);
+      d.setUint16(i * 20 + 12, 12);
+      d.setUint16(i * 20 + 14, 12);
+    }
+    const opts = {
+      ...defaultSettings,
+      leds: 2,
+      posSmooth: 0,
+      maxSpeed: 0,
+      smooth: 0,
+      binCm: 1,
+      dirBin: 90,
+    };
+    const p = await parsePosition(
+      new File([header, raw], "test.pos"),
+      opts,
+      w,
+      "clock",
+    );
+    const e = seedEngine(w, [960, 2880, 4800], [1, 1, 1]);
+    try {
+      const a = analyse(w, e, 1, 96000, 0.08, p, opts);
+      expect([...a.path]).toEqual(
+        [0.2, 0.1, 0.3, 0.1, 0.4, 0.1, 0.5, 0.1].map(Math.fround),
+      );
+      expect([...a.spikes]).toEqual(
+        [0.2, 0.1, 0.3, 0.1, 0.4, 0.1].map(Math.fround),
+      );
+      expect(a.direction[3]).toBeGreaterThan(0);
+      expect(a.spatial[12]).toBeCloseTo(50);
+    } finally {
+      w.position_free(p.handle);
+      w.engine_free(e);
+    }
+  });
   it("normalises spikes by dwell time and excludes self from autocorrelation in Rust", async () => {
     const w = await corePromise,
       e = seedEngine(w, [100, 1100, 2100], [1, 1, 1]),
@@ -147,5 +195,22 @@ describe("analysis", () => {
     expect(result.rate).toBe(1);
     w.position_free(pos);
     w.engine_free(e);
+  });
+});
+
+describe("plot geometry", () => {
+  it("preserves square bins and equal feature axes in wide and tall panes", () => {
+    for (const [w, h] of [
+      [800, 200],
+      [200, 800],
+      [127, 83],
+    ]) {
+      const box = fitGrid(w, h, 20, 10);
+      expect(box.width / 20).toBe(box.height / 10);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      const frame = projectionFrame(w, h);
+      expect(frame.width).toBe(frame.height);
+    }
   });
 });

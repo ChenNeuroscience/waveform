@@ -5,8 +5,8 @@
 //! and labels must be validated to 0..MAX_CELLS before recounting. This module is called
 //! only by the trusted worker wrapper; raw ABI functions are not a public input API.
 use std::slice;
-mod position;
 mod density;
+mod position;
 mod processing;
 pub const RECORD: usize = 216;
 pub const MAX_CELLS: usize = 1024;
@@ -25,7 +25,7 @@ pub struct Engine {
     output: Vec<u8>,
     groups: Vec<Vec<u32>>,
     groups_dirty: bool,
-    density: std::collections::HashMap<u16,Vec<u16>>,
+    density: std::collections::HashMap<u16, Vec<u16>>,
     density_atlas: Vec<u16>,
 }
 impl Engine {
@@ -44,7 +44,8 @@ impl Engine {
             output: vec![],
             groups: vec![],
             groups_dirty: true,
-            density: Default::default(),density_atlas:vec![],
+            density: Default::default(),
+            density_atlas: vec![],
         }
     }
     pub fn push(&mut self, data: &[u8]) {

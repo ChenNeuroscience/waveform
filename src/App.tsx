@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, History, Redo2, Search, Undo2, X } from "lucide-react";
 import { DesktopShell } from "./DesktopShell";
+import { FloatingWindow } from "./FloatingWindow";
 import { captureTile, type VisiblePlots } from "./TileWall";
 import { organiseFiles } from "./files";
 import { request } from "./client";
@@ -14,6 +15,7 @@ import {
   type ViewData,
   type AnalysisData,
   type PlotMode,
+  type SplitPoint,
 } from "./types";
 const fmt = (n: number) => n.toLocaleString("en-GB");
 const compact = (n: number) =>
@@ -28,7 +30,7 @@ function readSettings(): Settings {
   try {
     return {
       ...defaultSettings,
-      ...JSON.parse(localStorage.getItem("waveform-settings") || "{}"),
+      ...JSON.parse(localStorage.getItem("waveform-desktop-settings") || "{}"),
     };
   } catch {
     return defaultSettings;
@@ -43,6 +45,7 @@ function download(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 type Pane = "settings" | "history" | "headers" | "help" | null;
+type Panel = Exclude<Pane, null>;
 export default function App() {
   const [trials, setTrials] = useState<Trial[]>([]),
     [trialId, setTrialId] = useState(""),
@@ -65,6 +68,21 @@ export default function App() {
       ac: true,
     });
   const [pane, setPane] = useState<Pane>(null),
+    [panels, setPanels] = useState<Panel[]>([]),
+    [grabMode, setGrabMode] = useState(false),
+    [hoverCell, setHoverCell] = useState<number | null>(null),
+    [splitPoint, setSplitPoint] = useState<SplitPoint | null>(null),
+    [copies, setCopies] = useState<
+      {
+        id: string;
+        title: string;
+        image: string;
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }[]
+    >([]),
     [filter, setFilter] = useState(""),
     [sort, setSort] = useState(false),
     [busy, setBusy] = useState(false),
@@ -73,23 +91,21 @@ export default function App() {
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [drag, setDrag] = useState(false),
-    [demo, setDemo] = useState(false),
-    [pins, setPins] = useState<{ id: string; title: string; image: string }[]>(
-      [],
-    );
+    [demo, setDemo] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null),
     folderInput = useRef<HTMLInputElement>(null),
     loadGen = useRef(0),
     analysisGen = useRef(0),
     lastCuts = useRef(new Map<string, string>()),
     lastTets = useRef(new Map<string, number>()),
-    dirtySessions = useRef(new Set<string>());
+    dirtySessions = useRef(new Set<string>()),
+    finishingSplit = useRef(false);
   const trial = trials.find((t) => t.id === trialId),
     tet = trial?.tetrodes.find((t) => t.number === tetNum),
     cut = tet?.cuts.find((c) => c.id === cutId),
     ready = !!data && !busy;
   useEffect(() => {
-    localStorage.setItem("waveform-settings", JSON.stringify(settings));
+    localStorage.setItem("waveform-desktop-settings", JSON.stringify(settings));
   }, [settings]);
   useEffect(() => {
     if (data?.dirty) dirtySessions.current.add(data.session);
@@ -103,6 +119,12 @@ export default function App() {
     return () => removeEventListener("beforeunload", f);
   }, [data?.dirty, data?.session]);
   const importFiles = async (files: File[]) => {
+    if (splitPoint) {
+      setNotice(
+        "Finish the split with a left click, or press Escape before importing files.",
+      );
+      return;
+    }
     try {
       setError("");
       const result = await organiseFiles(files, trials);
@@ -154,6 +176,7 @@ export default function App() {
     setBusy(true);
     setProgress(0);
     setMessage("Opening recording…");
+    setHoverCell(null);
     setError("");
     setAnalysis(null);
     setRange([0, 1]);
@@ -193,15 +216,30 @@ export default function App() {
         }
       });
   }, [tet?.id, tet?.file, cutId]);
+  const displayCell = hoverCell ?? cell;
+  useEffect(() => {
+    if (pane) setPanels((ps) => (ps.includes(pane) ? ps : [...ps, pane]));
+  }, [pane]);
+  useEffect(() => {
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") setGrabMode(false);
+    };
+    const blur = () => setGrabMode(false);
+    addEventListener("keyup", up);
+    addEventListener("blur", blur);
+    return () => {
+      removeEventListener("keyup", up);
+      removeEventListener("blur", blur);
+    };
+  }, []);
   useEffect(() => {
     if (!data || busy) return;
     const gen = ++analysisGen.current;
-    setAnalysis(null);
     const t = setTimeout(
       () =>
         request<AnalysisData>("analysis", {
           session: data.session,
-          cell,
+          cell: displayCell,
           pos: trial?.pos,
           posKey: trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : "",
           settings,
@@ -212,7 +250,7 @@ export default function App() {
           .catch((e) => {
             if (gen === analysisGen.current) setError(e.message);
           }),
-      100,
+      25,
     );
     return () => {
       clearTimeout(t);
@@ -220,7 +258,7 @@ export default function App() {
     };
   }, [
     data,
-    cell,
+    displayCell,
     trial?.pos,
     settings.binCm,
     settings.smooth,
@@ -238,6 +276,7 @@ export default function App() {
   ) => {
     if (!ready) return;
     const generation = loadGen.current;
+    setHoverCell(null);
     setBusy(true);
     setProgress(0);
     setMessage(type === "edit" ? "Updating cut and saving undo…" : `${type}…`);
@@ -259,6 +298,101 @@ export default function App() {
       if (generation === loadGen.current) setBusy(false);
     }
   };
+  const previewSplit = async (
+    source: number,
+    channel: number,
+    sample: number,
+    threshold: number,
+  ) => {
+    if (!ready || finishingSplit.current) return;
+    source = splitPoint?.source ?? source;
+    setSplitPoint({ source, channel, sample, threshold });
+    setBusy(true);
+    setMessage("Preparing split preview…");
+    try {
+      const d = await request(
+        "split",
+        {
+          session: data!.session,
+          phase: "preview",
+          source,
+          channel,
+          sample,
+          threshold,
+        },
+        (p, m) => {
+          setProgress(p);
+          setMessage(m);
+        },
+      );
+      setData(d);
+    } catch (error) {
+      setError(String(error));
+      setData(
+        await request("budget", {
+          session: data!.session,
+          budget: settings.budget,
+        }),
+      );
+      setSplitPoint(null);
+    } finally {
+      if (!finishingSplit.current) setBusy(false);
+    }
+  };
+  const finishSplit = async (cancel = false) => {
+    if (!splitPoint || finishingSplit.current) return;
+    finishingSplit.current = true;
+    setBusy(true);
+    setHoverCell(null);
+    try {
+      setData(
+        await request("split", {
+          session: data!.session,
+          phase: cancel ? "cancel" : "finish",
+        }),
+      );
+    } catch (error) {
+      setError(String(error));
+      setData(
+        await request("budget", {
+          session: data!.session,
+          budget: settings.budget,
+        }),
+      );
+    } finally {
+      setSplitPoint(null);
+      finishingSplit.current = false;
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (!splitPoint) return;
+    const complete = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const swallow = (click: MouseEvent) => {
+        click.preventDefault();
+        click.stopImmediatePropagation();
+      };
+      window.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener("click", swallow, true), 500);
+      finishSplit();
+    };
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        finishSplit(true);
+      }
+    };
+    window.addEventListener("pointerdown", complete, true);
+    window.addEventListener("keydown", cancel, true);
+    return () => {
+      window.removeEventListener("pointerdown", complete, true);
+      window.removeEventListener("keydown", cancel, true);
+    };
+  }, [splitPoint]);
   const edit = (action: string) => {
     if (!data) return;
     operation("edit", {
@@ -270,7 +404,7 @@ export default function App() {
   };
   const polygon = (points: number[], ax: number, ay: number) => {
     if (!sources.length) {
-      setNotice("Select one or more source cells using the checkboxes.");
+      setNotice("Select one or more source cells in feature space.");
       return;
     }
     operation("edit", {
@@ -311,17 +445,44 @@ export default function App() {
       cell,
       `${trial?.name} · T${tetNum} · cell ${cell} · ${fmt(data?.counts[cell] || 0)} spikes`,
     );
-  const pin = () => {
-    const c = snapshot();
-    if (c)
-      setPins((p) => [
-        ...p.slice(-3),
-        {
-          id: crypto.randomUUID(),
-          title: `${trial?.name} · T${tetNum} · cell ${cell}`,
-          image: c.toDataURL(),
-        },
-      ]);
+  const popOut = (n: number, x = 45, y = 70) => {
+    const canvas = captureTile(n, `${trial?.name} · T${tetNum} · cell ${n}`);
+    if (!canvas) return;
+    const ratio = Math.min(2, devicePixelRatio || 1),
+      width = Math.min(innerWidth - 20, Math.max(280, canvas.width / ratio)),
+      height = Math.max(120, canvas.height / ratio + 26);
+    setCopies((cs) => [
+      ...cs,
+      {
+        id: crypto.randomUUID(),
+        title: `${trial?.name} · T${tetNum} · cell ${n} (copy)`,
+        image: canvas.toDataURL(),
+        x: Math.max(0, Math.min(innerWidth - width - 8, x + 15)),
+        y: Math.max(0, Math.min(innerHeight - height - 8, y + 15)),
+        width,
+        height,
+      },
+    ]);
+  };
+  const popPlot = (kind: "path" | "features", x: number, y: number) => {
+    const source = document.querySelector<HTMLCanvasElement>(
+      kind === "path" ? ".position-path canvas" : ".clusters canvas",
+    );
+    if (!source) return;
+    const width = Math.max(240, Math.min(700, source.clientWidth)),
+      height = source.clientHeight + 26;
+    setCopies((cs) => [
+      ...cs,
+      {
+        id: crypto.randomUUID(),
+        title: `${trial?.name} · T${tetNum} · ${kind}`,
+        image: source.toDataURL(),
+        x: Math.max(0, Math.min(innerWidth - width - 8, x)),
+        y: Math.max(0, Math.min(innerHeight - height - 8, y)),
+        width,
+        height,
+      },
+    ]);
   };
   const copyPlot = async () => {
     const c = snapshot();
@@ -370,6 +531,15 @@ export default function App() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).matches("input,select,textarea")) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        setGrabMode(true);
+        return;
+      }
+      if (splitPoint) {
+        e.preventDefault();
+        return;
+      }
       const cmd = e.ctrlKey || e.metaKey;
       if (cmd && e.key === "o") {
         e.preventDefault();
@@ -392,6 +562,7 @@ export default function App() {
         return;
       }
       if (e.key === "Escape") {
+        if (pane) setPanels((ps) => ps.filter((p) => p !== pane));
         setPane(null);
         setTool("select");
         return;
@@ -642,6 +813,25 @@ export default function App() {
       isolate={isolate}
       range={range}
       shown={shown}
+      grabMode={grabMode}
+      hoverCell={hoverCell}
+      onHover={setHoverCell}
+      onPopOut={popOut}
+      onPopPlot={popPlot}
+      onMerge={(a, b) => {
+        const source = Math.max(a, b),
+          dest = Math.min(a, b);
+        operation("edit", {
+          action: "merge",
+          source,
+          dest,
+          description: `Merge cells ${a} and ${b}`,
+        });
+        setCell(dest);
+        setSources([dest]);
+      }}
+      splitPoint={splitPoint}
+      onWaveSplit={previewSplit}
       busy={busy}
       progress={progress}
       message={message}
@@ -652,7 +842,6 @@ export default function App() {
       sort={sort}
       fileInput={fileInput}
       folderInput={folderInput}
-      pins={pins}
       onImport={importFiles}
       onTrial={chooseTrial}
       onTet={chooseTet}
@@ -687,194 +876,207 @@ export default function App() {
       onNotice={() => setNotice("")}
       onDrag={setDrag}
       onDrop={drop}
-      onPin={pin}
+      onPin={() => popOut(cell)}
       onCopy={copyPlot}
       onImage={() =>
         snapshot()?.toBlob((b) => {
           if (b) download(b, `cell-${cell}.png`);
         })
       }
-      onUnpin={(id) => setPins((p) => p.filter((x) => x.id !== id))}
     >
-      {pane && (
-        <div className="pane-backdrop" onClick={() => setPane(null)}>
-          <section
-            className="drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-label={
-              {
-                settings: "Settings",
-                history: "Edit history",
-                headers: "File headers",
-                help: "Keyboard shortcuts",
-              }[pane]
-            }
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="drawer-heading">
-              <h2>
-                {
-                  {
-                    settings: "Workspace settings",
-                    history: "Edit history",
-                    headers: "File headers",
-                    help: "Keyboard shortcuts",
-                  }[pane]
-                }
-              </h2>
-              <button
-                className="icon"
-                aria-label="Close panel"
-                onClick={() => setPane(null)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="drawer-content">
-              {pane === "settings" && renderSettings()}
-              {pane === "history" && (
-                <>
-                  <p className="muted">
-                    Each cut keeps its own undo and redo history when you switch
-                    trials or tetrodes. History is stored locally for this
-                    workspace session.
-                  </p>
-                  <div className="history-actions">
-                    <button
-                      disabled={!ready || !data?.undo.length}
-                      className="secondary"
-                      onClick={() => operation("undo")}
-                    >
-                      <Undo2 size={14} /> Undo
-                    </button>
-                    <button
-                      disabled={!ready || !data?.redo.length}
-                      className="secondary"
-                      onClick={() => operation("redo")}
-                    >
-                      <Redo2 size={14} /> Redo
-                    </button>
-                  </div>
-                  <div className="history-list">
-                    {data?.undo.length ? (
-                      data.undo.map((h, i) => (
-                        <div key={h.id}>
-                          <span className="history-index">{i + 1}</span>
-                          <div>
-                            <b>{h.description}</b>
-                            <small>{fmt(h.changed)} spikes changed</small>
-                          </div>
-                          <Check size={14} />
+      {panels.map((pane) => (
+        <FloatingWindow
+          key={pane}
+          label={
+            {
+              settings: "Settings",
+              history: "Edit history",
+              headers: "File headers",
+              help: "Keyboard shortcuts",
+            }[pane]
+          }
+          title={
+            {
+              settings: "Settings",
+              history: "Edit history",
+              headers: "File headers",
+              help: "Keyboard shortcuts",
+            }[pane]
+          }
+          x={pane === "headers" ? 410 : 35}
+          y={pane === "history" ? 105 : 65}
+          height={pane === "settings" ? 560 : 460}
+          onFocus={() => setPane(pane)}
+          onClose={() => {
+            setPanels((ps) => ps.filter((p) => p !== pane));
+            setPane(null);
+          }}
+        >
+          <div className="drawer-content">
+            {pane === "settings" && renderSettings()}
+            {pane === "history" && (
+              <>
+                <p className="muted">
+                  Each cut keeps its own undo and redo history when you switch
+                  trials or tetrodes. History is stored locally for this
+                  workspace session.
+                </p>
+                <div className="history-actions">
+                  <button
+                    disabled={!ready || !data?.undo.length}
+                    className="secondary"
+                    onClick={() => operation("undo")}
+                  >
+                    <Undo2 size={14} /> Undo
+                  </button>
+                  <button
+                    disabled={!ready || !data?.redo.length}
+                    className="secondary"
+                    onClick={() => operation("redo")}
+                  >
+                    <Redo2 size={14} /> Redo
+                  </button>
+                </div>
+                <div className="history-list">
+                  {data?.undo.length ? (
+                    data.undo.map((h, i) => (
+                      <div key={h.id}>
+                        <span className="history-index">{i + 1}</span>
+                        <div>
+                          <b>{h.description}</b>
+                          <small>{fmt(h.changed)} spikes changed</small>
                         </div>
-                      ))
-                    ) : (
-                      <div className="empty-history">
-                        <History size={27} />
-                        <p>No edits yet.</p>
-                        <small>
-                          Merge, swap, or lasso spikes to start a cut.
-                        </small>
+                        <Check size={14} />
                       </div>
-                    )}
-                    {data?.redo
-                      .slice()
-                      .reverse()
-                      .map((h) => (
-                        <div className="undone" key={h.id}>
-                          <Redo2 size={13} />
-                          <div>
-                            <b>{h.description}</b>
-                            <small>Undone · available to redo</small>
-                          </div>
+                    ))
+                  ) : (
+                    <div className="empty-history">
+                      <History size={27} />
+                      <p>No edits yet.</p>
+                      <small>
+                        Merge, swap, or lasso spikes to start a cut.
+                      </small>
+                    </div>
+                  )}
+                  {data?.redo
+                    .slice()
+                    .reverse()
+                    .map((h) => (
+                      <div className="undone" key={h.id}>
+                        <Redo2 size={13} />
+                        <div>
+                          <b>{h.description}</b>
+                          <small>Undone · available to redo</small>
                         </div>
-                      ))}
-                  </div>
-                  <button
-                    className="primary full"
-                    disabled={!ready}
-                    onClick={() => exportCut()}
-                  >
-                    Export .cut
-                  </button>
-                  <button
-                    className="secondary full"
-                    disabled={!ready}
-                    onClick={forkCut}
-                  >
-                    Duplicate cut
-                  </button>
-                  <button
-                    className="secondary full"
-                    disabled={!ready}
-                    onClick={() => exportCut("clu")}
-                  >
-                    Export .clu (1-based)
-                  </button>
-                </>
-              )}
-              {pane === "headers" && <Headers headers={data?.headers || {}} />}
-              {pane === "help" && (
-                <>
-                  <p className="muted">
-                    Your files stay on your device. Import a selection of LTX
-                    files or a folder to begin. Add cut files at any time.
-                  </p>
-                  <h3>Navigation</h3>
-                  <Shortcut keys="0–9" text="Jump to tetrode (ones digit)" />
-                  <Shortcut keys="O" text="Toggle tetrode tens digit" />
-                  <Shortcut keys="← / →" text="Previous / next trial" />
-                  <Shortcut keys="H" text="Inspect file headers" />
-                  <Shortcut keys="K / ?" text="Keyboard shortcuts" />
-                  <h3>Cut editing</h3>
-                  <Shortcut
-                    keys="L"
-                    text="Lasso source spikes into destination"
-                  />
-                  <Shortcut
-                    keys="E / F"
-                    text="Selected cell as destination / source"
-                  />
-                  <Shortcut keys="Enter" text="Next destination cell" />
-                  <Shortcut keys="⌘ / Ctrl Z" text="Undo" />
-                  <Shortcut keys="⌘ / Ctrl ⇧ Z" text="Redo" />
-                  <Shortcut keys="⌘ / Ctrl S" text="Export .cut" />
-                  <h3>Views</h3>
-                  <Shortcut
-                    keys="W / R / C / V / T"
-                    text="Waves / spatial / direction / speed / autocorrelation"
-                  />
-                  <Shortcut
-                    keys="D / P"
-                    text="Time colours / additive density"
-                  />
-                  <Shortcut
-                    keys="Esc"
-                    text="Close panel, return to selection"
-                  />
-                  <h3>Reading the plots</h3>
-                  <p className="muted">
-                    Feature space uses a bounded, evenly spaced display sample.
-                    Lasso cuts use all spikes from the checked source cells,
-                    across the entire recording; the time sliders affect display
-                    only. Waveform traces use a stratified sample. Rate maps use
-                    occupancy-normalised rates. Autocorrelation omits the
-                    self-spike and uses sampled reference spikes for large
-                    groups.
-                  </p>
-                  <a
-                    href="https://github.com/ChenNeuroscience/waveform"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Original project & source ↗
-                  </a>
-                </>
-              )}
-            </div>
-          </section>
-        </div>
-      )}
+                      </div>
+                    ))}
+                </div>
+                <button
+                  className="primary full"
+                  disabled={!ready}
+                  onClick={() => exportCut()}
+                >
+                  Export .cut
+                </button>
+                <button
+                  className="secondary full"
+                  disabled={!ready}
+                  onClick={forkCut}
+                >
+                  Duplicate cut
+                </button>
+                <button
+                  className="secondary full"
+                  disabled={!ready}
+                  onClick={() => exportCut("clu")}
+                >
+                  Export .clu (1-based)
+                </button>
+              </>
+            )}
+            {pane === "headers" && <Headers headers={data?.headers || {}} />}
+            {pane === "help" && (
+              <>
+                <p className="muted">
+                  Your files stay on your device. Import a selection of LTX
+                  files or a folder to begin. Add cut files at any time.
+                </p>
+                <h3>Navigation</h3>
+                <Shortcut keys="0–9" text="Jump to tetrode (ones digit)" />
+                <Shortcut keys="O" text="Toggle tetrode tens digit" />
+                <Shortcut keys="← / →" text="Previous / next trial" />
+                <Shortcut keys="H" text="Inspect file headers" />
+                <Shortcut keys="K / ?" text="Keyboard shortcuts" />
+                <h3>Cut editing</h3>
+                <Shortcut
+                  keys="Drag tile"
+                  text="Merge higher cell number into lower"
+                />
+                <Shortcut
+                  keys="Right drag"
+                  text="Adjust a split preview from either waveform tile"
+                />
+                <Shortcut
+                  keys="L"
+                  text="Lasso source spikes into destination"
+                />
+                <Shortcut
+                  keys="E / F"
+                  text="Selected cell as destination / source"
+                />
+                <Shortcut keys="Enter" text="Next destination cell" />
+                <Shortcut keys="⌘ / Ctrl Z" text="Undo" />
+                <Shortcut keys="⌘ / Ctrl ⇧ Z" text="Redo" />
+                <Shortcut keys="⌘ / Ctrl S" text="Export .cut" />
+                <h3>Views</h3>
+                <Shortcut
+                  keys="Hover tile"
+                  text="Show cell spikes on the position path"
+                />
+                <Shortcut
+                  keys="Hold Space"
+                  text="Click a tile, path or feature plot to pop out a copy"
+                />
+                <Shortcut
+                  keys="W / R / C / V / T"
+                  text="Waves / spatial / direction / speed / autocorrelation"
+                />
+                <Shortcut keys="D / P" text="Time colours / waveform density" />
+                <Shortcut keys="Esc" text="Close panel, return to selection" />
+                <h3>Reading the plots</h3>
+                <p className="muted">
+                  Feature space uses a bounded, evenly spaced display sample.
+                  Lasso cuts use all spikes from the chosen source cells, across
+                  the entire recording; the time sliders affect display only.
+                  Waveform traces use a stratified sample. Rate maps use
+                  occupancy-normalised rates. Autocorrelation omits the
+                  self-spike and uses sampled reference spikes for large groups.
+                </p>
+                <a
+                  href="https://github.com/ChenNeuroscience/waveform"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Original project & source ↗
+                </a>
+              </>
+            )}
+          </div>
+        </FloatingWindow>
+      ))}
+      {copies.map((c) => (
+        <FloatingWindow
+          key={c.id}
+          title={c.title}
+          x={c.x}
+          y={c.y}
+          width={c.width}
+          height={c.height}
+          onClose={() => setCopies((cs) => cs.filter((v) => v.id !== c.id))}
+        >
+          <img className="plot-copy" src={c.image} alt={c.title} />
+        </FloatingWindow>
+      ))}
     </DesktopShell>
   );
 }

@@ -32,12 +32,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/d1manson/waveform.git"
+    "url": "git+https://github.com/ChenNeuroscience/waveform.git"
   },
   "author": "Daniel Manson",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/d1manson/waveform/issues"
+    "url": "https://github.com/ChenNeuroscience/waveform/issues"
   },
-  "homepage": "https://github.com/d1manson/waveform#readme"
+  "homepage": "https://github.com/ChenNeuroscience/waveform#readme"
 }

@@ -1,4 +1,5 @@
 import { cellRgb, type Settings, type ViewData } from "./types";
+import { projectionFrame, type WaveLayout } from "./plot-geometry";
 const vertex = `#version 300 es
 precision highp float;
 layout(location=0) in vec4 amplitudes;
@@ -58,7 +59,11 @@ export class ClusterGPU {
     }
   >();
   constructor(public canvas: HTMLCanvasElement) {
-    const gl = canvas.getContext("webgl2", { antialias: false, alpha: false });
+    const gl = canvas.getContext("webgl2", {
+      antialias: false,
+      alpha: false,
+      preserveDrawingBuffer: true,
+    });
     if (!gl)
       throw new Error(
         "WebGL2 is unavailable. Enable hardware acceleration and reopen this page.",
@@ -139,8 +144,19 @@ export class ClusterGPU {
         y = Math.round(h - ((row + 1) * h) / 2),
         ww = Math.floor(w / 3),
         hh = Math.floor(h / 2);
-      gl.viewport(x + 22 * dpr, y + 24 * dpr, ww - 34 * dpr, hh - 50 * dpr);
-      gl.scissor(x + 22 * dpr, y + 24 * dpr, ww - 34 * dpr, hh - 50 * dpr);
+      const frame = projectionFrame(ww / dpr, hh / dpr);
+      gl.viewport(
+        x + frame.x * dpr,
+        y + hh - (frame.y + frame.height) * dpr,
+        frame.width * dpr,
+        frame.height * dpr,
+      );
+      gl.scissor(
+        x + frame.x * dpr,
+        y + hh - (frame.y + frame.height) * dpr,
+        frame.width * dpr,
+        frame.height * dpr,
+      );
       gl.uniform1i(u("ax"), ax);
       gl.uniform1i(u("ay"), ay);
       gl.drawArrays(gl.POINTS, 0, cached!.n);
@@ -231,6 +247,7 @@ export function drawWaveOverview(
   data: ViewData,
   cells: number[],
   columns: number,
+  layout?: WaveLayout,
 ) {
   const gl = canvas.getContext("webgl2", {
     alpha: false,
@@ -241,7 +258,7 @@ export function drawWaveOverview(
   const dpr = Math.min(2, devicePixelRatio || 1),
     rows = Math.ceil(cells.length / columns);
   canvas.width = canvas.clientWidth * dpr;
-  canvas.height = rows * 120 * dpr;
+  canvas.height = rows * (layout?.rowStride || 120) * dpr;
   const records: number[] = [],
     ranges: { start: number; n: number }[] = [];
   for (const c of cells) {
@@ -286,13 +303,15 @@ export function drawWaveOverview(
   cells.forEach((cell, i) => {
     const col = i % columns,
       row = Math.floor(i / columns),
-      w = canvas.width / columns,
-      h = 120 * dpr;
+      stride = (layout?.tileStride || canvas.clientWidth / columns) * dpr,
+      w = (layout?.waveWidth || canvas.clientWidth / columns) * dpr,
+      h = (layout?.waveHeight || 120) * dpr,
+      rowStride = (layout?.rowStride || 120) * dpr;
     gl.viewport(
-      col * w + 8 * dpr,
-      canvas.height - (row + 1) * h + 15 * dpr,
-      w - 16 * dpr,
-      h - 42 * dpr,
+      col * stride + (layout?.inset || 0) * dpr,
+      canvas.height - row * rowStride - h,
+      w,
+      h,
     );
     gl.uniform1i(gl.getUniformLocation(p, "baseWave"), ranges[i].start);
     gl.uniform3fv(gl.getUniformLocation(p, "rgb"), cellRgb(cell));

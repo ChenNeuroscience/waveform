@@ -28,7 +28,9 @@ export async function parsePosition(
   const n = parseInt(h.num_pos_samples),
     ppm = parseFloat(h.pixels_per_metre),
     rate = parseFloat(h.sample_rate),
-    tb = parseFloat(h.timebase || "50");
+    tb = parseFloat(
+      h.timestamp_timebase || h.timebase || h.sample_rate || "50",
+    );
   const minX = parseFloat(h.window_min_x || "0"),
     minY = parseFloat(h.window_min_y || "0"),
     maxX = parseFloat(h.window_max_x),
@@ -46,6 +48,7 @@ export async function parsePosition(
     throw new Error("Invalid or truncated position file.");
   const handle = w.position_new(n, ppm, rate, tb, minX, minY, maxX, maxY);
   try {
+    w.position_bearing(handle, parseFloat(h.bearing_colour_1 || "0"));
     await streamFile(w, file, offset, n * 20, 32768 * 20, (p, bytes) =>
       w.position_push(handle, p, bytes),
     );
@@ -80,7 +83,7 @@ export function analyse(
   const meta = new Float64Array(
     w.memory.buffer,
     w.engine_analysis_meta(engine),
-    7,
+    9,
   ).slice();
   const array = (name: string) =>
     copyF32(
@@ -90,6 +93,8 @@ export function analyse(
     );
   return {
     cell: meta[0],
+    arenaWidth: meta[7],
+    arenaHeight: meta[8],
     width: meta[1],
     height: meta[2],
     peak: meta[3],
