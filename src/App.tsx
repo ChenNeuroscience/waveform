@@ -641,7 +641,7 @@ export default function App() {
         e.preventDefault();
         return;
       }
-      if (e.code === "Space") {
+      if (e.code === "Space" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         setGrabMode(true);
         return;
@@ -676,6 +676,9 @@ export default function App() {
         exportCut();
         return;
       }
+      // Browser commands (reload, close tab, back, etc.) must never fall
+      // through to the unmodified plot/navigation shortcuts.
+      if (cmd || e.altKey) return;
       if (e.key === "Escape") {
         if (pane) setPanels((ps) => ps.filter((p) => p !== pane));
         setPane(null);

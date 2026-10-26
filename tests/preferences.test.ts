@@ -55,12 +55,15 @@ it("shows acquisition clock time and duration, including midnight rollover", () 
       },
       1,
     ),
-  ).toMatchObject({ text: "16:07–16:28", minutes: "21.1 min" });
+  ).toMatchObject({ text: "16:07–16:28", durationText: "21 min 5 sec" });
   expect(
     experimentTiming({ set: { trial_time: "23:59", duration: "125" } }, 0),
-  ).toMatchObject({ text: "23:59–00:01 (+1 day)", minutes: "2.1 min" });
+  ).toMatchObject({
+    text: "23:59–00:01 (+1 day)",
+    durationText: "2 min 5 sec",
+  });
   expect(experimentTiming({}, 600)).toMatchObject({
     text: "Start time unavailable",
-    minutes: "10 min",
+    durationText: "10 min 0 sec",
   });
 });

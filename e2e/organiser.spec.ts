@@ -211,7 +211,7 @@ test("original favicon and compact tile corners; extra filter, time controls and
   await page.screenshot({ path: "test-results/tile-corners.png" });
 });
 
-test("trial rows keep the current tetrode and cut history; clock/speed summaries are hover-only and auxiliary files stay inline", async ({
+test("trial rows keep the current tetrode and cut history; clock/speed summaries stay visible and auxiliary files stay inline", async ({
   page,
 }) => {
   const pos = Buffer.alloc(10 * 20);
@@ -260,19 +260,39 @@ test("trial rows keep the current tetrode and cut history; clock/speed summaries
     page.getByRole("status").filter({ hasText: /skipped/ }),
   ).toHaveCount(0);
   await page.locator(".desktop-toolbar").hover();
-  await expect(page.locator(".position-hover-info")).toBeHidden();
+  await expect(page.locator(".position-info")).toBeVisible();
   await expect(page.locator(".position-time")).toHaveText(
-    "16:07–16:2821.1 min",
+    "16:07–16:2821 min 5 sec",
   );
   await page.locator(".position-pane").hover();
-  await expect(page.locator(".position-hover-info")).toBeVisible();
+  await expect(page.locator(".position-info")).toBeVisible();
   const histogram = (await page
       .locator(".position-speed canvas")
       .boundingBox())!,
     axis = (await page.locator(".speed-axis-limit").boundingBox())!,
     pane = (await page.locator(".position-pane").boundingBox())!;
-  expect(histogram.x).toBe(pane.x);
+  expect(histogram.x).toBe(pane.x + 4);
+  expect(
+    await page
+      .locator(".speed-axis-limit")
+      .evaluate((el) => getComputedStyle(el).borderWidth),
+  ).toBe("0px");
   expect(axis.y).toBe(histogram.y + histogram.height);
+  const axisPixels = await page
+    .locator(".position-speed canvas")
+    .evaluate((el) => {
+      const c = el as HTMLCanvasElement,
+        ctx = c.getContext("2d")!;
+      return {
+        horizontal: [...ctx.getImageData(10, c.height - 1, 1, 1).data],
+        vertical: [...ctx.getImageData(0, Math.floor(c.height / 2), 1, 1).data],
+      };
+    });
+  expect(axisPixels.horizontal[0]).toBe(255);
+  expect(axisPixels.horizontal[1]).toBe(0);
+  expect(axisPixels.horizontal[2]).toBe(0);
+  expect(axisPixels.horizontal[3]).toBeGreaterThan(200);
+  expect(axisPixels.vertical[3]).toBe(0);
   await expect(page.locator(".speed-axis-limit")).toHaveText("45 cm/s max");
   await cut(page, "02").click();
   await page.getByLabel("Destination cell", { exact: true }).fill("3");

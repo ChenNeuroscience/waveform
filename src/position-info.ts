@@ -26,7 +26,7 @@ export function experimentTiming(
       start === undefined
         ? "Start time unavailable"
         : `${clock(start)}–${clock(start + duration)}${start + duration >= 86400 ? " (+1 day)" : ""}`,
-    minutes: `${+(duration / 60).toFixed(1)} min`,
+    durationText: `${Math.floor(duration / 60)} min ${Math.floor(duration % 60)} sec`,
     date: head.trial_date || "",
   };
 }

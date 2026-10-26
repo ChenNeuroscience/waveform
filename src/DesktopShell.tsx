@@ -482,11 +482,11 @@ export function DesktopShell(p: Props) {
                 <div className="position-content">
                   {p.analysis && p.trial?.pos ? (
                     <>
-                      <div className="position-hover-info">
+                      <div className="position-info">
                         <div className="position-time" title={timing.date}>
                           {timing.text}
                           <br />
-                          {timing.minutes}
+                          {timing.durationText}
                         </div>
                         <div className="position-speed">
                           <AnalysisPlot

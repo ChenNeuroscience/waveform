@@ -203,3 +203,46 @@ test("external file readiness uses the original 800 ms pivot animation; internal
   await page.locator(".desktop-app").dispatchEvent("dragleave");
   await expect(page.locator(".drop-title-wobble")).toHaveCount(0);
 });
+
+test("browser reload/close modifiers do not toggle plots before the leave warning; the path fills its pane", async ({
+  page,
+}) => {
+  await demo(page);
+  await page.getByLabel("Destination cell", { exact: true }).fill("2");
+  await page.getByRole("button", { name: "Merge", exact: true }).click();
+  await ready(page);
+  const waves = page.getByRole("button", { name: "Waveforms", exact: true }),
+    rate = page.getByRole("button", { name: "Spatial rate", exact: true });
+  for (const modifiers of [
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+  ]) {
+    for (const key of ["r", "w"])
+      await page.evaluate(
+        ({ key, modifiers }) =>
+          window.dispatchEvent(
+            new KeyboardEvent("keydown", { key, bubbles: true, ...modifiers }),
+          ),
+        { key, modifiers },
+      );
+    await expect(waves).toHaveAttribute("aria-pressed", "true");
+    await expect(rate).toHaveAttribute("aria-pressed", "true");
+  }
+  expect(
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event("beforeunload", { cancelable: true })),
+    ),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Settings", exact: true }).focus();
+  await page.keyboard.press("r");
+  await expect(rate).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("r");
+  await expect(rate).toHaveAttribute("aria-pressed", "true");
+  const pane = (await page.locator(".position-pane").boundingBox())!,
+    path = (await page.locator(".position-path canvas").boundingBox())!;
+  expect(path.x).toBe(pane.x);
+  expect(path.y).toBe(pane.y);
+  expect(path.width).toBe(pane.width);
+  expect(path.height).toBe(pane.height);
+});

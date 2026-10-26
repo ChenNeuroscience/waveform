@@ -4,14 +4,14 @@ Local verification on 26 October 2026, macOS arm64, Node 24.14.0, stable Rust, C
 
 ## Passing checks
 
-| Check                                           | Result                                                                                                                                                                                                                        |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 93 KB, main app JS about 303 KB before gzip                                                                                                                                                         |
-| Rust tests                                      | 11 passed: decoding, cut streaming, exact edits/patches, inserted-cell split, density invalidation, position/analysis and 9-million-label integrity                                                                           |
+| Check                                           | Result                                                                                                                                                                                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 93 KB, main app JS about 303 KB before gzip                                                                                                                                                          |
+| Rust tests                                      | 11 passed: decoding, cut streaming, exact edits/patches, inserted-cell split, density invalidation, position/analysis and 9-million-label integrity                                                                            |
 | TypeScript unit tests                           | 11 passed: grouping, cut/CLu validation, binary boundary, patches, occupancy/AC and 96 kHz position clock/window/bearing regression, plot-bin geometry, original palette/contrast, clock formatting and viewport-safe geometry |
-| Chromium browser tests                          | 21 passed, including two optional local data tests                                                                                                                                                                            |
-| Dependency audit after updating the test runner | Zero reported vulnerabilities                                                                                                                                                                                                 |
-| Git diff whitespace check                       | Passed                                                                                                                                                                                                                        |
+| Chromium browser tests                          | 22 passed, including two optional local data tests                                                                                                                                                                             |
+| Dependency audit after updating the test runner | Zero reported vulnerabilities                                                                                                                                                                                                  |
+| Git diff whitespace check                       | Passed                                                                                                                                                                                                                         |
 
 Browser scenarios:
 
@@ -34,7 +34,8 @@ Browser scenarios:
 16. Switch flag → density → flag three times, require the exact original flag pixels each time, and check for non-flat waveforms and no WebGL errors.
 17. Check A1–A4 corner labels are baked into Space-copy PNGs, square feature viewports after resizing, and settings/divider/tool-window restoration on a smaller screen.
 18. Check the original drop-title animation has 11 keyframes and an 800 ms cycle, stops on drag leave, and ignores internal cut drags.
-19. Click trial rows and set/pos chips, keep the current tetrode, restore its last cut/history, and verify the hover-only recorded clock time/duration and left-aligned speed axis. Auxiliary file counts and tooltip details stay beside set/pos markers without a skipped-file toast.
+19. Verify Ctrl/Cmd/Alt+R/W cannot toggle plot visibility before the unsaved-work warning; plain R still toggles rate maps. Verify the position canvas uses the entire pane.
+20. Click trial rows and set/pos chips, keep the current tetrode, restore its last cut/history, and verify the always-visible recorded clock time/duration and left-aligned speed axis. Auxiliary file counts and tooltip details stay beside set/pos markers without a skipped-file toast.
 
 ## Timings observed
 

@@ -442,7 +442,7 @@ export function AnalysisPlot({
         let w = c.clientWidth,
           h = c.clientHeight;
         ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, w, h);
+        if (!positionSpeed) ctx.fillRect(0, 0, w, h);
         if (compact && (mode === "ac" || mode === "speed")) {
           const box = fitGrid(
             w,
@@ -482,6 +482,9 @@ export function AnalysisPlot({
             data.arenaWidth || data.width,
             data.arenaHeight || data.height,
           );
+          // Use the full pane width and start at its top; retain one physical
+          // scale for x/y, with any unused space below or beside the arena.
+          box.y = 0;
           ctx.strokeStyle = "#333333";
           ctx.lineWidth = 0.6;
           ctx.beginPath();
@@ -554,13 +557,18 @@ export function AnalysisPlot({
             ctx.fillStyle = "#111";
             const bh = h / a.length;
             for (let i = 0; i < a.length; i++) {
+              if (!(a[i] > 0)) continue;
               const bw = (a[i] / max) * (w - 1);
               ctx.fillRect(
                 speedAlignment === "left" ? 0 : w - bw,
                 i * bh,
-                Math.max(0.5, bw),
+                bw,
                 Math.max(0.5, bh - 0.4),
               );
+            }
+            if (positionSpeed) {
+              ctx.fillStyle = "#f00";
+              ctx.fillRect(0, h - 0.6, w, 0.6);
             }
           }
         } else {
