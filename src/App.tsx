@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, History, Redo2, Search, Undo2, X } from "lucide-react";
 import { DesktopShell } from "./DesktopShell";
+import type { DragComparison } from "./tile-gestures";
 import { FloatingWindow } from "./FloatingWindow";
 import { captureTile, type VisiblePlots } from "./TileWall";
 import { organiseFiles } from "./files";
@@ -71,6 +72,11 @@ export default function App() {
     [panels, setPanels] = useState<Panel[]>([]),
     [grabMode, setGrabMode] = useState(false),
     [hoverCell, setHoverCell] = useState<number | null>(null),
+    [dragComparison, setDragComparison] = useState<DragComparison | null>(null),
+    [compareAnalysis, setCompareAnalysis] = useState<{
+      key: string;
+      data: AnalysisData;
+    } | null>(null),
     [splitPoint, setSplitPoint] = useState<SplitPoint | null>(null),
     [copies, setCopies] = useState<
       {
@@ -176,6 +182,7 @@ export default function App() {
     setBusy(true);
     setProgress(0);
     setMessage("Opening recording…");
+    setDragComparison(null);
     setHoverCell(null);
     setError("");
     setAnalysis(null);
@@ -216,7 +223,33 @@ export default function App() {
         }
       });
   }, [tet?.id, tet?.file, cutId]);
-  const displayCell = hoverCell ?? cell;
+  const displayCell = dragComparison?.source ?? hoverCell ?? cell;
+  const comparisonKey = `${data?.session}|${data?.revision}|${trial?.id}|${trial?.pos ? fileId(trial.pos) : ""}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${dragComparison?.target}`;
+  useEffect(() => {
+    let live = true;
+    if (!data || busy || dragComparison?.target == null) return;
+    const timeout = setTimeout(
+      () =>
+        request<AnalysisData>("analysis", {
+          session: data.session,
+          cell: dragComparison.target,
+          pos: trial?.pos,
+          posKey: trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : "",
+          settings,
+        })
+          .then((a) => {
+            if (live) setCompareAnalysis({ key: comparisonKey, data: a });
+          })
+          .catch((e) => {
+            if (live) setError(e.message);
+          }),
+      25,
+    );
+    return () => {
+      live = false;
+      clearTimeout(timeout);
+    };
+  }, [comparisonKey, trial?.pos, busy]);
   useEffect(() => {
     if (pane) setPanels((ps) => (ps.includes(pane) ? ps : [...ps, pane]));
   }, [pane]);
@@ -531,6 +564,10 @@ export default function App() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).matches("input,select,textarea")) return;
+      if (dragComparison) {
+        e.preventDefault();
+        return;
+      }
       if (e.code === "Space") {
         e.preventDefault();
         setGrabMode(true);
@@ -815,6 +852,11 @@ export default function App() {
       shown={shown}
       grabMode={grabMode}
       hoverCell={hoverCell}
+      dragComparison={dragComparison}
+      comparisonAnalysis={
+        compareAnalysis?.key === comparisonKey ? compareAnalysis.data : null
+      }
+      onCompare={setDragComparison}
       onHover={setHoverCell}
       onPopOut={popOut}
       onPopPlot={popPlot}

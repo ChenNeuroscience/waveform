@@ -34,6 +34,7 @@ import {
   type PlotMode,
   type SplitPoint,
 } from "./types";
+import type { DragComparison } from "./tile-gestures";
 import video from "../img/demo_youtube.png";
 interface Props {
   trials: Trial[];
@@ -53,6 +54,9 @@ interface Props {
   splitPoint: SplitPoint | null;
   grabMode: boolean;
   hoverCell: number | null;
+  dragComparison: DragComparison | null;
+  comparisonAnalysis: AnalysisData | null;
+  onCompare: (pair: DragComparison | null) => void;
   onHover: (n: number | null) => void;
   onMerge: (a: number, b: number) => void;
   onWaveSplit: (
@@ -110,6 +114,16 @@ export function DesktopShell(p: Props) {
     left = useRef<HTMLDivElement>(null),
     [split, setSplit] = useState(350),
     [rows, setRows] = useState([200, 300]);
+  const pathCell = p.dragComparison?.source ?? p.hoverCell,
+    primary = p.analysis?.cell === pathCell ? p.analysis : null,
+    secondary =
+      p.dragComparison?.target != null &&
+      p.comparisonAnalysis?.cell === p.dragComparison.target
+        ? p.comparisonAnalysis
+        : null,
+    pathLayers = [primary, secondary]
+      .filter((a): a is AnalysisData => !!a)
+      .map((a) => ({ cell: a.cell, spikes: a.spikes, color: color(a.cell) }));
   const ready = !!p.data && !p.busy,
     active = p.trial?.tetrodes.find((t) => t.number === p.tetNum),
     numbers = [
@@ -442,9 +456,11 @@ export function DesktopShell(p: Props) {
               <section className="position-pane">
                 <div className="pane-caption">
                   <span>
-                    {p.hoverCell === null
-                      ? "Position"
-                      : `Position / spikes · cell ${p.hoverCell}`}
+                    {p.dragComparison?.target != null
+                      ? `Position / spikes · cells ${p.dragComparison.source} + ${p.dragComparison.target}`
+                      : p.hoverCell === null
+                        ? "Position"
+                        : `Position / spikes · cell ${p.hoverCell}`}
                   </span>
                   <span>
                     {time((p.data?.duration || 0) * p.range[0])}–
@@ -500,14 +516,18 @@ export function DesktopShell(p: Props) {
                       </div>
                       <div
                         className="position-path"
-                        data-cell={
-                          p.analysis.cell === p.hoverCell
-                            ? p.hoverCell
-                            : undefined
+                        data-cell={primary?.cell}
+                        data-cells={pathLayers.map((a) => a.cell).join(",")}
+                        data-spikes={pathLayers.reduce(
+                          (n, a) => n + a.spikes.length / 2,
+                          0,
+                        )}
+                        data-source-spikes={
+                          primary?.spikes.length ? primary.spikes.length / 2 : 0
                         }
-                        data-spikes={
-                          p.analysis.cell === p.hoverCell
-                            ? p.analysis.spikes.length / 2
+                        data-target-spikes={
+                          secondary?.spikes.length
+                            ? secondary.spikes.length / 2
                             : 0
                         }
                         onPointerDownCapture={(e) => {
@@ -519,11 +539,8 @@ export function DesktopShell(p: Props) {
                         }}
                       >
                         <AnalysisPlot
-                          data={
-                            p.analysis.cell === p.hoverCell
-                              ? p.analysis
-                              : { ...p.analysis, spikes: new Float32Array() }
-                          }
+                          data={p.analysis}
+                          spikeLayers={pathLayers}
                           mode="path"
                           maxRate={0}
                         />
@@ -777,6 +794,7 @@ export function DesktopShell(p: Props) {
                   splitPoint={p.splitPoint}
                   grabMode={p.grabMode}
                   busy={!ready}
+                  onCompare={p.onCompare}
                   onHover={p.onHover}
                   onMerge={p.onMerge}
                   onWaveSplit={p.onWaveSplit}

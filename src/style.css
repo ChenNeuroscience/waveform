@@ -1712,3 +1712,102 @@ kbd {
 .tile-caption {
   max-width: none;
 }
+/* A drag keeps its layout slot and compares cached plot images at one scale. */
+.cell-tile {
+  touch-action: none;
+  user-select: none;
+}
+.tile-drag-placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  color: #777;
+  font: 20px Arial;
+  border: 1px dashed #ccc;
+  pointer-events: none;
+}
+.drag-origin .tile-caption {
+  visibility: hidden;
+}
+.tile-drag-ghost {
+  border: 0;
+  outline: 1px solid #999;
+  opacity: 0.65;
+  overflow: hidden;
+}
+.tile-drag-ghost.snapped {
+  opacity: 1;
+  box-shadow: none;
+  outline: 2px solid #b88634;
+}
+.tile-drag-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.tile-drag-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 21px;
+  height: 21px;
+  border: 1px solid #555;
+  text-align: center;
+  font: 10px/19px Arial;
+}
+.snapped .tile-drag-badge {
+  right: 26px;
+}
+.snapped .tile-drag-image,
+.snapped .tile-drag-badge {
+  animation: tile-compare 1.5s linear infinite;
+}
+@keyframes tile-compare {
+  0%,
+  33%,
+  100% {
+    opacity: 1;
+  }
+  50%,
+  83% {
+    opacity: 0;
+  }
+}
+.tile-drag-ghost.returning {
+  opacity: 1;
+  box-shadow: none;
+  animation: tile-settle 650ms ease-out both;
+}
+@keyframes tile-settle {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15% {
+    transform: translateX(-10px);
+  }
+  32% {
+    transform: translateX(7px);
+  }
+  49% {
+    transform: translateX(-5px);
+  }
+  65% {
+    transform: translateX(3px);
+  }
+  82% {
+    transform: translateX(-1px);
+  }
+}
+
+.tile-wall[data-dragging] .tile-caption {
+  visibility: hidden;
+}
+.tile-wall[data-dragging] .tile-wave-caption,
+.tile-wall[data-dragging] .wave-channel-names {
+  opacity: 0;
+}

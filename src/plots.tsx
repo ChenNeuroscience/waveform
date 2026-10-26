@@ -370,11 +370,13 @@ export function AnalysisPlot({
   mode,
   maxRate,
   compact = false,
+  spikeLayers,
 }: {
   data: AnalysisData;
   mode: PlotMode | "path";
   maxRate: number;
   compact?: boolean;
+  spikeLayers?: { cell: number; spikes: Float32Array; color: string }[];
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -435,14 +437,18 @@ export function AnalysisPlot({
             else ctx.moveTo(x, y);
           }
           ctx.stroke();
-          ctx.fillStyle = "#0044cc";
-          for (let i = 0; i < data.spikes.length; i += 2)
-            ctx.fillRect(
-              box.x + data.spikes[i] * box.width,
-              box.y + data.spikes[i + 1] * box.height,
-              1.6,
-              1.6,
-            );
+          for (const layer of spikeLayers || [
+            { spikes: data.spikes, color: "#0044cc" },
+          ]) {
+            ctx.fillStyle = layer.color;
+            for (let i = 0; i < layer.spikes.length; i += 2)
+              ctx.fillRect(
+                box.x + layer.spikes[i] * box.width,
+                box.y + layer.spikes[i + 1] * box.height,
+                1.6,
+                1.6,
+              );
+          }
         } else if (mode === "direction") {
           const a = data.direction,
             max = Math.max(...a, 1),
@@ -526,7 +532,7 @@ export function AnalysisPlot({
     const ro = new ResizeObserver(draw);
     ro.observe(c);
     return () => ro.disconnect();
-  }, [data, mode, maxRate, compact]);
+  }, [data, mode, maxRate, compact, spikeLayers]);
   return (
     <canvas
       ref={canvas}

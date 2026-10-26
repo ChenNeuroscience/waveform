@@ -4,7 +4,7 @@ import { drawDensity } from "./density-gpu";
 import { AnalysisPlot } from "./plots";
 import { request } from "./client";
 import type { WaveLayout } from "./plot-geometry";
-import { useTileGestures } from "./tile-gestures";
+import { useTileGestures, type DragComparison } from "./tile-gestures";
 import {
   color,
   type ViewData,
@@ -29,6 +29,7 @@ export function TileWall({
   splitPoint,
   grabMode,
   busy,
+  onCompare,
   onHover,
   onMerge,
   onWaveSplit,
@@ -46,6 +47,7 @@ export function TileWall({
   splitPoint: SplitPoint | null;
   grabMode: boolean;
   busy: boolean;
+  onCompare: (pair: DragComparison | null) => void;
   onHover: (n: number | null) => void;
   onMerge: (a: number, b: number) => void;
   onWaveSplit: (n: number, ch: number, t: number, v: number) => void;
@@ -100,17 +102,22 @@ export function TileWall({
     },
     signature = visible.join(","),
     waveScope = `${data.session}|${data.revision}`,
-    scope = `${data.session}|${data.revision}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}`;
+    scope = `${data.session}|${data.revision}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}`;
   const gestures = useTileGestures({
     splitSource: splitPoint?.source,
     grab: grabMode,
     busy,
-    scope,
+    scope: `${scope}|${tileStride}|${columns}`,
     onSelect,
+    onCompare,
     onMerge,
     onSplit: onWaveSplit,
     onPopOut,
-    snapshot: (n) => captureTile(n, `Cell ${n}`)?.toDataURL(),
+    snapshot: (n) =>
+      captureTile(n, `Cell ${n}`, {
+        header: false,
+        details: false,
+      })?.toDataURL(),
   });
   useEffect(() => {
     const ro = new ResizeObserver(() => {
@@ -205,6 +212,7 @@ export function TileWall({
     <div
       className="tile-wall"
       data-splitting={splitPoint ? splitPoint.source : undefined}
+      data-dragging={gestures.dragging ?? undefined}
       ref={scroller}
       onScroll={(e) => setScroll(e.currentTarget.scrollTop)}
       aria-label="Cell tile wall"
@@ -258,7 +266,7 @@ export function TileWall({
             return (
               <section
                 key={cell}
-                className={`cell-tile ${selected === cell ? "selected" : ""} ${gestures.target === cell ? "merge-target" : ""} ${splitPoint && !paired ? "split-muted" : ""} ${paired ? "split-pair" : ""}`}
+                className={`cell-tile ${selected === cell ? "selected" : ""} ${gestures.target === cell ? "merge-target" : ""} ${splitPoint && !paired ? "split-muted" : ""} ${paired ? "split-pair" : ""} ${gestures.dragging === cell || gestures.settling?.source === cell ? "drag-origin" : ""}`}
                 data-cell={cell}
                 style={{
                   top: Math.floor(i / columns) * STRIDE,
@@ -272,9 +280,16 @@ export function TileWall({
                     e.preventDefault();
                 }}
                 onPointerEnter={() => {
-                  if (!grabMode && (!splitPoint || paired)) onHover(cell);
+                  if (
+                    gestures.dragging === null &&
+                    !grabMode &&
+                    (!splitPoint || paired)
+                  )
+                    onHover(cell);
                 }}
-                onPointerLeave={() => onHover(null)}
+                onPointerLeave={() => {
+                  if (gestures.dragging === null) onHover(null);
+                }}
               >
                 <div className="tile-waves" style={{ width: waveWidth }}>
                   {shown.waveforms && (
@@ -386,6 +401,15 @@ export function TileWall({
                     {cell}
                   </button>
                 </div>
+                {(gestures.dragging === cell ||
+                  gestures.settling?.source === cell) && (
+                  <div
+                    className="tile-drag-placeholder"
+                    aria-label={`Original location of cell ${cell}`}
+                  >
+                    {gestures.dragging === cell ? `[group ${cell}]` : ""}
+                  </div>
+                )}
                 <div className="tile-caption">
                   <span>{data.counts[cell].toLocaleString()} spikes</span>
                   <span>{a ? `${a.rate.toFixed(2)} Hz` : "…"}</span>
@@ -402,17 +426,43 @@ export function TileWall({
         </div>
       </div>
       {!all.length && <div className="no-cells">No matching cells.</div>}
-      {gestures.ghost && (
-        <img
-          className="tile-drag-ghost"
-          alt="Dragging cell"
-          src={gestures.ghost.image}
-          style={{
-            left: gestures.ghost.x,
-            top: gestures.ghost.y,
-            width: gestures.ghost.width,
-          }}
-        />
+      {[gestures.ghost, gestures.settling].map(
+        (tile, i) =>
+          tile && (
+            <div
+              key={i}
+              className={`tile-drag-ghost ${tile.snapped ? "snapped" : ""} ${i === 1 ? "returning" : ""}`}
+              aria-label={
+                i === 1
+                  ? `Returning cell ${tile.source}`
+                  : `Dragging cell ${tile.source}`
+              }
+              data-source={tile.source}
+              data-target={tile.snapped ? gestures.target : undefined}
+              style={{
+                left: tile.x,
+                top: tile.y,
+                width: tile.width,
+                height: tile.height,
+              }}
+            >
+              <img
+                className="tile-drag-image"
+                alt=""
+                src={tile.image}
+                draggable={false}
+              />
+              <span
+                className="tile-drag-badge"
+                style={{
+                  background: tile.source ? color(tile.source) : "#e9e9e9",
+                  color: tile.source ? "white" : "black",
+                }}
+              >
+                {tile.source}
+              </span>
+            </div>
+          ),
       )}
     </div>
   );
@@ -420,6 +470,7 @@ export function TileWall({
 export function captureTile(
   cell: number,
   title: string,
+  options: { header?: boolean; details?: boolean } = {},
 ): HTMLCanvasElement | undefined {
   const row = document.querySelector<HTMLElement>(
       `.cell-tile[data-cell="${cell}"]`,
@@ -428,16 +479,22 @@ export function captureTile(
   if (!row) return;
   const rect = row.getBoundingClientRect(),
     dpr = Math.min(2, devicePixelRatio || 1),
+    heading = options.header === false ? 0 : 28,
     canvas = document.createElement("canvas");
   canvas.width = rect.width * dpr;
-  canvas.height = (rect.height + 28) * dpr;
+  canvas.height = (rect.height + heading) * dpr;
   const ctx = canvas.getContext("2d")!;
   ctx.scale(dpr, dpr);
   ctx.fillStyle = "white";
-  ctx.fillRect(0, 0, rect.width, rect.height + 28);
+  ctx.fillRect(
+    0,
+    0,
+    rect.width - (options.header === false ? 24 : 0),
+    rect.height + heading,
+  );
   ctx.fillStyle = "black";
   ctx.font = "11px Arial";
-  ctx.fillText(title, 6, 17);
+  if (heading) ctx.fillText(title, 6, 17);
   const waveRegion = row.querySelector<HTMLElement>(".tile-waves")!;
   if (waves && waveRegion.clientWidth) {
     const w = waves.getBoundingClientRect(),
@@ -451,7 +508,7 @@ export function captureTile(
       region.width * sx,
       rect.height * sy,
       region.left - rect.left,
-      28,
+      heading,
       region.width,
       rect.height,
     );
@@ -461,18 +518,22 @@ export function captureTile(
     ctx.drawImage(
       c,
       b.left - rect.left,
-      b.top - rect.top + 28,
+      b.top - rect.top + heading,
       b.width,
       b.height,
     );
   }
   const caption = row.querySelector<HTMLElement>(".tile-caption");
-  if (caption && getComputedStyle(caption).visibility !== "hidden") {
+  if (
+    options.details !== false &&
+    caption &&
+    getComputedStyle(caption).visibility !== "hidden"
+  ) {
     const info = caption.getBoundingClientRect();
     ctx.fillStyle = "#ffffffe8";
     ctx.fillRect(
       info.left - rect.left,
-      info.top - rect.top + 28,
+      info.top - rect.top + heading,
       info.width,
       info.height,
     );
@@ -482,7 +543,7 @@ export function captureTile(
       ctx.fillText(
         line.textContent || "",
         info.left - rect.left + 6,
-        info.top - rect.top + 45 + i * 18,
+        info.top - rect.top + heading + 17 + i * 18,
       );
   }
   return canvas;

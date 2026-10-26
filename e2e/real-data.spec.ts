@@ -88,10 +88,11 @@ test("nine million spikes and 100 cells: import, merge, undo and export", async 
   ).toBeEnabled({ timeout: 120000 });
   await expect(page.getByText("9,000,000", { exact: true })).toBeVisible();
   console.log(`9M browser first load: ${Date.now() - start}ms`);
-  await page.getByLabel("Destination cell", { exact: true }).fill("2");
-  await page.getByRole("button", { name: "Merge", exact: true }).click();
+  await page
+    .locator('.cell-tile[data-cell="1"] .tile-waves')
+    .dragTo(page.locator('.cell-tile[data-cell="2"] .tile-waves'));
   await expect(
-    page.getByRole("button", { name: "Select cell 1", exact: true }),
+    page.getByRole("button", { name: "Select cell 2", exact: true }),
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(
