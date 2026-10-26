@@ -23,6 +23,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await ready(page);
   await page.locator(".tile-wall").evaluate((el) => (el.scrollTop = 0));
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
@@ -38,12 +39,14 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await ready(page);
   await page.locator(".tile-wall").evaluate((el) => (el.scrollTop = 0));
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveText(count!);
   await expect(page.locator(".tile-wave-canvas")).toBeVisible();
   await page.getByRole("button", { name: "Redo", exact: true }).click();
+  await ready(page);
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveCount(0);
@@ -58,6 +61,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await ready(page);
   await page.locator(".tile-wall").evaluate((el) => (el.scrollTop = 0));
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
