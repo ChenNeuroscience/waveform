@@ -410,15 +410,16 @@ small {
   padding: 1px 2px;
 }
 .feature-group-strip {
-  height: 24px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  height: auto;
   min-height: 24px;
   display: flex;
   gap: 2px;
   align-items: center;
   padding: 2px 3px;
-  overflow-x: auto;
-  white-space: nowrap;
-  scrollbar-width: thin;
+  overflow: visible;
+  white-space: normal;
 }
 .feature-group-strip button {
   width: 21px;
@@ -434,30 +435,16 @@ small {
   outline: 2px solid #333;
   outline-offset: -2px;
 }
-.feature-options {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 20px;
-  padding: 2px 4px;
-  font-size: 9px;
-  border-bottom: 1px solid #ccc;
-}
-.feature-options label {
-  white-space: nowrap;
-}
-.feature-options small {
-  margin-left: auto;
-  font-size: 8px;
-  white-space: nowrap;
-}
 .feature-stage {
+  display: flex;
   flex: 1;
   min-height: 0;
   background: white;
   overflow: auto;
 }
 .clusters {
+  margin: auto;
+  flex: none;
   position: relative;
   min-height: 210px;
   width: 100%;
@@ -548,52 +535,6 @@ small {
   color: #900;
   padding: 10px;
   font-size: 11px;
-}
-.wave-gate {
-  flex-shrink: 0;
-  border-top: 1px solid #bbb;
-  background: #f7f7f7;
-  padding: 3px 5px;
-  max-height: 150px;
-  overflow: auto;
-}
-.wave-gate summary {
-  font-size: 10px;
-  cursor: pointer;
-  min-height: 17px;
-}
-.wave-gate p {
-  font-size: 9px;
-  color: #555;
-  margin: 5px 0;
-}
-.wave-gate > div {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  padding-bottom: 3px;
-}
-.wave-gate label {
-  font-size: 9px;
-  display: block;
-  min-width: 45px;
-}
-.wave-gate input,
-.wave-gate select {
-  display: block;
-  width: 100%;
-  height: 21px;
-  font-size: 10px;
-  margin-top: 2px;
-}
-.wave-gate input {
-  max-width: 65px;
-}
-.wave-gate .secondary {
-  height: 21px;
-  min-height: 21px;
-  padding: 2px 6px;
-  white-space: nowrap;
 }
 .right-workspace {
   display: flex;
@@ -865,40 +806,10 @@ small {
   width: 100%;
   display: block;
 }
-.desktop-status {
-  height: 20px;
-  min-height: 20px;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 2px 6px;
-  border-top: 1px solid #b8b8b8;
-  background: #eee;
-  font-size: 9px;
-  color: #444;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.desktop-status > span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 60%;
-}
-.desktop-status b {
-  font-weight: normal;
-}
-.status-spacer {
-  flex: 1;
-}
-.desktop-status progress {
-  height: 8px;
-  width: 100px;
-  accent-color: #7b98b7;
-}
 .desktop-notice {
   position: fixed;
   left: 10px;
-  bottom: 26px;
+  bottom: 8px;
   right: auto;
   max-width: calc(100vw - 20px);
   display: flex;
@@ -1937,8 +1848,7 @@ kbd {
 .projection-labels > div,
 .projection-labels > div:nth-child(3n),
 .projection-labels > div:nth-child(n + 4) {
-  border-right: 1px solid #bbb;
-  border-bottom: 1px solid #bbb;
+  border: 1px solid #bbb;
   padding: 0;
 }
 .projection-labels .axis-y,
@@ -2104,4 +2014,115 @@ kbd {
   font-size: 9px;
   color: #666;
   white-space: nowrap;
+}
+
+.toolbar-status {
+  margin-left: auto;
+  padding: 0 4px 0 12px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  font: 9px/11px Arial;
+  color: #555;
+}
+.toolbar-status > span {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toolbar-status b {
+  font-weight: normal;
+}
+.toolbar-status progress {
+  width: 55px;
+  height: 6px;
+}
+.comparison-window {
+  resize: none;
+}
+.comparison-window .floating-content {
+  cursor: move;
+}
+
+.demo-files {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 360px;
+  margin: 12px auto;
+  padding: 8px 14px;
+  border: 1px dashed #bbb;
+  background: #fafafa;
+  cursor: pointer;
+  text-align: left;
+  white-space: normal;
+}
+.demo-files > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.demo-files b {
+  font-size: 12px;
+}
+.demo-files small {
+  display: block;
+  font-size: 10px;
+}
+.demo-file-stack {
+  position: relative;
+  width: 100px;
+  height: 78px;
+  flex: none;
+}
+.demo-file-card {
+  position: absolute;
+  width: 43px;
+  height: 54px;
+  top: 10px;
+  left: 3px;
+  display: flex;
+  align-items: flex-end;
+  padding: 6px;
+  border: 1px solid #999;
+  background: #fff;
+  color: #333;
+  font: 11px monospace;
+  box-shadow: 1px 2px 3px #0002;
+  transform: rotate(-12deg);
+}
+.demo-file-card:nth-child(2) {
+  left: 24px;
+  top: 5px;
+  transform: rotate(0);
+  background: #fff4ef;
+}
+.demo-file-card:nth-child(3) {
+  left: 46px;
+  transform: rotate(12deg);
+  background: #fffbe6;
+}
+.demo-file-stack svg {
+  position: absolute;
+  width: 78px;
+  height: 32px;
+  left: 29px;
+  top: 52px;
+  fill: none;
+  stroke: #777;
+  stroke-width: 1.5;
+}
+.demo-progress {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0;
+  font-size: 11px;
+}
+.demo-progress progress {
+  width: 80px;
+  height: 7px;
 }

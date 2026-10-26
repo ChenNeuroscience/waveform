@@ -10,14 +10,15 @@ The replacement starts from the original `gh-pages` implementation at `bf0f51bd7
 
 - Drop files or folders, or use the file/folder picker. Group `.set`, `.pos`, numeric tetrode files, `.cut` and `.clu.N` by trial and tetrode. Add files incrementally and select alternative cuts.
 - Six GPU amplitude projections, cell isolation, time colouring, additive point density, point size and a configurable display budget.
-- Compact light desktop layout: files, position and feature projections on the left, a scrolling cell tile wall on the right. Tiles size to visible plots and wrap into columns; numeric details appear on hover. The left pane starts at 350 px and can shrink to 240 px.
+- Compact light desktop layout: files, position and feature projections on the left, a scrolling cell tile wall on the right. Tiles size to visible plots and wrap into columns; numeric details appear on hover. Paint is the default feature tool, with a lasso for region cuts; group chips wrap and square plots have borders and small gaps. The feature grid centres within its pane, with rendering controls in Settings; recording details sit at the top right of the toolbar. There is no footer or numeric waveform-split form. The left pane starts at 350 px and can shrink to 240 px.
 - Four-channel waveforms with cached density images or flag traces, rate maps, direction/speed tuning and autocorrelation in every tile. Hover to see spikes on the position path.
-- Drag a cell tile onto another to compare aligned plots with an alternating fade and both spike sets on the position path; release while snapped to merge. An unsnapped drop cancels and returns the tile with a settling jiggle. Stats stay hidden during dragging; right-drag over a waveform to enter split mode, adjust from either tile, then left-click anywhere to finish (Escape cancels). Hold Space and click a tile, position path or feature plot to make a floating comparison copy, or click any floating window to close it. Copied tiles keep frozen stats as a hover overlay and show their title once in the header. Settings and file headers also use movable, resizable windows. Data bins keep their proportions when panes resize.
+- Drag a cell tile onto another to compare aligned plots with an alternating fade and both spike sets on the position path; release while snapped to merge. An unsnapped drop cancels and returns the tile with a settling jiggle. Stats stay hidden during dragging; right-drag over a waveform to enter split mode, adjust from either tile, then left-click anywhere to finish (Escape cancels). Hold Space and click a tile, position path or feature plot to make a floating comparison copy, or click any floating window to close it. Copies have fixed sizes and drag from anywhere inside the window. Copied tiles keep frozen stats as a hover overlay and show their title once in the header. Settings and file headers also use movable, resizable windows. Data bins keep their proportions when panes resize.
 - Exact population edits: lasso, paint, waveform-sample threshold, merge, swap and renumber by count. Cell 0 remains noise when renumbering. Every edit supports undo/redo; original disk files are never overwritten.
 - Cut files sit inline beside each tetrode, visible even when collapsed; auxiliary file counts and names sit beside the set/pos markers. Editing an original creates a blue local cut with its own undo/redo history; switch among cuts or duplicate them. Drag a prepared cut out of the organiser, or export `.cut` / legacy 1-based `.clu.N` assignments from Edit history or Ctrl/Cmd+S.
 - Spatial firing-rate maps, trajectory/spike overlays, head-direction tuning, speed tuning, temporal autocorrelograms, spike counts and spatial/directional peak rates on hover. The position pane shows recorded start/end clock times, duration and a left-aligned speed occupancy plot over a faint white backing.
 - Position processing with one/two LEDs, continuity-based swap correction, jump rejection, interpolation and boxcar smoothing. Inspect searchable file headers and use keyboard shortcuts.
 - Settings, plot visibility, dividers and tool-window geometry persist in localStorage; restored panes/windows fit the current screen. Feature plots use square bins and compact A1–A4 axis labels, retained in Space copies. The original cell palette, favicon, hover glow and drop-title animation are preserved.
+- Browser Back/Forward restores trial, tetrode and cut selections. Edits, plot settings and window/pane changes do not add navigation entries.
 - Runs as a static browser app. Recordings are not uploaded; there is no analytics, server or remote font dependency.
 
 See the complete [original feature inventory and migration notes](docs/FEATURES.md), [architecture and memory model](docs/ARCHITECTURE.md), and [verification results](docs/VALIDATION.md).
@@ -33,12 +34,16 @@ npm run build:wasm
 npm run dev
 ```
 
-Open the URL printed by Vite. Use **Explore a synthetic demo** without supplying recordings, or drop LTX files into the workspace. For a production build:
+Open **http://localhost:5173**. Click **Try it now with simulated data** to generate five trials with eight tetrodes each, with about **50,000 spikes per tetrode over 20 minutes**, and 24–48 cells. The rodent trajectory is simulated at 50 Hz in a 1 × 1 m box, with changing speed and heading, brief pauses, wall avoidance and a bias towards less-visited squares of a 10 × 10 grid. Each run uses a fresh seed. Record bytes are generated in Rust as the loader requests chunks; the demo uses the same decoder, editing engine and rendering pipeline as imported files. Raw waveform records are generated by range rather than retained as a large fake file. You can also drop LTX files into the workspace. For a production build:
 
 ```sh
 npm run build
 npm run preview
 ```
+
+For a larger developer workload, `?demo=stress` selects 9M spikes / 100 cells; routine interaction tests use `?demo=quick`.
+
+The dev server uses port 5173 and refuses to silently move to another port. Browser tests use a separate preview server on 4173; their start/stop lifecycle does not control the dev server. Generated test artifacts and Rust build outputs are excluded from the dev watcher.
 
 The Rust core has no dependencies and uses a small explicit Wasm ABI, so neither `wasm-pack` nor `wasm-bindgen` is needed.
 
@@ -48,7 +53,7 @@ The target workload is approximately **9 million spikes and 100 cells per tetrod
 
 Counts, assignments, lasso/paint/gate edits and cut exports use the **full spike population**. GPU feature views use an evenly spaced sample; waveform views use a stratified reservoir. Hovering sampled plots shows **WARNING: using sampled rendering**; full-population waveform rendering is deferred. Newly split cells have their waveform sample replenished from small file slices. Large/bursty autocorrelograms use bounded reference/pair sampling and are labelled accordingly. Cuts operate across the complete recording.
 
-A local Chromium test loaded a synthetic 9-million-spike recording with 100 cells in about **3.4–4.6 seconds**, then merged, undid and exported it. The Wasm-only decoder benchmark processed the same population in about **1.31 seconds**, with about **94 MiB** of Wasm memory. These are measurements on one development machine, not cross-device performance guarantees. See `docs/VALIDATION.md` for commands and scope.
+A local Chromium test loaded a synthetic 9-million-spike recording with 100 cells in about **3.3–5.8 seconds**, then merged, undid and exported it. The Wasm-only decoder benchmark processed the same population in about **1.31 seconds**, with about **94 MiB** of Wasm memory. These are measurements on one development machine, not cross-device performance guarantees. See `docs/VALIDATION.md` for commands and scope.
 
 Undo patches are saved to IndexedDB, with no fixed action limit. History metadata and open-file references live for the current workspace tab. Switching trials, tetrodes or cuts preserves history; refreshing/closing the tab does not restore the workspace. Export modified cuts before closing. Browser storage quota can limit history: an edit is rolled back if its undo patch cannot be stored.
 

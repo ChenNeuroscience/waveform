@@ -5,8 +5,8 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.goto("/?demo=quick");
+  await page.getByText("Try it now with simulated data").click();
   await ready(page, 30000);
   await expect(page.getByText("18,000", { exact: true })).toBeVisible();
   await expect(
@@ -26,16 +26,12 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveText(count!);
-  await page.getByText("Split by waveform sample", { exact: true }).click();
-  await page.getByLabel("Destination cell", { exact: true }).fill("13");
-  await page.getByLabel("Gate threshold", { exact: true }).fill("-128");
-  await page.getByRole("button", { name: "Apply split", exact: true }).click();
+  await page.getByLabel("Destination cell", { exact: true }).fill("2");
+  await page.getByRole("button", { name: "Merge", exact: true }).click();
   await ready(page);
-  await page
-    .locator(".tile-wall")
-    .evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await page.locator(".tile-wall").evaluate((el) => (el.scrollTop = 0));
   await expect(
-    page.getByRole("button", { name: "Select cell 13", exact: true }),
+    page.getByRole("button", { name: "Select cell 2", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
@@ -69,9 +65,12 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     page.waitForEvent("download"),
     exportCut(page),
   ]);
-  expect(download.suggestedFilename()).toBe("demo_linear-track_1.cut");
+  expect(download.suggestedFilename()).toBe("demo_box-a_1.cut");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  // CI's software WebGL renderer can still be finishing the restored tile wall.
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible({
+    timeout: 15000,
+  });
   await page.getByLabel("Spatial bin width", { exact: true }).fill("5");
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   await page
@@ -91,7 +90,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     .getByRole("button", { name: "Close panel", exact: true })
     .click();
   await expect(
-    page.getByRole("button", { name: "~_1 edited.cut", exact: true }),
+    page.getByRole("button", { name: "~_1 edited 2.cut", exact: true }),
   ).toBeVisible();
   await ready(page);
   await expect(page.getByRole("alert")).toHaveCount(0);
@@ -100,15 +99,15 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
 test("production assets and Wasm load under the GitHub Pages subpath", async ({
   page,
 }) => {
-  await page.goto("http://127.0.0.1:4174/waveform/");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.goto("http://127.0.0.1:4174/waveform/?demo=quick");
+  await page.getByText("Try it now with simulated data").click();
   await ready(page, 30000);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText("18,000", { exact: true })).toBeVisible();
 });
 test("mobile welcome stays within the viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await expect(
     page.getByRole("button", { name: "Browse files", exact: true }),
   ).toBeVisible();

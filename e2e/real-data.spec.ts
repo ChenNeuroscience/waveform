@@ -16,7 +16,7 @@ test("user sample: three trials and sixteen tetrodes load without cuts", async (
   test.setTimeout(120000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   const files = readdirSync(dir!)
     .filter((f) => /\.(set|pos|\d+)$/.test(f))
     .map((f) => resolve(dir!, f));
@@ -25,20 +25,28 @@ test("user sample: three trials and sixteen tetrodes load without cuts", async (
     .setInputFiles(files);
   await ready(page, 60000);
   await expect(
-    page.getByRole("contentinfo").getByText("289,129", { exact: true }),
+    page
+      .getByRole("group", { name: "Recording details", exact: true })
+      .getByText("289,129", { exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "16", exact: true }).click();
   await expect(
-    page.getByRole("contentinfo").getByText("164,385", { exact: true }),
+    page
+      .getByRole("group", { name: "Recording details", exact: true })
+      .getByText("164,385", { exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "13062025b 16", exact: true }).click();
   await ready(page);
   await expect(
-    page.getByRole("contentinfo").getByText("382,880", { exact: true }),
+    page
+      .getByRole("group", { name: "Recording details", exact: true })
+      .getByText("382,880", { exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "01", exact: true }).click();
   await expect(
-    page.getByRole("contentinfo").getByText("704,080", { exact: true }),
+    page
+      .getByRole("group", { name: "Recording details", exact: true })
+      .getByText("704,080", { exact: true }),
   ).toBeVisible();
   await page.getByLabel("Destination cell", { exact: true }).fill("1");
   await page.getByRole("button", { name: "Lasso cut", exact: true }).click();
@@ -79,14 +87,16 @@ test("nine million spikes and 100 cells: import, merge, undo and export", async 
   test.setTimeout(180000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   const start = Date.now();
   await page
     .getByLabel("Import recording files", { exact: true })
     .setInputFiles([resolve(dir!, "stress.1"), resolve(dir!, "stress_1.cut")]);
   await ready(page, 120000);
   await expect(
-    page.getByRole("contentinfo").getByText("9,000,000", { exact: true }),
+    page
+      .getByRole("group", { name: "Recording details", exact: true })
+      .getByText("9,000,000", { exact: true }),
   ).toBeVisible();
   console.log(`9M browser first load: ${Date.now() - start}ms`);
   await page

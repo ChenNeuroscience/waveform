@@ -8,6 +8,7 @@ use std::slice;
 mod density;
 mod position;
 mod processing;
+mod synthetic;
 pub const RECORD: usize = 216;
 pub const MAX_CELLS: usize = 1024;
 #[derive(Default)]

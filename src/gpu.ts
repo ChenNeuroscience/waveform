@@ -1,6 +1,11 @@
 import { groupPalette } from "./palette";
 import { cellRgb, type Settings, type ViewData } from "./types";
-import { projectionFrame, type WaveLayout } from "./plot-geometry";
+import {
+  projectionFrame,
+  featurePlotOrigin,
+  FEATURE_PLOT,
+  type WaveLayout,
+} from "./plot-geometry";
 const vertex = `#version 300 es
 precision highp float;
 layout(location=0) in vec4 amplitudes;
@@ -141,14 +146,11 @@ export class ClusterGPU {
     gl.uniform1i(u("drift"), s.drift ? 1 : 0);
     gl.uniform2f(u("range"), range[0], range[1]);
     axes.forEach(([ax, ay], i) => {
-      const rows = Math.ceil(axes.length / columns),
-        col = i % columns,
-        row = Math.floor(i / columns),
-        x = Math.round((col * w) / columns),
-        y = Math.round(h - ((row + 1) * h) / rows),
-        ww = Math.floor(w / columns),
-        hh = Math.floor(h / rows);
-      const frame = projectionFrame(ww / dpr, hh / dpr);
+      const origin = featurePlotOrigin(i, columns),
+        x = Math.round(origin.x * dpr),
+        y = Math.round(h - (origin.y + FEATURE_PLOT) * dpr),
+        hh = Math.round(FEATURE_PLOT * dpr);
+      const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
       gl.viewport(
         x + frame.x * dpr,
         y + hh - (frame.y + frame.height) * dpr,

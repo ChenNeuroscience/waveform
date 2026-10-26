@@ -36,7 +36,7 @@ test("identical basenames in different folders keep separate cuts and histories"
       await utimes(join(base, "trial.1"), 1, 1);
       await utimes(join(base, "trial_1.cut"), 1, 1);
     }
-    await page.goto("/");
+    await page.goto("/?demo=quick");
     await page
       .getByLabel("Import recording folder", { exact: true })
       .setInputFiles(dir);

@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 // Owns browser handles and asynchronous scheduling. Rust owns population data and
 // every loop over spike, label, waveform and position records.
+import { demoFiles, recordingSource } from "./demo";
 import { parseHeader, textHeader, readCut } from "./files";
 import type { Settings, Header, HistoryEntry, ViewData } from "./types";
 import { parsePosition, analyse, type Position } from "./position";
@@ -312,6 +313,11 @@ async function handle(m: any): Promise<any> {
     throw new Error(
       "Finish the waveform split with a left click, or press Escape to cancel.",
     );
+  if (m.type === "demo") {
+    return demoFiles(await wasmPromise, m.options, (n, message) =>
+      progress(m.id, n, message),
+    );
+  }
   if (m.type === "load") {
     await saveActive();
     const key = m.assetKey as string,
@@ -320,7 +326,7 @@ async function handle(m: any): Promise<any> {
       existing = sessions.get(sessionKey);
     budget = m.budget;
     const a = await loadAsset(
-      m.file,
+      recordingSource(await wasmPromise, m.file),
       existing?.localCut ? undefined : m.cut,
       m.id,
       key,

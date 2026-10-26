@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { usePreference } from "./preferences";
-import { fitGrid, projectionFrame } from "./plot-geometry";
+import {
+  fitGrid,
+  projectionFrame,
+  FEATURE_PLOT,
+  FEATURE_GAP,
+  FEATURE_STRIDE,
+  featureGridSize,
+  featurePlotOrigin,
+} from "./plot-geometry";
 import { ClusterGPU, drawWaves, drawWaveOverview, projections } from "./gpu";
 import {
   color,
@@ -53,12 +60,18 @@ export function Clusters({
       setColumns(
         Math.max(
           1,
-          Math.min(6, Math.floor(wrapper.current!.clientWidth / 128)),
+          Math.min(
+            6,
+            Math.floor(
+              (wrapper.current!.parentElement!.clientWidth + FEATURE_GAP) /
+                FEATURE_STRIDE,
+            ),
+          ),
         ),
       );
       setVersion((v) => v + 1);
     });
-    ro.observe(wrapper.current!);
+    ro.observe(wrapper.current!.parentElement!);
     return () => {
       ro.disconnect();
       gpu.current?.dispose();
@@ -83,6 +96,7 @@ export function Clusters({
       setError(String(e));
     }
   }, [data, settings, selected, isolate, range, axes, version, columns]);
+  const grid = featureGridSize(columns);
   const point = (e: React.PointerEvent) => {
     const b = e.currentTarget.getBoundingClientRect();
     return [e.clientX - b.left, e.clientY - b.top];
@@ -92,12 +106,21 @@ export function Clusters({
       className="clusters"
       ref={wrapper}
       data-columns={columns}
-      style={{ height: Math.ceil(6 / columns) * 128 }}
+      style={grid}
       onPointerDown={(e) => {
-        if (tool !== "lasso" && tool !== "brush") return;
+        if (e.button !== 0 || (tool !== "lasso" && tool !== "brush")) return;
         const p = point(e),
-          plot = Math.floor(p[1] / 128) * columns + Math.floor(p[0] / 128);
-        if (p[0] >= columns * 128 || plot >= 6) return;
+          plot =
+            Math.floor(p[1] / FEATURE_STRIDE) * columns +
+            Math.floor(p[0] / FEATURE_STRIDE);
+        if (
+          p[0] >= grid.width ||
+          p[1] >= grid.height ||
+          p[0] % FEATURE_STRIDE >= FEATURE_PLOT ||
+          p[1] % FEATURE_STRIDE >= FEATURE_PLOT ||
+          plot >= 6
+        )
+          return;
         drawing.current = { plot, points: [p] };
         setStroke([p]);
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -113,23 +136,23 @@ export function Clusters({
         drawing.current = null;
         setStroke([]);
         if (!d) return;
-        const w = 128,
-          h = 128,
-          col = d.plot % columns,
-          row = Math.floor(d.plot / columns),
-          frame = projectionFrame(w, h),
+        const origin = featurePlotOrigin(d.plot, columns),
+          frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT),
           points = d.points;
         if (tool !== "brush" && points.length < 3) return;
         const poly = points.flatMap(([x, y]) => [
           Math.max(
             0,
-            Math.min(1, ((x - col * w - frame.x) / frame.width - 0.035) / 0.93),
+            Math.min(
+              1,
+              ((x - origin.x - frame.x) / frame.width - 0.035) / 0.93,
+            ),
           ),
           Math.max(
             0,
             Math.min(
               1,
-              1 - ((y - row * h - frame.y) / frame.height - 0.035) / 0.93,
+              1 - ((y - origin.y - frame.y) / frame.height - 0.035) / 0.93,
             ),
           ),
         ]);
@@ -138,16 +161,16 @@ export function Clusters({
     >
       <canvas
         ref={canvas}
-        style={{ width: columns * 128, height: Math.ceil(6 / columns) * 128 }}
+        style={grid}
         aria-label="Six WebGL2 spike feature projections"
       />
       <div
         className="projection-labels"
         style={{
-          width: columns * 128,
-          height: Math.ceil(6 / columns) * 128,
-          gridTemplateColumns: `repeat(${columns},128px)`,
-          gridTemplateRows: `repeat(${Math.ceil(6 / columns)},128px)`,
+          ...grid,
+          gap: FEATURE_GAP,
+          gridTemplateColumns: `repeat(${columns},${FEATURE_PLOT}px)`,
+          gridTemplateRows: `repeat(${Math.ceil(6 / columns)},${FEATURE_PLOT}px)`,
         }}
       >
         {axes.map(([x, y], i) => (
@@ -193,8 +216,10 @@ export function captureFeatureGrid(): HTMLCanvasElement | undefined {
   for (const [i, label] of [
     ...root.querySelectorAll<HTMLElement>(".projection-labels>div"),
   ].entries()) {
-    const x = (i % columns) * 128,
-      y = Math.floor(i / columns) * 128;
+    const { x, y } = featurePlotOrigin(i, columns);
+    ctx.strokeStyle = "#bbb";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, FEATURE_PLOT - 1, FEATURE_PLOT - 1);
     ctx.fillStyle = "#ffffffe8";
     ctx.fillRect(x + 2, y + 2, 20, 13);
     ctx.fillRect(x + 106, y + 113, 20, 13);
@@ -222,99 +247,6 @@ export function WavePlot({ data, cell }: { data: ViewData; cell: number }) {
         {data.waveLabels.filter((c) => c === cell).length} sampled spikes
       </small>
     </div>
-  );
-}
-export function WaveformGate({
-  disabled,
-  onGate,
-}: {
-  disabled: boolean;
-  onGate: (
-    channel: number,
-    sample: number,
-    threshold: number,
-    above: boolean,
-  ) => void;
-}) {
-  const [gate, setGate] = usePreference("waveform-gate", {
-    channel: 0,
-    sample: 14,
-    threshold: 40,
-    above: true,
-  });
-  const { channel, sample, threshold, above } = gate,
-    setChannel = (channel: number) => setGate((g) => ({ ...g, channel })),
-    setSample = (sample: number) => setGate((g) => ({ ...g, sample })),
-    setThreshold = (threshold: number) => setGate((g) => ({ ...g, threshold })),
-    setAbove = (above: boolean) => setGate((g) => ({ ...g, above }));
-  return (
-    <details className="wave-gate">
-      <summary>Split by waveform sample</summary>
-      <p>
-        Apply a sample threshold to every spike in the chosen source cells. The
-        first use reads one waveform column; repeated cuts reuse it.
-      </p>
-      <div>
-        <label>
-          Channel
-          <select
-            aria-label="Gate channel"
-            value={channel}
-            onChange={(e) => setChannel(+e.target.value)}
-          >
-            {[0, 1, 2, 3].map((c) => (
-              <option key={c} value={c}>
-                {c + 1}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Sample
-          <input
-            aria-label="Gate sample"
-            type="number"
-            value={sample}
-            min="0"
-            max="49"
-            onChange={(e) =>
-              setSample(Math.max(0, Math.min(49, +e.target.value)))
-            }
-          />
-        </label>
-        <label>
-          Threshold
-          <input
-            aria-label="Gate threshold"
-            type="number"
-            value={threshold}
-            min="-128"
-            max="127"
-            onChange={(e) =>
-              setThreshold(Math.max(-128, Math.min(127, +e.target.value)))
-            }
-          />
-        </label>
-        <label>
-          Move
-          <select
-            aria-label="Gate direction"
-            value={above ? "above" : "below"}
-            onChange={(e) => setAbove(e.target.value === "above")}
-          >
-            <option value="above">At or above</option>
-            <option value="below">Below</option>
-          </select>
-        </label>
-        <button
-          className="secondary"
-          disabled={disabled}
-          onClick={() => onGate(channel, sample, threshold, above)}
-        >
-          Apply split
-        </button>
-      </div>
-    </details>
   );
 }
 export function CellOverview({
@@ -568,7 +500,7 @@ export function AnalysisPlot({
             }
             if (positionSpeed) {
               ctx.fillStyle = "#f00";
-              ctx.fillRect(0, h - 0.6, w, 0.6);
+              ctx.fillRect(0, 0, 0.6, h);
             }
           }
         } else {

@@ -8,16 +8,15 @@ import {
   Settings2,
   History,
   List,
-  Scissors,
+  Lasso,
   PenLine,
-  MousePointer2,
   GitMerge,
   ArrowLeftRight,
   Plus,
   X,
   HelpCircle,
 } from "lucide-react";
-import { Clusters, AnalysisPlot, WaveformGate } from "./plots";
+import { Clusters, AnalysisPlot } from "./plots";
 import { TileWall, type VisiblePlots } from "./TileWall";
 import {
   color,
@@ -67,6 +66,7 @@ interface Props {
   ) => void;
   onPopOut: (cell: number, x?: number, y?: number) => void;
   onPopPlot: (kind: "path" | "features", x: number, y: number) => void;
+  ready: boolean;
   busy: boolean;
   progress: number;
   message: string;
@@ -88,13 +88,11 @@ interface Props {
   onSources: (n: number[]) => void;
   onDest: (n: number) => void;
   onTool: (s: string) => void;
-  onIsolate: (v: boolean) => void;
   onToggle: (m: PlotMode) => void;
   onPanel: (p: "settings" | "history" | "headers" | "help") => void;
-  onOperation: (type: string, p?: Record<string, unknown>) => void;
   onEdit: (action: string) => void;
+  onOperation: (type: string, p?: Record<string, unknown>) => void;
   onPolygon: (p: number[], a: number, b: number) => void;
-  onSettings: (k: keyof Settings, v: any) => void;
   onDemo: () => void;
   onError: () => void;
   onNotice: () => void;
@@ -103,8 +101,6 @@ interface Props {
   children?: ReactNode;
 }
 const FULL_RANGE = [0, 1];
-const time = (n: number) =>
-  `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, "0")}`;
 export function DesktopShell(p: Props) {
   const root = useRef<HTMLDivElement>(null),
     left = useRef<HTMLDivElement>(null),
@@ -112,7 +108,7 @@ export function DesktopShell(p: Props) {
   const fitted = fitPaneLayout(
       layout,
       root.current?.clientWidth || innerWidth,
-      left.current?.clientHeight || innerHeight - 55,
+      left.current?.clientHeight || innerHeight - 35,
     ),
     split = fitted.left,
     rows = [fitted.files, fitted.features],
@@ -123,13 +119,18 @@ export function DesktopShell(p: Props) {
         fitPaneLayout(
           saved,
           root.current?.clientWidth || innerWidth,
-          left.current?.clientHeight || innerHeight - 55,
+          left.current?.clientHeight || innerHeight - 35,
         ),
       );
     resize();
     addEventListener("resize", resize);
     return () => removeEventListener("resize", resize);
   }, []);
+  useEffect(() => {
+    root.current
+      ?.querySelector<HTMLElement>(".trial-block.selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [p.trial?.id]);
   const pathCell = p.dragComparison?.source ?? p.hoverCell,
     primary = p.analysis?.cell === pathCell ? p.analysis : null,
     secondary =
@@ -140,7 +141,7 @@ export function DesktopShell(p: Props) {
     pathLayers = [primary, secondary]
       .filter((a): a is AnalysisData => !!a)
       .map((a) => ({ cell: a.cell, spikes: a.spikes, color: color(a.cell) }));
-  const ready = !!p.data && !p.busy,
+  const ready = p.ready,
     active = p.trial?.tetrodes.find((t) => t.number === p.tetNum),
     numbers = [
       ...new Set(p.trials.flatMap((t) => t.tetrodes.map((t) => t.number))),
@@ -337,6 +338,34 @@ export function DesktopShell(p: Props) {
                 }
               </button>
             ))}
+            <div
+              className="toolbar-status"
+              role="group"
+              aria-label="Recording details"
+              title={
+                p.data
+                  ? `Feature display: ${Math.min(p.data.n, p.settings.budget).toLocaleString()} of ${p.data.n.toLocaleString()} spikes; edits use all spikes.`
+                  : undefined
+              }
+            >
+              {p.data && (
+                <span>
+                  Spikes: <b>{p.data.n.toLocaleString()}</b> ·{" "}
+                  {timing.durationText}
+                </span>
+              )}
+              <span>
+                {p.busy ? (
+                  <>
+                    <progress max="1" value={p.progress} /> {p.message}
+                  </>
+                ) : p.data ? (
+                  `${(p.data.residentBytes / 1048576).toFixed(0)} MB cached`
+                ) : (
+                  "Preparing…"
+                )}
+              </span>
+            </div>
           </div>
           <div
             className="desktop-workspace"
@@ -553,11 +582,12 @@ export function DesktopShell(p: Props) {
               <section className="feature-pane">
                 <div className="feature-tools">
                   <button
-                    className={p.tool === "select" ? "active" : ""}
-                    title="Select"
-                    onClick={() => p.onTool("select")}
+                    className={p.tool === "brush" ? "active" : ""}
+                    aria-label="Paint source spikes"
+                    title="Paint source spikes"
+                    onClick={() => p.onTool("brush")}
                   >
-                    <MousePointer2 size={14} />
+                    <PenLine size={14} />
                   </button>
                   <button
                     className={p.tool === "lasso" ? "active" : ""}
@@ -565,15 +595,7 @@ export function DesktopShell(p: Props) {
                     title="Lasso source spikes [L]"
                     onClick={() => p.onTool("lasso")}
                   >
-                    <Scissors size={14} />
-                  </button>
-                  <button
-                    className={p.tool === "brush" ? "active" : ""}
-                    aria-label="Paint source spikes"
-                    title="Paint source spikes"
-                    onClick={() => p.onTool("brush")}
-                  >
-                    <PenLine size={14} />
+                    <Lasso size={14} />
                   </button>
                   <span>
                     Source: {p.sources.length ? p.sources.join(", ") : "none"} →
@@ -642,40 +664,6 @@ export function DesktopShell(p: Props) {
                         </button>
                       ))}
                 </div>
-                <div className="feature-options">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={p.isolate}
-                      onChange={(e) => p.onIsolate(e.target.checked)}
-                    />
-                    isolate
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={p.settings.drift}
-                      onChange={(e) => p.onSettings("drift", e.target.checked)}
-                    />
-                    drift
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={p.settings.density}
-                      onChange={(e) =>
-                        p.onSettings("density", e.target.checked)
-                      }
-                    />
-                    density
-                  </label>
-                  <small>
-                    {p.data
-                      ? `${Math.min(p.data.n, p.settings.budget).toLocaleString()} / ${p.data.n.toLocaleString()} displayed`
-                      : "Preparing…"}{" "}
-                    · cuts use all spikes
-                  </small>
-                </div>
                 <div
                   className="feature-stage"
                   onPointerDownCapture={(e) => {
@@ -693,26 +681,11 @@ export function DesktopShell(p: Props) {
                       selected={p.cell}
                       isolate={p.isolate}
                       range={FULL_RANGE}
-                      tool={ready ? p.tool : "select"}
+                      tool={ready ? p.tool : "disabled"}
                       onPolygon={p.onPolygon}
                     />
                   )}
                 </div>
-                <WaveformGate
-                  disabled={!ready || !p.sources.length}
-                  onGate={(channel, sample, threshold, above) =>
-                    p.onOperation("edit", {
-                      action: "gate",
-                      sources: p.sources,
-                      dest: p.dest,
-                      channel,
-                      sample,
-                      threshold,
-                      above,
-                      description: `Waveform Ch ${channel + 1} sample ${sample} ${above ? "≥" : "<"} ${threshold} → ${p.dest}`,
-                    })
-                  }
-                />
               </section>
             </div>
             <div
@@ -801,12 +774,40 @@ export function DesktopShell(p: Props) {
               <img src={video} alt="Watch the original Waveform introduction" />
               <span>Original video introduction ↗</span>
             </a>
-            <button className="demo-link" onClick={p.onDemo}>
-              Explore a synthetic demo
+            <button
+              className="demo-files"
+              draggable={false}
+              aria-label="Try it now with simulated data"
+              disabled={p.busy}
+              onClick={p.onDemo}
+            >
+              <span className="demo-file-stack" aria-hidden="true">
+                <span className="demo-file-card">.pos</span>
+                <span className="demo-file-card">.cut</span>
+                <span className="demo-file-card">.1</span>
+                <svg viewBox="0 0 100 40">
+                  <path d="M35 4 L35 28 L42 22 L49 35 L54 32 L47 20 L59 20 Z M25 4 L20 0 M23 14 H16" />
+                </svg>
+              </span>
+              <span>
+                <b>Try it now with simulated data</b>
+                <small>Click here to explore</small>
+                <small>
+                  {new URLSearchParams(location.search).get("demo") === "quick"
+                    ? "Quick preview"
+                    : new URLSearchParams(location.search).get("demo") ===
+                        "stress"
+                      ? "9 million spikes · 100 cells · stress test"
+                      : "~50k spikes/tetrode · 20 minutes · 5 trials"}
+                </small>
+              </span>
             </button>
-            <small>
-              Files are processed locally and stay on this computer.
-            </small>
+            {p.busy && (
+              <div className="demo-progress" role="status">
+                <progress max="1" value={p.progress} />
+                {p.message}
+              </div>
+            )}
           </div>
         </main>
       )}
@@ -824,27 +825,6 @@ export function DesktopShell(p: Props) {
           </button>
         </div>
       )}
-      <footer className="desktop-status">
-        <span>
-          {p.busy
-            ? p.message
-            : p.data
-              ? `${p.data.name}${p.data.dirty ? " *" : ""}`
-              : "Drop files to begin"}
-        </span>
-        {p.busy && <progress max="1" value={p.progress} />}
-        <span className="status-spacer" />
-        {p.data && (
-          <>
-            <span>
-              Spikes: <b>{p.data.n.toLocaleString()}</b>
-            </span>
-            <span>{time(p.data.duration)}</span>
-            <span>{(p.data.residentBytes / 1048576).toFixed(0)} MB cached</span>
-          </>
-        )}
-        <span>Local files</span>
-      </footer>
       {p.drag && p.trials.length > 0 && (
         <div className="drag-overlay">
           <p className="drop-title-wobble">drag &amp; drop files here</p>

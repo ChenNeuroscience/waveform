@@ -2,17 +2,17 @@ import { test, expect, type Page } from "@playwright/test";
 import { ready } from "./controls";
 
 async function demo(page: Page) {
-  await page.goto("/");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.goto("/?demo=quick");
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
 }
 
 test("hover preserves waveform pixels, aligns the badge and displays the sampling warning above the toolbar", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await expect(page).toHaveTitle("Waveform");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
   await expect(page).toHaveTitle(/demo_.* \[Waveform\]/);
   await expect(page.locator(".toolbar-title")).toHaveCount(0);
@@ -115,16 +115,16 @@ test("feature corner labels survive Space copies; settings and divider positions
   });
   for (const ink of labelInk) expect(ink).toBeGreaterThan(5);
   const png = await page.locator(".plot-copy").getAttribute("src");
-  await page
-    .getByRole("button", { name: "demo_open-field 3", exact: true })
-    .click();
+  await page.getByRole("button", { name: "demo_box-b 8", exact: true }).click();
   await ready(page);
   expect(await page.locator(".plot-copy").getAttribute("src")).toBe(png);
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
-  await page.getByLabel("isolate", { exact: true }).check();
   await page.getByRole("button", { name: "Waveforms", exact: true }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+  await settings
+    .getByRole("checkbox", { name: "Isolate selected cell", exact: true })
+    .check();
   await page
     .getByRole("slider", { name: "Maximum speed shown", exact: true })
     .fill("60");
@@ -153,11 +153,10 @@ test("feature corner labels survive Space copies; settings and divider positions
     .toBeGreaterThan(800);
   await page.setViewportSize({ width: 900, height: 650 });
   await page.reload();
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
   const left = (await page.locator(".left-workspace").boundingBox())!;
   expect(left.width).toBe(563);
-  await expect(page.getByLabel("isolate", { exact: true })).toBeChecked();
   await expect(
     page.getByRole("button", { name: "Waveforms", exact: true }),
   ).toHaveAttribute("aria-pressed", "false");
@@ -165,6 +164,12 @@ test("feature corner labels survive Space copies; settings and divider positions
   await expect(
     page.getByRole("slider", { name: "Maximum speed shown", exact: true }),
   ).toHaveValue("60");
+  await expect(
+    settings.getByRole("checkbox", {
+      name: "Isolate selected cell",
+      exact: true,
+    }),
+  ).toBeChecked();
   const restored = (await settings.boundingBox())!;
   expect(restored.x + restored.width).toBeLessThanOrEqual(900);
   expect(restored.y + restored.height).toBeLessThanOrEqual(650);
@@ -173,7 +178,7 @@ test("feature corner labels survive Space copies; settings and divider positions
 test("external file readiness uses the original 800 ms pivot animation; internal cut drags do not", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   const enter = (internal = false) =>
     page.locator(".desktop-app").evaluate((el, internal) => {
       const data = new DataTransfer();
@@ -245,4 +250,49 @@ test("browser reload/close modifiers do not toggle plots before the leave warnin
   expect(path.y).toBe(pane.y);
   expect(path.width).toBe(pane.width);
   expect(path.height).toBe(pane.height);
+});
+
+test("compact toolbar replaces the footer; feature grid centres without experimental controls or a numeric split form", async ({
+  page,
+}) => {
+  await demo(page);
+  await expect(page.getByRole("contentinfo")).toHaveCount(0);
+  const details = page.getByRole("group", {
+    name: "Recording details",
+    exact: true,
+  });
+  await expect(details).toContainText("18,000");
+  const toolbar = (await page.locator(".desktop-toolbar").boundingBox())!,
+    status = (await details.boundingBox())!;
+  expect(status.y).toBeGreaterThanOrEqual(toolbar.y);
+  expect(status.y + status.height).toBeLessThanOrEqual(
+    toolbar.y + toolbar.height,
+  );
+  expect(status.x).toBeGreaterThan(1000);
+  await expect(page.locator(".feature-pane input[type=checkbox]")).toHaveCount(
+    0,
+  );
+  await expect(page.locator(".wave-gate")).toHaveCount(0);
+  await expect(
+    page.getByText("Split by waveform sample", { exact: true }),
+  ).toHaveCount(0);
+  const centred = async () => {
+    const stage = (await page.locator(".feature-stage").boundingBox())!,
+      grid = (await page.locator(".clusters").boundingBox())!;
+    const clientWidth = await page
+      .locator(".feature-stage")
+      .evaluate((el) => el.clientWidth);
+    expect(
+      Math.abs(grid.x - stage.x - (clientWidth - grid.width) / 2),
+    ).toBeLessThanOrEqual(1);
+    if (grid.height <= stage.height)
+      expect(
+        Math.abs(grid.y - stage.y - (stage.height - grid.height) / 2),
+      ).toBeLessThanOrEqual(1);
+    else expect(grid.y).toBe(stage.y); // Overflow must remain scrollable from the first row.
+  };
+  await centred();
+  await page.setViewportSize({ width: 1440, height: 1500 });
+  await centred();
+  await page.screenshot({ path: "test-results/centred-feature-grid.png" });
 });

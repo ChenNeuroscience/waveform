@@ -17,7 +17,7 @@ async function fixture(page: Page) {
     pos.writeUInt16BE(20 + i * 3, i * 20 + 6);
     pos.writeUInt16BE(12, i * 20 + 12);
   }
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await page
     .getByLabel("Import recording files", { exact: true })
     .setInputFiles([
@@ -202,8 +202,8 @@ test("drag comparison leaves a placeholder, fades at exact alignment, overlays b
 test("cancelling after the source scrolls out of the virtual wall restores its slot", async ({
   page,
 }) => {
-  await page.goto("/");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.goto("/?demo=quick");
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
   await start(page, 1);
   await page

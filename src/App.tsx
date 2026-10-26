@@ -8,9 +8,9 @@ import { captureFeatureGrid } from "./plots";
 import { captureTile, type VisiblePlots } from "./TileWall";
 import { CutDownloads, cutDownloadKey, writeCutDrag } from "./cut-downloads";
 import { usePreference } from "./preferences";
+import { useRecordingHistory, type RecordingSelection } from "./navigation";
 import { organiseFiles } from "./files";
 import { request } from "./client";
-import { demoFiles } from "./demo";
 import {
   color,
   groupTextColor,
@@ -73,7 +73,7 @@ export default function App() {
     [cell, setCell] = useState(1),
     [sources, setSources] = useState<number[]>([1]),
     [dest, setDest] = useState(2),
-    [tool, setTool] = useState("select"),
+    [tool, setTool] = useState("brush"),
     [isolate, setIsolate] = usePreference("isolate", false),
     [shown, setShown] = usePreference<VisiblePlots>("plots", {
       waveforms: true,
@@ -121,6 +121,7 @@ export default function App() {
     lastCuts = useRef(new Map<string, string>()),
     dirtySessions = useRef(new Set<string>()),
     finishingSplit = useRef(false),
+    splitCompletion = useRef<Promise<void> | null>(null),
     cutDownloads = useRef(new CutDownloads());
   useEffect(() => () => cutDownloads.current.dispose(), []);
   useEffect(() => {
@@ -131,7 +132,11 @@ export default function App() {
   const trial = trials.find((t) => t.id === trialId),
     tet = trial?.tetrodes.find((t) => t.number === tetNum),
     cut = tet?.cuts.find((c) => c.id === cutId),
-    ready = !!data && !busy;
+    ready =
+      !!data &&
+      !busy &&
+      !!tet?.file &&
+      data.session === `${tet.id}|${fileId(tet.file)}|${cutId || "unsorted"}`;
   useEffect(() => {
     localStorage.setItem("waveform-desktop-settings", JSON.stringify(settings));
   }, [settings]);
@@ -175,22 +180,54 @@ export default function App() {
       setError(String(e));
     }
   };
-  const chooseTrial = (t: Trial) => {
+  const applySelection = (next: RecordingSelection) => {
+    const target = trials
+      .find((t) => t.id === next.trialId)
+      ?.tetrodes.find((e) => e.number === next.tetNum && e.file);
+    if (
+      !target ||
+      (next.cutId && !target.cuts.some((c) => c.id === next.cutId))
+    )
+      return;
+    if (
+      trialId === next.trialId &&
+      tetNum === next.tetNum &&
+      cutId === next.cutId
+    )
+      return;
     if (tet) lastCuts.current.set(tet.id, cutId);
+    ++loadGen.current; // Invalidate replies before the next load effect runs.
+    setTrialId(next.trialId);
+    setTetNum(next.tetNum);
+    setCutId(next.cutId);
+  };
+  const rememberedCut = (target: Tetrode) =>
+    target.id === tet?.id
+      ? cutId
+      : (lastCuts.current.get(target.id) ?? target.cuts[0]?.id ?? "");
+  const navigateTo = (next: RecordingSelection) => {
+    pushSelection(next);
+    applySelection(next);
+  };
+  const chooseTrial = (t: Trial) => {
     const e =
       t.tetrodes.find((e) => e.number === tetNum && e.file) ||
       t.tetrodes.find((e) => e.file);
-    if (!e) return;
-    setTrialId(t.id);
-    setTetNum(e.number);
-    setCutId(lastCuts.current.get(e.id) ?? e.cuts[0]?.id ?? "");
+    if (e)
+      navigateTo({
+        trialId: t.id,
+        tetNum: e.number,
+        cutId: rememberedCut(e),
+      });
   };
   const chooseTet = (n: number) => {
     const e = trial?.tetrodes.find((t) => t.number === n && t.file);
-    if (!e) return;
-    if (tet) lastCuts.current.set(tet.id, cutId);
-    setTetNum(n);
-    setCutId(lastCuts.current.get(e.id) ?? e.cuts[0]?.id ?? "");
+    if (e && trial)
+      navigateTo({
+        trialId: trial.id,
+        tetNum: n,
+        cutId: rememberedCut(e),
+      });
   };
   useEffect(() => {
     if (!tet?.file) return;
@@ -451,33 +488,46 @@ export default function App() {
       if (!finishingSplit.current) setBusy(false);
     }
   };
-  const finishSplit = async (cancel = false) => {
-    if (!splitPoint || finishingSplit.current) return;
-    finishingSplit.current = true;
-    setBusy(true);
-    setHoverCell(null);
-    try {
-      adopt(
-        await request("split", {
-          session: data!.session,
-          phase: cancel ? "cancel" : "finish",
-          ...(!cancel && !cut?.local ? { newCut: newCut() } : {}),
-        }),
-      );
-    } catch (error) {
-      setError(String(error));
-      setData(
-        await request("budget", {
-          session: data!.session,
-          budget: settings.budget,
-        }),
-      );
-    } finally {
-      setSplitPoint(null);
-      finishingSplit.current = false;
-      setBusy(false);
-    }
+  const finishSplit = (cancel = false): Promise<void> => {
+    if (splitCompletion.current) return splitCompletion.current;
+    if (!splitPoint) return Promise.resolve();
+    const completion = (async () => {
+      finishingSplit.current = true;
+      setBusy(true);
+      setHoverCell(null);
+      try {
+        adopt(
+          await request("split", {
+            session: data!.session,
+            phase: cancel ? "cancel" : "finish",
+            ...(!cancel && !cut?.local ? { newCut: newCut() } : {}),
+          }),
+        );
+      } catch (error) {
+        setError(String(error));
+        setData(
+          await request("budget", {
+            session: data!.session,
+            budget: settings.budget,
+          }),
+        );
+      } finally {
+        splitCompletion.current = null;
+        setSplitPoint(null);
+        finishingSplit.current = false;
+        setBusy(false);
+      }
+    })();
+    splitCompletion.current = completion;
+    return completion;
   };
+  const pushSelection = useRecordingHistory(
+    trial && tet?.file ? { trialId, tetNum, cutId } : null,
+    async (next, current) => {
+      if (splitPoint) await finishSplit(true);
+      if (current()) applySelection(next);
+    },
+  );
   useEffect(() => {
     if (!splitPoint) return;
     const complete = (event: PointerEvent) => {
@@ -682,7 +732,7 @@ export default function App() {
       if (e.key === "Escape") {
         if (pane) setPanels((ps) => ps.filter((p) => p !== pane));
         setPane(null);
-        setTool("select");
+        setTool("brush");
         return;
       }
       if (e.key === "k" || e.key === "?")
@@ -719,10 +769,30 @@ export default function App() {
     return () => removeEventListener("keydown", key);
   });
   const startDemo = async () => {
+    if (busy) return;
     setDemo(true);
-    setMessage("Creating synthetic demo…");
-    await new Promise((r) => setTimeout(r, 20));
-    await importFiles(demoFiles());
+    setBusy(true);
+    setMessage("Preparing simulated recordings…");
+    try {
+      const quick =
+        new URLSearchParams(location.search).get("demo") === "quick";
+      const stress =
+        new URLSearchParams(location.search).get("demo") === "stress";
+      const seed = quick ? 4271 : crypto.getRandomValues(new Uint32Array(1))[0];
+      const files = await request<File[]>(
+        "demo",
+        { options: { quick, stress, seed } },
+        (value, message) => {
+          setProgress(value);
+          setMessage(message);
+        },
+      );
+      setBusy(false);
+      await importFiles(files);
+    } catch (error) {
+      setBusy(false);
+      setError(String(error));
+    }
   };
   const drop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -787,6 +857,11 @@ export default function App() {
           ))}
         </select>
       </label>
+      <Toggle
+        label="Isolate selected cell"
+        checked={isolate}
+        onChange={setIsolate}
+      />
       <Toggle
         label="Colour by recording time"
         checked={settings.drift}
@@ -956,6 +1031,7 @@ export default function App() {
       }}
       splitPoint={splitPoint}
       onWaveSplit={previewSplit}
+      ready={ready}
       busy={busy}
       progress={progress}
       message={message}
@@ -969,15 +1045,14 @@ export default function App() {
       onTet={chooseTet}
       onRecording={(t, n, c) => {
         const target = t.tetrodes.find((e) => e.number === n && e.file);
-        if (!target) return;
-        if (tet) lastCuts.current.set(tet.id, cutId);
-        setTrialId(t.id);
-        setTetNum(n);
-        setCutId(
-          c ?? lastCuts.current.get(target.id) ?? target.cuts[0]?.id ?? "",
-        );
+        if (target)
+          navigateTo({
+            trialId: t.id,
+            tetNum: n,
+            cutId: c ?? rememberedCut(target),
+          });
       }}
-      onCut={setCutId}
+      onCut={(id) => navigateTo({ trialId, tetNum, cutId: id })}
       downloadVersion={downloadVersion}
       cutDownloads={cutDownloads.current}
       onPrepareCut={prepareCut}
@@ -996,13 +1071,11 @@ export default function App() {
       onSources={setSources}
       onDest={setDest}
       onTool={setTool}
-      onIsolate={setIsolate}
       onToggle={(m) => setShown((s) => ({ ...s, [m]: !s[m] }))}
       onPanel={setPane}
-      onOperation={operation}
       onEdit={edit}
+      onOperation={operation}
       onPolygon={polygon}
-      onSettings={update}
       onDemo={startDemo}
       onError={() => setError("")}
       onNotice={() => setNotice("")}
@@ -1170,7 +1243,7 @@ export default function App() {
                   text="Waves / spatial / direction / speed / autocorrelation"
                 />
                 <Shortcut keys="D / P" text="Time colours / waveform density" />
-                <Shortcut keys="Esc" text="Close panel, return to selection" />
+                <Shortcut keys="Esc" text="Close panel, return to paint" />
                 <h3>Reading the plots</h3>
                 <p className="muted">
                   Feature space uses a bounded, evenly spaced display sample.
@@ -1195,6 +1268,7 @@ export default function App() {
       {copies.map((c) => (
         <FloatingWindow
           key={c.id}
+          comparison
           grabMode={grabMode}
           title={c.title}
           x={c.x}

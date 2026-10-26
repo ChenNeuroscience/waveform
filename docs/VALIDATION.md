@@ -6,10 +6,10 @@ Local verification on 26 October 2026, macOS arm64, Node 24.14.0, stable Rust, C
 
 | Check                                           | Result                                                                                                                                                                                                                         |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 93 KB, main app JS about 303 KB before gzip                                                                                                                                                          |
-| Rust tests                                      | 11 passed: decoding, cut streaming, exact edits/patches, inserted-cell split, density invalidation, position/analysis and 9-million-label integrity                                                                            |
-| TypeScript unit tests                           | 11 passed: grouping, cut/CLu validation, binary boundary, patches, occupancy/AC and 96 kHz position clock/window/bearing regression, plot-bin geometry, original palette/contrast, clock formatting and viewport-safe geometry |
-| Chromium browser tests                          | 22 passed, including two optional local data tests                                                                                                                                                                             |
+| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 123 KB, main app JS about 302 KB before gzip                                                                                                                                                         |
+| Rust tests                                      | 14 passed: decoding, cut streaming, exact edits/patches, inserted-cell split, density invalidation, position/analysis and 9-million-label integrity                                                                            |
+| TypeScript unit tests                           | 12 passed: grouping, cut/CLu validation, binary boundary, patches, occupancy/AC and 96 kHz position clock/window/bearing regression, plot-bin geometry, original palette/contrast, clock formatting and viewport-safe geometry |
+| Chromium browser tests                          | 30 passed, including two optional local data tests                                                                                                                                                                             |
 | Dependency audit after updating the test runner | Zero reported vulnerabilities                                                                                                                                                                                                  |
 | Git diff whitespace check                       | Passed                                                                                                                                                                                                                         |
 
@@ -26,16 +26,22 @@ Browser scenarios:
 9. Resize panes/window and check square feature viewports and fixed waveform grids in density/flag modes.
 10. Toggle plots and verify intrinsic tile widths, wrapping, shared density/flag canvas, absent tile checkboxes and larger numeric overlays only on hover.
 11. Verify the drag placeholder, exact cross-column snap alignment, 1.5-second alpha cycle, simultaneous source/target position spikes, hidden stats, snap-only merge, unsnapped/Escape cancellation, and settling animation. Verify restoration after the source scrolls out of the virtual wall.
-12. Space-click closes copies and tool windows without activating the plot or control underneath. Copied tiles have no embedded title strip, a single window title, and a separate frozen hover-only stats overlay.
+12. Space-click closes copies and tool windows without activating the plot or control underneath. Comparison content drags its window and has no resize handle; tool windows remain resizable. Copied tiles have no embedded title strip, a single window title, and a separate frozen hover-only stats overlay.
 13. Import two folders with identical trial/tetrode/cut basenames and timestamps. Verify separate assignments, undo histories, and cut duplication without creating a spurious trial.
 
 14. Verify collapsed/expanded inline cuts, automatic blue cut creation, independent imported/local/duplicated undo and redo, and inactive-cut drag payloads and label contents without changing the active recording.
 15. Compare every pixel in the waveform region before/after hover; verify transparent wave hit targets, original bottom-right stats, badge positions and speed clearance, the prominent sampling warning, and a page-layer halo above both the toolbar and snapped fade. Verify frozen copies retain the same badge/warning behaviour.
 16. Switch flag → density → flag three times, require the exact original flag pixels each time, and check for non-flat waveforms and no WebGL errors.
-17. Check A1–A4 corner labels are baked into Space-copy PNGs, square feature viewports after resizing, and settings/divider/tool-window restoration on a smaller screen.
+17. Check the centred feature grid has no footer, numeric split form or feature-pane checkboxes; recording details fit in the toolbar. Verify A1–A4 corner labels are baked into Space-copy PNGs, square feature viewports after resizing, and settings/divider/tool-window restoration on a smaller screen.
 18. Check the original drop-title animation has 11 keyframes and an 800 ms cycle, stops on drag leave, and ignores internal cut drags.
 19. Verify Ctrl/Cmd/Alt+R/W cannot toggle plot visibility before the unsaved-work warning; plain R still toggles rate maps. Verify the position canvas uses the entire pane.
-20. Click trial rows and set/pos chips, keep the current tetrode, restore its last cut/history, and verify the always-visible recorded clock time/duration and left-aligned speed axis. Auxiliary file counts and tooltip details stay beside set/pos markers without a skipped-file toast.
+20. Click trial rows and set/pos chips, keep the current tetrode, restore its last cut/history, and verify the always-visible recorded clock time/duration and left-aligned speed bars with a red vertical line and no horizontal axis. Auxiliary file counts and tooltip details stay beside set/pos markers without a skipped-file toast.
+
+21. Click the simulated-files card to create five trials and eight tetrodes per trial. Verify the default 50k-spike/20-minute demo and 24–48 cells. Generate the stress preset without external fixtures, verify 9M spikes and 100 cells, merge/undo and compare a hash of the entire canonical cut export. Ordinary interaction tests use the same native generator with `?demo=quick`.
+
+22. Browser Back/Forward restores trial/tetrode/cut selections and existing cut undo history. Duplicate choices, edits and display/window settings add no entries; navigation cancels a pending split preview.
+
+23. Verify default paint, absence of select mode, the lasso icon, wrapped group chips, complete plot borders and 4 px gaps. Paint/lasso a known point cloud on the second projection and compare every exported label; clicking a gap must not edit. Space copies retain plot borders.
 
 ## Timings observed
 
@@ -44,7 +50,8 @@ Browser scenarios:
 | 9M synthetic records, Wasm benchmark        | 1.31 s        | Chunk generation/timestamp writes, copying chunks into Wasm, signed-wave amplitude extraction and timestamp decoding                                                  |
 | Merge about 89K members of one of 100 cells | 7.94 ms       | Rust relabel + population recount; excludes patch persistence and UI                                                                                                  |
 | Wasm memory after 9M decode                 | 93.81 MiB     | Includes full population arrays, allocator overhead and scratch allocation high-water mark; excludes JS/GPU/browser memory                                            |
-| 9M fixture, browser first load              | 3.3–4.6 s     | File picker automation, cut parsing, chunked file reads, Rust decoding, reservoir creation, population summary, bounded view transfer and initial React/GPU rendering |
+| Generated 9M stress demo, browser ready     | 4.83 s        | Cut/position generation, chunk-by-chunk native record synthesis and full decoding, reservoir preparation and initial UI; excludes real disk I/O                       |
+| 9M fixture, browser first load              | 3.3–5.8 s     | File picker automation, cut parsing, chunked file reads, Rust decoding, reservoir creation, population summary, bounded view transfer and initial React/GPU rendering |
 | Real sample tetrode, 704,080 spikes         | 125 ms        | Node/Wasm chunked decoder benchmark, including local file reads                                                                                                       |
 
 These timings do not establish a universal frame-rate or memory ceiling. The browser first-load measurement ends when the workspace reports that the recording is ready; selected-cell analysis can finish afterwards. Warm operating-system file caches may improve local IO timings. The two large fixtures are optional in CI so contributors do not need to download private data or generate 2 GB for routine checks.
