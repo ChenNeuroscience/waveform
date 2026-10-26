@@ -100,7 +100,10 @@ export function useTileGestures({
       button = event.button;
     const gate = () => {
       const x = Math.max(0, Math.min(wr.width - 1, px - wr.left)),
-        wx = x / wr.width,
+        plotWidth = Number(wave.dataset.plotWidth) || wr.width,
+        plotHeight = Number(wave.dataset.plotHeight) || rect.height,
+        plotTop = Number(wave.dataset.plotTop) || 0,
+        wx = Math.min(0.99999, x / plotWidth),
         y = Math.max(0, Math.min(rect.height - 1, py - rect.top)),
         channel = Math.min(3, Math.floor(wx * 4)),
         sample = Math.max(
@@ -109,7 +112,10 @@ export function useTileGestures({
         ),
         threshold = Math.max(
           -128,
-          Math.min(127, Math.round((64 - (y / rect.height) * 128) / 0.39)),
+          Math.min(
+            127,
+            Math.round((64 - ((y - plotTop) / plotHeight) * 128) / 0.39),
+          ),
         );
       return { cell, x, y, channel, sample, threshold };
     };

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { usePreference } from "./preferences";
 import { fitGrid, projectionFrame } from "./plot-geometry";
 import { ClusterGPU, drawWaves, drawWaveOverview, projections } from "./gpu";
 import {
@@ -25,10 +26,12 @@ export function Clusters({
   tool: string;
   onPolygon: (p: number[], ax: number, ay: number) => void;
 }) {
-  const canvas = useRef<HTMLCanvasElement>(null),
+  const wrapper = useRef<HTMLDivElement>(null),
+    [columns, setColumns] = useState(2),
+    canvas = useRef<HTMLCanvasElement>(null),
     gpu = useRef<ClusterGPU | null>(null),
     [error, setError] = useState(""),
-    [axes, setAxes] = useState(projections),
+    axes = projections,
     [stroke, setStroke] = useState<number[][]>([]),
     drawing = useRef<{ plot: number; points: number[][] } | null>(null),
     [version, setVersion] = useState(0);
@@ -46,8 +49,16 @@ export function Clusters({
     } catch (e) {
       setError(String(e));
     }
-    const ro = new ResizeObserver(() => setVersion((v) => v + 1));
-    ro.observe(c);
+    const ro = new ResizeObserver(() => {
+      setColumns(
+        Math.max(
+          1,
+          Math.min(6, Math.floor(wrapper.current!.clientWidth / 128)),
+        ),
+      );
+      setVersion((v) => v + 1);
+    });
+    ro.observe(wrapper.current!);
     return () => {
       ro.disconnect();
       gpu.current?.dispose();
@@ -59,11 +70,19 @@ export function Clusters({
     try {
       if (!gpu.current && canvas.current)
         gpu.current = new ClusterGPU(canvas.current);
-      gpu.current?.draw(data, settings, selected, isolate, range, axes);
+      gpu.current?.draw(
+        data,
+        settings,
+        selected,
+        isolate,
+        range,
+        axes,
+        columns,
+      );
     } catch (e) {
       setError(String(e));
     }
-  }, [data, settings, selected, isolate, range, axes, version]);
+  }, [data, settings, selected, isolate, range, axes, version, columns]);
   const point = (e: React.PointerEvent) => {
     const b = e.currentTarget.getBoundingClientRect();
     return [e.clientX - b.left, e.clientY - b.top];
@@ -71,15 +90,14 @@ export function Clusters({
   return (
     <div
       className="clusters"
+      ref={wrapper}
+      data-columns={columns}
+      style={{ height: Math.ceil(6 / columns) * 128 }}
       onPointerDown={(e) => {
         if (tool !== "lasso" && tool !== "brush") return;
         const p = point(e),
-          b = e.currentTarget.getBoundingClientRect(),
-          plot = Math.min(
-            5,
-            Math.floor(p[1] / (b.height / 2)) * 3 +
-              Math.floor(p[0] / (b.width / 3)),
-          );
+          plot = Math.floor(p[1] / 128) * columns + Math.floor(p[0] / 128);
+        if (p[0] >= columns * 128 || plot >= 6) return;
         drawing.current = { plot, points: [p] };
         setStroke([p]);
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -95,11 +113,10 @@ export function Clusters({
         drawing.current = null;
         setStroke([]);
         if (!d) return;
-        const b = e.currentTarget.getBoundingClientRect(),
-          w = b.width / 3,
-          h = b.height / 2,
-          col = d.plot % 3,
-          row = Math.floor(d.plot / 3),
+        const w = 128,
+          h = 128,
+          col = d.plot % columns,
+          row = Math.floor(d.plot / columns),
           frame = projectionFrame(w, h),
           points = d.points;
         if (tool !== "brush" && points.length < 3) return;
@@ -119,37 +136,32 @@ export function Clusters({
         onPolygon(poly, axes[d.plot][0], axes[d.plot][1]);
       }}
     >
-      <canvas ref={canvas} aria-label="Six WebGL2 spike feature projections" />
-      <div className="projection-labels">
+      <canvas
+        ref={canvas}
+        style={{ width: columns * 128, height: Math.ceil(6 / columns) * 128 }}
+        aria-label="Six WebGL2 spike feature projections"
+      />
+      <div
+        className="projection-labels"
+        style={{
+          width: columns * 128,
+          height: Math.ceil(6 / columns) * 128,
+          gridTemplateColumns: `repeat(${columns},128px)`,
+          gridTemplateRows: `repeat(${Math.ceil(6 / columns)},128px)`,
+        }}
+      >
         {axes.map(([x, y], i) => (
-          <div key={i}>
-            <span>
-              <b>{x === 4 ? "Time" : `Ch ${x + 1}`}</b>
-              <i>×</i>
-              <b>{y === 4 ? "Time" : `Ch ${y + 1}`}</b>
-            </span>
-            <button
-              title="Toggle time projection"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() =>
-                setAxes((a) =>
-                  a.map((p, j) =>
-                    j === i ? [p[0], p[1] === 4 ? projections[i][1] : 4] : p,
-                  ),
-                )
-              }
-            >
-              ↔
-            </button>
-            <small className="x-label">
-              {x === 4 ? "Time →" : `Channel ${x + 1} · peak-to-peak`}
-            </small>
-            <small className="y-label">
-              {y === 4 ? "Time →" : `Channel ${y + 1}`}
-            </small>
+          <div key={i} data-x-axis={`A${x + 1}`} data-y-axis={`A${y + 1}`}>
+            <span className="axis-y">A{y + 1}</span>
+            <span className="axis-x">A{x + 1}</span>
           </div>
         ))}
       </div>
+      {data.features.length / 4 < data.n && (
+        <span className="sampling-warning">
+          WARNING: using sampled rendering
+        </span>
+      )}
       {stroke.length > 0 && (
         <svg className="lasso-overlay">
           <polyline
@@ -164,6 +176,35 @@ export function Clusters({
       {error && <div className="plot-error">{error}</div>}
     </div>
   );
+}
+export function captureFeatureGrid(): HTMLCanvasElement | undefined {
+  const source = document.querySelector<HTMLCanvasElement>(".clusters canvas"),
+    root = source?.closest<HTMLElement>(".clusters");
+  if (!source || !root) return;
+  const columns = Number(root.dataset.columns),
+    scale = source.width / source.clientWidth,
+    copy = document.createElement("canvas");
+  copy.width = source.width;
+  copy.height = source.height;
+  const ctx = copy.getContext("2d")!;
+  ctx.drawImage(source, 0, 0);
+  ctx.scale(scale, scale);
+  ctx.font = "9px Arial";
+  for (const [i, label] of [
+    ...root.querySelectorAll<HTMLElement>(".projection-labels>div"),
+  ].entries()) {
+    const x = (i % columns) * 128,
+      y = Math.floor(i / columns) * 128;
+    ctx.fillStyle = "#ffffffe8";
+    ctx.fillRect(x + 2, y + 2, 20, 13);
+    ctx.fillRect(x + 106, y + 113, 20, 13);
+    ctx.fillStyle = "#333";
+    ctx.textAlign = "left";
+    ctx.fillText(label.dataset.yAxis || "", x + 4, y + 12);
+    ctx.textAlign = "right";
+    ctx.fillText(label.dataset.xAxis || "", x + 124, y + 124);
+  }
+  return copy;
 }
 export function WavePlot({ data, cell }: { data: ViewData; cell: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -195,10 +236,17 @@ export function WaveformGate({
     above: boolean,
   ) => void;
 }) {
-  const [channel, setChannel] = useState(0),
-    [sample, setSample] = useState(14),
-    [threshold, setThreshold] = useState(40),
-    [above, setAbove] = useState(true);
+  const [gate, setGate] = usePreference("waveform-gate", {
+    channel: 0,
+    sample: 14,
+    threshold: 40,
+    above: true,
+  });
+  const { channel, sample, threshold, above } = gate,
+    setChannel = (channel: number) => setGate((g) => ({ ...g, channel })),
+    setSample = (sample: number) => setGate((g) => ({ ...g, sample })),
+    setThreshold = (threshold: number) => setGate((g) => ({ ...g, threshold })),
+    setAbove = (above: boolean) => setGate((g) => ({ ...g, above }));
   return (
     <details className="wave-gate">
       <summary>Split by waveform sample</summary>
@@ -371,11 +419,15 @@ export function AnalysisPlot({
   maxRate,
   compact = false,
   spikeLayers,
+  speedAlignment = "right",
+  positionSpeed = false,
 }: {
   data: AnalysisData;
   mode: PlotMode | "path";
   maxRate: number;
   compact?: boolean;
+  speedAlignment?: "left" | "right";
+  positionSpeed?: boolean;
   spikeLayers?: { cell: number; spikes: Float32Array; color: string }[];
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -390,7 +442,7 @@ export function AnalysisPlot({
         let w = c.clientWidth,
           h = c.clientHeight;
         ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, w, h);
+        if (!positionSpeed) ctx.fillRect(0, 0, w, h);
         if (compact && (mode === "ac" || mode === "speed")) {
           const box = fitGrid(
             w,
@@ -398,7 +450,10 @@ export function AnalysisPlot({
             mode === "ac" ? 128 : 24,
             mode === "ac" ? 32 : 80,
           );
-          ctx.translate(box.x, box.y);
+          ctx.translate(
+            mode === "speed" && speedAlignment === "left" ? 0 : box.x,
+            box.y,
+          );
           ctx.scale(box.unit, box.unit);
           w = mode === "ac" ? 128 : 24;
           h = mode === "ac" ? 32 : 80;
@@ -427,6 +482,9 @@ export function AnalysisPlot({
             data.arenaWidth || data.width,
             data.arenaHeight || data.height,
           );
+          // Use the full pane width and start at its top; retain one physical
+          // scale for x/y, with any unused space below or beside the arena.
+          box.y = 0;
           ctx.strokeStyle = "#333333";
           ctx.lineWidth = 0.6;
           ctx.beginPath();
@@ -477,7 +535,12 @@ export function AnalysisPlot({
           ctx.fill();
           ctx.stroke();
         } else if (compact) {
-          const a = mode === "ac" ? data.ac : data.speed,
+          const a =
+              mode === "ac"
+                ? data.ac
+                : positionSpeed
+                  ? data.speedDwell
+                  : data.speed,
             max = Math.max(...a, 1);
           if (mode === "ac") {
             ctx.strokeStyle = "#f00000";
@@ -494,17 +557,27 @@ export function AnalysisPlot({
             ctx.fillStyle = "#111";
             const bh = h / a.length;
             for (let i = 0; i < a.length; i++) {
+              if (!(a[i] > 0)) continue;
               const bw = (a[i] / max) * (w - 1);
               ctx.fillRect(
-                w - bw,
+                speedAlignment === "left" ? 0 : w - bw,
                 i * bh,
-                Math.max(0.5, bw),
+                bw,
                 Math.max(0.5, bh - 0.4),
               );
             }
+            if (positionSpeed) {
+              ctx.fillStyle = "#f00";
+              ctx.fillRect(0, h - 0.6, w, 0.6);
+            }
           }
         } else {
-          const a = mode === "ac" ? data.ac : data.speed,
+          const a =
+              mode === "ac"
+                ? data.ac
+                : positionSpeed
+                  ? data.speedDwell
+                  : data.speed,
             max = Math.max(...a, 1),
             bw = (w - 36) / a.length;
           ctx.strokeStyle = "#888";
@@ -532,7 +605,15 @@ export function AnalysisPlot({
     const ro = new ResizeObserver(draw);
     ro.observe(c);
     return () => ro.disconnect();
-  }, [data, mode, maxRate, compact, spikeLayers]);
+  }, [
+    data,
+    mode,
+    maxRate,
+    compact,
+    spikeLayers,
+    speedAlignment,
+    positionSpeed,
+  ]);
   return (
     <canvas
       ref={canvas}

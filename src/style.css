@@ -122,13 +122,7 @@ small {
   background: #fffdd4;
   color: #e24a4a;
 }
-.toolbar-title {
-  margin-left: auto;
-  color: #555;
-  font-weight: bold;
-  font-size: 11px;
-  padding: 0 8px;
-}
+
 .desktop-workspace {
   display: grid;
   flex: 1;
@@ -202,6 +196,10 @@ small {
   font-weight: bold;
 }
 .file-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
   font-size: 9px;
   height: 18px;
   min-height: 18px;
@@ -350,9 +348,9 @@ small {
   white-space: nowrap;
 }
 .position-path {
-  width: 65%;
+  width: 100%;
   height: 100%;
-  max-width: 330px;
+  min-width: 0;
 }
 .position-path canvas {
   width: 100%;
@@ -773,15 +771,14 @@ small {
   height: 100%;
 }
 .tile-badge {
-  width: 24px;
-  flex-shrink: 0;
-  background: white;
-  display: flex;
-  align-items: center;
-  flex-direction: column;
-  gap: 5px;
-  padding-top: 2px;
-  border-left: 1px solid #ddd;
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  z-index: 3;
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  border: 0;
 }
 .tile-badge button {
   width: 21px;
@@ -790,7 +787,8 @@ small {
   padding: 0;
   border: 1px solid #555;
   font-size: 10px;
-  text-shadow: 0 0 1px #111;
+  font: 10px/19px Arial;
+  text-shadow: none;
 }
 .tile-badge input {
   width: 11px;
@@ -1268,9 +1266,6 @@ kbd {
   }
 }
 @media (max-width: 900px) {
-  .toolbar-title {
-    display: none;
-  }
   .desktop-toolbar {
     gap: 1px;
   }
@@ -1349,7 +1344,7 @@ kbd {
   pointer-events: auto;
 }
 .cell-tile.merge-target {
-  outline: 2px solid #be6329;
+  outline: none;
   outline-offset: -2px;
   background: #fff5e529;
 }
@@ -1742,17 +1737,18 @@ kbd {
 .tile-drag-ghost.snapped {
   opacity: 1;
   box-shadow: none;
-  outline: 2px solid #b88634;
+  outline: none;
 }
 .tile-drag-image {
   display: block;
   width: 100%;
   height: 100%;
 }
-.tile-drag-badge {
+.tile-drag-badge,
+.tile-copy-badge {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 3px;
+  right: 3px;
   width: 21px;
   height: 21px;
   border: 1px solid #555;
@@ -1760,7 +1756,7 @@ kbd {
   font: 10px/19px Arial;
 }
 .snapped .tile-drag-badge {
-  right: 26px;
+  right: 27px;
 }
 .snapped .tile-drag-image,
 .snapped .tile-drag-badge {
@@ -1833,16 +1829,6 @@ kbd {
 .tile-copy:hover .tile-copy-stats {
   visibility: visible;
 }
-.tile-copy-badge {
-  position: absolute;
-  right: 2px;
-  top: 2px;
-  width: 21px;
-  height: 21px;
-  border: 1px solid #555;
-  text-align: center;
-  font: 10px/19px Arial;
-}
 .grab-mode .floating-window:hover {
   outline: 3px solid red;
   outline-offset: -3px;
@@ -1856,4 +1842,266 @@ kbd {
 }
 .grab-mode:after {
   content: "Space: click a plot to copy · click a window to close";
+}
+
+/* Every tetrode and its cuts form one inline file group, including collapsed groups. */
+.trial-tetrodes {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+.tetrode-file-block {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1px;
+  border-left: 2px solid #777;
+  padding: 0 3px 0 1px;
+}
+.tetrode-file-block > button.cut-file {
+  background: #fbb;
+  border-color: #500;
+  color: #500;
+}
+.tetrode-file-block > button.cut-file.active {
+  background: #500;
+  color: white;
+}
+.tetrode-file-block > button.local-cut {
+  background: #bbf;
+  border-color: #005;
+  color: #005;
+  cursor: grab;
+}
+.tetrode-file-block > button.local-cut.active {
+  background: #005;
+  color: white;
+}
+.tetrode-file-block > button.local-cut:active {
+  cursor: grabbing;
+}
+
+.tetrode-file-block.expanded {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+/* Position summaries stay visible over a faint white backing. */
+.position-info {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  z-index: 2;
+  pointer-events: none;
+  background: #ffffff99;
+}
+.position-time {
+  font: 11px/15px Arial;
+  padding: 0 3px 3px;
+  white-space: nowrap;
+}
+.position-speed {
+  position: relative;
+  left: 0;
+  top: 0;
+  bottom: auto;
+  width: 76px;
+  height: 145px;
+}
+.position-speed canvas {
+  width: 40px;
+  height: 128px;
+  flex: none;
+}
+.speed-axis-limit {
+  position: absolute;
+  left: 0;
+  top: 128px;
+  padding: 1px 0 !important;
+  font: 9px/12px Arial;
+  white-space: nowrap;
+}
+.file-tag.missing {
+  opacity: 0.45;
+}
+.trial-block {
+  cursor: pointer;
+}
+.trial-heading .trial-name,
+.trial-heading .file-tag {
+  cursor: inherit;
+}
+.clusters {
+  min-height: 0;
+  height: auto;
+}
+.projection-labels > div,
+.projection-labels > div:nth-child(3n),
+.projection-labels > div:nth-child(n + 4) {
+  border-right: 1px solid #bbb;
+  border-bottom: 1px solid #bbb;
+  padding: 0;
+}
+.projection-labels .axis-y,
+.projection-labels .axis-x {
+  position: absolute;
+  display: block;
+  font: 9px/12px Arial;
+  color: #333;
+  background: #ffffffd8;
+  padding: 0 2px;
+}
+.projection-labels .axis-y {
+  top: 2px;
+  left: 2px;
+}
+.projection-labels .axis-x {
+  bottom: 2px;
+  right: 2px;
+}
+/* The original drop-zone's spaceboots motion, with its original 0.8 s timing. */
+@keyframes spaceboots {
+  0% {
+    transform: translate(2px, 1px) rotate(0deg);
+  }
+  10% {
+    transform: translate(-1px, -2px) rotate(-1deg);
+  }
+  20% {
+    transform: translate(-3px, 0px) rotate(1deg);
+  }
+  30% {
+    transform: translate(0px, 2px) rotate(0deg);
+  }
+  40% {
+    transform: translate(1px, -1px) rotate(1deg);
+  }
+  50% {
+    transform: translate(-1px, 1px) rotate(-1deg);
+  }
+  60% {
+    transform: translate(-3px, -2px) rotate(0deg);
+  }
+  70% {
+    transform: translate(2px, 1px) rotate(-1deg);
+  }
+  80% {
+    transform: translate(-1px, -2px) rotate(1deg);
+  }
+  90% {
+    transform: translate(2px, -1px) rotate(0deg);
+  }
+  100% {
+    transform: translate(1px, -2px) rotate(-1deg);
+  }
+}
+.drop-title-wobble {
+  animation: spaceboots 0.8s linear infinite;
+  transform-origin: 50% 50%;
+}
+.drag-overlay {
+  background: #ffffffd9;
+  color: #888;
+}
+.drag-overlay p {
+  font-size: 52px;
+  font-weight: normal;
+}
+
+.tile-wave-canvas,
+.tile-waves {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+.cell-tile.selected {
+  border-left-color: #c9c9c9;
+  box-shadow: none;
+}
+.cell-tile:hover {
+  box-shadow: none;
+}
+.tile-caption,
+.tile-copy-stats {
+  right: 0;
+  bottom: 0;
+  top: auto;
+  width: 60px;
+  padding: 0;
+  display: block;
+  text-align: center;
+  font: 14px/14px Arial;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: -3px 0 6px #ddc;
+}
+.caption-inner {
+  border-bottom: 1px solid black;
+  padding: 1px 0;
+}
+.caption-inner:last-child {
+  border-bottom: 0;
+}
+.stat-label {
+  font-size: 0.8em;
+  font-weight: bold;
+  line-height: 12px;
+}
+.tile-speed {
+  margin-top: 28px;
+  padding-top: 0;
+  height: 53px;
+  flex: none;
+}
+.tile-speed canvas {
+  height: 53px;
+}
+/* Waveforms sit on a shared canvas behind these transparent hit targets. */
+.cell-tile,
+.cell-tile:hover {
+  background: transparent;
+}
+.tile-waves,
+.tile-wave-canvas,
+.tile-spatial,
+.tile-tuning,
+.tile-ac {
+  border: 0;
+  outline: 0;
+}
+
+/* Outside the scrolling wall, the original halo can extend over the toolbar. */
+.tile-hover-glow {
+  position: fixed;
+  pointer-events: none;
+  z-index: 90;
+  box-shadow: 0 0 5px 3px #fc0;
+}
+.sampling-warning {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  max-width: calc(100% - 72px);
+  padding: 3px 5px;
+  font: bold 12px/16px Arial;
+  color: #a00;
+  background: #fff5b8f0;
+  pointer-events: none;
+  visibility: hidden;
+  z-index: 5;
+}
+.cell-tile:hover > .sampling-warning,
+.tile-copy:hover > .sampling-warning,
+.clusters:hover > .sampling-warning {
+  visibility: visible;
+}
+.tile-wall[data-dragging] .sampling-warning {
+  visibility: hidden;
+}
+
+.other-files {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  font-size: 9px;
+  color: #666;
+  white-space: nowrap;
 }

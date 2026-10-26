@@ -15,12 +15,21 @@ describe("LTX import", () => {
     };
     const a = f("a/trial.1"),
       b = f("b/trial.1");
-    const first = await organiseFiles([a, b]);
+    const first = await organiseFiles([
+      f("a/trial.eeg"),
+      a,
+      b,
+      f("b/trial.fet.1"),
+    ]);
+    expect(first.trials[0].otherFiles).toEqual(["trial.eeg"]);
+    expect(first.trials[1].otherFiles).toEqual(["trial.fet.1"]);
     const next = await organiseFiles(
       [f("b/trial_1.cut", "Exact_cut_for: trial spikes: 1\n2")],
       first.trials,
     );
     expect(next.trials).toHaveLength(2);
+    expect(next.trials[0].otherFiles).toEqual(["trial.eeg"]);
+    expect(next.trials[1].otherFiles).toEqual(["trial.fet.1"]);
     expect(next.trials[0].tetrodes[0].file).toBe(a);
     expect(next.trials[1].tetrodes[0].file).toBe(b);
     expect(next.trials[0].tetrodes[0].cuts).toHaveLength(0);

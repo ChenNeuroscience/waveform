@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import {
   FolderOpen,
   Folder,
@@ -8,16 +8,11 @@ import {
   Settings2,
   History,
   List,
-  Upload,
-  Search,
   Scissors,
   PenLine,
   MousePointer2,
   GitMerge,
   ArrowLeftRight,
-  Pin,
-  Copy,
-  ImageDown,
   Plus,
   X,
   HelpCircle,
@@ -26,8 +21,11 @@ import { Clusters, AnalysisPlot, WaveformGate } from "./plots";
 import { TileWall, type VisiblePlots } from "./TileWall";
 import {
   color,
+  groupTextColor,
   fileId,
   type Trial,
+  type Tetrode,
+  type CutFile,
   type ViewData,
   type AnalysisData,
   type Settings,
@@ -35,6 +33,9 @@ import {
   type SplitPoint,
 } from "./types";
 import type { DragComparison } from "./tile-gestures";
+import { CutDownloads, cutDownloadKey } from "./cut-downloads";
+import { usePreference, defaultLayout, fitPaneLayout } from "./preferences";
+import { experimentTiming } from "./position-info";
 import video from "../img/demo_youtube.png";
 interface Props {
   trials: Trial[];
@@ -49,7 +50,6 @@ interface Props {
   dest: number;
   tool: string;
   isolate: boolean;
-  range: number[];
   shown: VisiblePlots;
   splitPoint: SplitPoint | null;
   grabMode: boolean;
@@ -73,8 +73,6 @@ interface Props {
   error: string;
   notice: string;
   drag: boolean;
-  filter: string;
-  sort: boolean;
   fileInput: RefObject<HTMLInputElement | null>;
   folderInput: RefObject<HTMLInputElement | null>;
   onImport: (f: File[]) => void;
@@ -82,38 +80,56 @@ interface Props {
   onTet: (n: number) => void;
   onRecording: (t: Trial, n: number, c?: string) => void;
   onCut: (id: string) => void;
+  downloadVersion: number;
+  cutDownloads: CutDownloads;
+  onPrepareCut: (t: Trial, e: Tetrode, c: CutFile) => void;
+  onCutDrag: (event: React.DragEvent, t: Trial, e: Tetrode, c: CutFile) => void;
   onCell: (n: number) => void;
   onSources: (n: number[]) => void;
   onDest: (n: number) => void;
   onTool: (s: string) => void;
   onIsolate: (v: boolean) => void;
-  onRange: (n: number[]) => void;
   onToggle: (m: PlotMode) => void;
   onPanel: (p: "settings" | "history" | "headers" | "help") => void;
   onOperation: (type: string, p?: Record<string, unknown>) => void;
   onEdit: (action: string) => void;
   onPolygon: (p: number[], a: number, b: number) => void;
-  onExport: () => void;
   onSettings: (k: keyof Settings, v: any) => void;
   onDemo: () => void;
-  onFilter: (s: string) => void;
-  onSort: () => void;
   onError: () => void;
   onNotice: () => void;
   onDrag: (v: boolean) => void;
   onDrop: (e: React.DragEvent) => void;
-  onPin: () => void;
-  onCopy: () => void;
-  onImage: () => void;
   children?: ReactNode;
 }
+const FULL_RANGE = [0, 1];
 const time = (n: number) =>
   `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, "0")}`;
 export function DesktopShell(p: Props) {
   const root = useRef<HTMLDivElement>(null),
     left = useRef<HTMLDivElement>(null),
-    [split, setSplit] = useState(350),
-    [rows, setRows] = useState([200, 300]);
+    [layout, setLayout] = usePreference("panes", defaultLayout);
+  const fitted = fitPaneLayout(
+      layout,
+      root.current?.clientWidth || innerWidth,
+      left.current?.clientHeight || innerHeight - 55,
+    ),
+    split = fitted.left,
+    rows = [fitted.files, fitted.features],
+    timing = experimentTiming(p.data?.headers || {}, p.data?.duration || 0);
+  useEffect(() => {
+    const resize = () =>
+      setLayout((saved) =>
+        fitPaneLayout(
+          saved,
+          root.current?.clientWidth || innerWidth,
+          left.current?.clientHeight || innerHeight - 55,
+        ),
+      );
+    resize();
+    addEventListener("resize", resize);
+    return () => removeEventListener("resize", resize);
+  }, []);
   const pathCell = p.dragComparison?.source ?? p.hoverCell,
     primary = p.analysis?.cell === pathCell ? p.analysis : null,
     secondary =
@@ -137,25 +153,26 @@ export function DesktopShell(p: Props) {
     const move = (ev: PointerEvent) => {
       if (part === "horizontal") {
         const b = root.current!.getBoundingClientRect();
-        setSplit(Math.max(240, Math.min(b.width - 337, ev.clientX - b.left)));
+        setLayout((old) =>
+          fitPaneLayout(
+            { ...old, left: ev.clientX - b.left },
+            b.width,
+            left.current!.clientHeight,
+          ),
+        );
       } else {
         const b = left.current!.getBoundingClientRect();
-        setRows((old) =>
-          part === "files"
-            ? [
-                Math.max(
-                  90,
-                  Math.min(b.height - old[1] - 102, ev.clientY - b.top),
-                ),
-                old[1],
-              ]
-            : [
-                old[0],
-                Math.max(
-                  160,
-                  Math.min(b.height - old[0] - 102, b.bottom - ev.clientY),
-                ),
-              ],
+        setLayout((old) =>
+          fitPaneLayout(
+            {
+              ...old,
+              ...(part === "files"
+                ? { files: ev.clientY - b.top }
+                : { features: b.bottom - ev.clientY }),
+            },
+            root.current!.clientWidth,
+            b.height,
+          ),
         );
       }
     };
@@ -169,9 +186,14 @@ export function DesktopShell(p: Props) {
   return (
     <div
       className={`app desktop-app ${p.grabMode ? "grab-mode" : ""} ${p.splitPoint ? "splitting" : ""}`}
+      data-ready={ready ? "true" : "false"}
       onDragOver={(e) => {
         e.preventDefault();
-        if (e.dataTransfer.types.includes("Files")) p.onDrag(true);
+        if (
+          e.dataTransfer.types.includes("Files") &&
+          !e.dataTransfer.types.includes("application/x-waveform-cut")
+        )
+          p.onDrag(true);
       }}
       onDragLeave={(e) => {
         if (!e.relatedTarget) p.onDrag(false);
@@ -315,19 +337,6 @@ export function DesktopShell(p: Props) {
                 }
               </button>
             ))}
-            <span className="toolbar-title">
-              {p.trial?.name || "Waveform"}
-              {p.data?.dirty ? " *" : ""}
-            </span>
-            <button
-              aria-label="Export cut"
-              title="Export .cut [Ctrl/Cmd S]"
-              disabled={!ready}
-              onClick={p.onExport}
-            >
-              <Upload size={15} />
-              Export cut
-            </button>
           </div>
           <div
             className="desktop-workspace"
@@ -364,34 +373,41 @@ export function DesktopShell(p: Props) {
                   {p.trials.map((t) => (
                     <div
                       key={t.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${t.name} ${t.tetrodes.length}`}
+                      onClick={() => p.onTrial(t)}
+                      onKeyDown={(e) => {
+                        if (
+                          e.target === e.currentTarget &&
+                          (e.key === "Enter" || e.key === " ")
+                        ) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          p.onTrial(t);
+                        }
+                      }}
                       className={`trial-block ${t.id === p.trial?.id ? "selected" : ""}`}
                     >
                       <div className="trial-heading">
-                        <button
-                          className="trial-name"
-                          aria-label={`${t.name} ${t.tetrodes.length}`}
-                          title={t.folder || t.name}
-                          onClick={() => p.onTrial(t)}
-                        >
+                        <span className="trial-name" title={t.folder || t.name}>
                           <b>Trial '{t.name}'</b>
-                        </button>
-                        <button
-                          disabled={!t.set}
-                          className="file-tag"
-                          onClick={() => {
-                            p.onTrial(t);
-                            p.onPanel("headers");
-                          }}
-                        >
+                        </span>
+                        <span className={`file-tag ${t.set ? "" : "missing"}`}>
                           ~.set
-                        </button>
-                        <button
-                          disabled={!t.pos}
-                          className="file-tag"
-                          onClick={() => p.onTrial(t)}
-                        >
+                        </span>
+                        <span className={`file-tag ${t.pos ? "" : "missing"}`}>
                           ~.pos
-                        </button>
+                        </span>
+                        {!!t.otherFiles?.length && (
+                          <span
+                            className="other-files"
+                            title={`Other files (not loaded):\n${t.otherFiles.join("\n")}`}
+                          >
+                            {t.otherFiles.length} other{" "}
+                            {t.otherFiles.length === 1 ? "file" : "files"}
+                          </span>
+                        )}
                         <small>{t.folder}</small>
                       </div>
                       <div className="trial-tetrodes">
@@ -406,35 +422,44 @@ export function DesktopShell(p: Props) {
                                 title={e.file.name}
                                 aria-label={`${t.name} tetrode ${e.number}`}
                                 className={
-                                  t.id === p.trial?.id && e.number === p.tetNum
+                                  t.id === p.trial?.id &&
+                                  e.number === p.tetNum &&
+                                  !p.cutId
                                     ? "active"
                                     : ""
                                 }
-                                onClick={() => p.onRecording(t, e.number)}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  p.onRecording(t, e.number, "");
+                                }}
                               >
                                 ~.{e.number}
-                              </button>
-                            )}
-                            {e.file && e.number === p.tetNum && (
-                              <button
-                                title="Unsorted spikes"
-                                className={
-                                  t.id === p.trial?.id && !p.cutId
-                                    ? "active"
-                                    : ""
-                                }
-                                onClick={() => p.onRecording(t, e.number, "")}
-                              >
-                                uncut
                               </button>
                             )}
                             {e.cuts.map((c) => (
                               <button
                                 key={c.id}
-                                title={c.name}
+                                title={`${c.name}${c.local ? " (modified cut)" : ""}`}
+                                data-local={c.local ? "true" : undefined}
+                                data-export-ready={
+                                  p.cutDownloads.entries.has(
+                                    cutDownloadKey(e, c),
+                                  )
+                                    ? "true"
+                                    : "false"
+                                }
+                                draggable
+                                onMouseEnter={() => p.onPrepareCut(t, e, c)}
+                                onPointerDown={() => p.onPrepareCut(t, e, c)}
+                                onDragStart={(event) =>
+                                  p.onCutDrag(event, t, e, c)
+                                }
                                 aria-label={c.name.replace(t.name, "~")}
-                                className={`cut-file ${t.id === p.trial?.id && e.number === p.tetNum && p.cutId === c.id ? "active" : ""}`}
-                                onClick={() => p.onRecording(t, e.number, c.id)}
+                                className={`cut-file ${c.local ? "local-cut" : ""} ${t.id === p.trial?.id && e.number === p.tetNum && p.cutId === c.id ? "active" : ""}`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  p.onRecording(t, e.number, c.id);
+                                }}
                               >
                                 {c.name.replace(t.name, "~")}
                               </button>
@@ -454,65 +479,28 @@ export function DesktopShell(p: Props) {
                 •••
               </div>
               <section className="position-pane">
-                <div className="pane-caption">
-                  <span>
-                    {p.dragComparison?.target != null
-                      ? `Position / spikes · cells ${p.dragComparison.source} + ${p.dragComparison.target}`
-                      : p.hoverCell === null
-                        ? "Position"
-                        : `Position / spikes · cell ${p.hoverCell}`}
-                  </span>
-                  <span>
-                    {time((p.data?.duration || 0) * p.range[0])}–
-                    {time((p.data?.duration || 0) * p.range[1])}
-                  </span>
-                  <label>
-                    Start
-                    <input
-                      aria-label="Time window start"
-                      type="range"
-                      min="0"
-                      max="1"
-                      step=".001"
-                      value={p.range[0]}
-                      onChange={(e) =>
-                        p.onRange([
-                          Math.min(+e.target.value, p.range[1]),
-                          p.range[1],
-                        ])
-                      }
-                    />
-                  </label>
-                  <label>
-                    End
-                    <input
-                      aria-label="Time window end"
-                      type="range"
-                      min="0"
-                      max="1"
-                      step=".001"
-                      value={p.range[1]}
-                      onChange={(e) =>
-                        p.onRange([
-                          p.range[0],
-                          Math.max(+e.target.value, p.range[0]),
-                        ])
-                      }
-                    />
-                  </label>
-                  <button onClick={() => p.onRange([0, 1])}>Reset</button>
-                </div>
                 <div className="position-content">
                   {p.analysis && p.trial?.pos ? (
                     <>
-                      <div className="position-speed">
-                        <AnalysisPlot
-                          data={p.analysis}
-                          mode="speed"
-                          maxRate={0}
-                          compact
-                        />
-                        <small>80 cm/s</small>
+                      <div className="position-info">
+                        <div className="position-time" title={timing.date}>
+                          {timing.text}
+                          <br />
+                          {timing.durationText}
+                        </div>
+                        <div className="position-speed">
+                          <AnalysisPlot
+                            data={p.analysis}
+                            mode="speed"
+                            maxRate={0}
+                            positionSpeed
+                            speedAlignment="left"
+                            compact
+                          />
+                          <small className="speed-axis-limit">
+                            {p.settings.speedMax} cm/s max
+                          </small>
+                        </div>
                       </div>
                       <div
                         className="position-path"
@@ -645,8 +633,8 @@ export function DesktopShell(p: Props) {
                           aria-label={`Focus cell ${c.i}`}
                           title={`${c.n.toLocaleString()} spikes; click selects source`}
                           style={{
-                            background: c.i ? color(c.i) : "#eee",
-                            color: c.i ? "white" : "black",
+                            background: color(c.i),
+                            color: groupTextColor(c.i),
                           }}
                           onClick={() => p.onCell(c.i)}
                         >
@@ -704,7 +692,7 @@ export function DesktopShell(p: Props) {
                       settings={p.settings}
                       selected={p.cell}
                       isolate={p.isolate}
-                      range={p.range}
+                      range={FULL_RANGE}
                       tool={ready ? p.tool : "select"}
                       onPolygon={p.onPolygon}
                     />
@@ -735,49 +723,6 @@ export function DesktopShell(p: Props) {
               ⋮
             </div>
             <section className="right-workspace">
-              <div className="tile-wall-tools">
-                <b>Cells</b>
-                <span>
-                  {p.data?.counts.filter((n, i) => i > 0 && n > 0).length || 0}
-                </span>
-                <span className="small-separator" />
-                <Search size={12} />
-                <input
-                  aria-label="Find cell"
-                  placeholder="cell #"
-                  value={p.filter}
-                  onChange={(e) => p.onFilter(e.target.value)}
-                />
-                <button
-                  title="Sort by spike count"
-                  aria-label="Sort cells by count"
-                  onClick={p.onSort}
-                >
-                  {p.sort ? "Count ↓" : "Cell #"}
-                </button>
-                <span className="tools-spacer" />
-                <button
-                  title="Pin current cell"
-                  aria-label="Pin cell snapshot"
-                  onClick={p.onPin}
-                >
-                  <Pin size={13} />
-                </button>
-                <button
-                  title="Copy current cell"
-                  aria-label="Copy cell plot"
-                  onClick={p.onCopy}
-                >
-                  <Copy size={13} />
-                </button>
-                <button
-                  title="Save current cell image"
-                  aria-label="Export plot image"
-                  onClick={p.onImage}
-                >
-                  <ImageDown size={13} />
-                </button>
-              </div>
               {p.data ? (
                 <TileWall
                   data={p.data}
@@ -788,8 +733,6 @@ export function DesktopShell(p: Props) {
                   }
                   selected={p.cell}
                   shown={p.shown}
-                  filter={p.filter}
-                  sort={p.sort}
                   onSelect={p.onCell}
                   splitPoint={p.splitPoint}
                   grabMode={p.grabMode}
@@ -811,7 +754,9 @@ export function DesktopShell(p: Props) {
       ) : (
         <main className="start-screen">
           <div className="start-drop">
-            <h1>drag &amp; drop files here</h1>
+            <h1 className={p.drag ? "drop-title-wobble" : ""}>
+              drag &amp; drop files here
+            </h1>
             <p className="recognised-types">
               the following types of data files are recognised:
             </p>
@@ -900,9 +845,9 @@ export function DesktopShell(p: Props) {
         )}
         <span>Local files</span>
       </footer>
-      {p.drag && (
+      {p.drag && p.trials.length > 0 && (
         <div className="drag-overlay">
-          <p>Drop LTX recording files</p>
+          <p className="drop-title-wobble">drag &amp; drop files here</p>
           <small>.set · .pos · .1, .2, … · .cut · .clu.N</small>
         </div>
       )}

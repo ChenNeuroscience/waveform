@@ -79,6 +79,7 @@ export function analyse(
     s.acWindow,
     s.dirBin,
     s.speedBin,
+    s.speedMax,
   );
   const meta = new Float64Array(
     w.memory.buffer,
@@ -106,6 +107,7 @@ export function analyse(
     spikes: array("spikes"),
     direction: array("direction"),
     speed: array("speed"),
+    speedDwell: array("speed_dwell"),
     ac: array("ac"),
   };
 }

@@ -238,6 +238,7 @@ pub(crate) struct Analysis {
     spikes: Vec<f32>,
     direction: Vec<f32>,
     speed: Vec<f32>,
+    speed_dwell: Vec<f32>,
     ac: Vec<f32>,
 }
 fn box2(a: &[f32], w: usize, h: usize, k: usize) -> Vec<f32> {
@@ -277,7 +278,10 @@ fn analyse(
     window: f64,
     dir_bin: f32,
     speed_bin: f32,
+    speed_max: f32,
 ) -> Analysis {
+    let speed_bin = speed_bin.clamp(0.5, 100.);
+    let speed_max = speed_max.clamp(1., 1000.);
     e.ensure_groups();
     let ids = &e.groups[cell as usize];
     let n = ids.len();
@@ -315,7 +319,7 @@ fn analyse(
         })
         .unwrap_or((0, 0));
     let nd = (360. / dir_bin).ceil() as usize;
-    let ns = (80. / speed_bin).ceil() as usize;
+    let ns = (speed_max / speed_bin).ceil() as usize;
     let (mut occ, mut hits, mut od, mut hd, mut os, mut hs) = (
         vec![0.; w * h],
         vec![0.; w * h],
@@ -341,7 +345,13 @@ fn analyse(
                 .floor() as usize)
                 .min(nd - 1)
         };
-        let sb = |i: usize| ((p.speed[i] / speed_bin).floor().max(0.) as usize).min(ns - 1);
+        let sb = |i: usize| {
+            if p.speed[i].is_finite() && p.speed[i] >= 0. && p.speed[i] < speed_max {
+                Some(((p.speed[i] / speed_bin).floor() as usize).min(ns - 1))
+            } else {
+                None
+            }
+        };
         for i in 0..p.x.len() {
             if let Some(b) = bin(i) {
                 let dt = if i + 1 < p.raw.time.len() {
@@ -356,8 +366,8 @@ fn analyse(
                 if p.dir[i].is_finite() {
                     od[db(i)] += dt as f32;
                 }
-                if p.speed[i].is_finite() {
-                    os[sb(i)] += dt as f32;
+                if let Some(b) = sb(i) {
+                    os[b] += dt as f32;
                 }
                 if i % p.x.len().div_ceil(12000).max(1) == 0 {
                     path.extend([p.x[i] / p.width, p.y[i] / p.height]);
@@ -382,8 +392,8 @@ fn analyse(
                 if p.dir[cursor].is_finite() {
                     hd[db(cursor)] += 1.;
                 }
-                if p.speed[cursor].is_finite() {
-                    hs[sb(cursor)] += 1.;
+                if let Some(b) = sb(cursor) {
+                    hs[b] += 1.;
                 }
                 if j % step == 0 {
                     spikes.extend([p.x[cursor] / p.width, p.y[cursor] / p.height]);
@@ -445,6 +455,7 @@ fn analyse(
         spikes,
         direction,
         speed,
+        speed_dwell: os,
         ac,
     }
 }
@@ -501,6 +512,7 @@ pub unsafe extern "C" fn engine_analyse(
     window: f64,
     dir_bin: f32,
     speed_bin: f32,
+    speed_max: f32,
 ) {
     let e = &mut *e;
     e.analysis = analyse(
@@ -514,6 +526,7 @@ pub unsafe extern "C" fn engine_analyse(
         window,
         dir_bin,
         speed_bin,
+        speed_max,
     );
 }
 #[no_mangle]
@@ -547,6 +560,11 @@ getter!(
     direction
 );
 getter!(engine_analysis_speed, engine_analysis_speed_len, speed);
+getter!(
+    engine_analysis_speed_dwell,
+    engine_analysis_speed_dwell_len,
+    speed_dwell
+);
 getter!(engine_analysis_ac, engine_analysis_ac_len, ac);
 #[cfg(test)]
 mod tests {
@@ -574,7 +592,7 @@ mod tests {
         let mut e = Engine::new(3);
         e.times = vec![100, 1100, 2100];
         e.labels = vec![1; 3];
-        let a = analyse(&mut e, Some(&p), 1, 1000., 3., 5., 0, 100., 6., 4.);
+        let a = analyse(&mut e, Some(&p), 1, 1000., 3., 5., 0, 100., 6., 4., 45.);
         assert_eq!(a.spatial[0], 1.);
         assert_eq!(a.spatial[3], 0.5);
         assert_eq!(a.ac.iter().sum::<f32>(), 0.);

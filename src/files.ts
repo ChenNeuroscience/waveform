@@ -37,13 +37,20 @@ export async function organiseFiles(
 ): Promise<{ trials: Trial[]; ignored: string[] }> {
   // File objects are immutable. Preserve their references and relative paths while
   // cloning only the mutable organiser containers (custom paths do not clone).
-  const trials = previous.map((t) => ({
+  const trials: Trial[] = previous.map((t) => ({
       ...t,
+      otherFiles: [...(t.otherFiles || [])],
       tetrodes: t.tetrodes.map((e) => ({ ...e, cuts: [...e.cuts] })),
     })),
     map = new Map(trials.map((t) => [t.id, t]));
   const ignored: string[] = [],
+    skipped: { file: File; detail: string }[] = [],
     cuts: File[] = [];
+  const ignore = (file: File, reason = "") => {
+    const detail = file.name + (reason ? ` (${reason})` : "");
+    ignored.push(detail);
+    skipped.push({ file, detail });
+  };
   const ensure = (base: string, folder: string) => {
     const id = `${folder}/${base}`;
     if (!map.has(id)) {
@@ -65,19 +72,24 @@ export async function organiseFiles(
     const m = f.name.match(/^(.*)\.([^.]+)$/),
       folder = (f.webkitRelativePath || "").split("/").slice(0, -1).join("/");
     if (!m) {
-      ignored.push(f.name);
+      ignore(f);
       continue;
     }
     const [, base, raw] = m,
       ext = raw.toLowerCase();
     if (ext === "cut" || /\.clu\.\d+$/i.test(f.name)) {
       if (!/\.temp\.clu\./i.test(f.name)) cuts.push(f);
+      else ignore(f);
       continue;
     }
     if (ext === "pos" || ext === "set") ensure(base, folder)[ext] = f;
-    else if (/^\d+$/.test(ext) && +ext > 0 && !/\.(fet|klg)$/i.test(base))
+    else if (
+      /^\d+$/.test(ext) &&
+      +ext > 0 &&
+      !/\.(fet|fmask|klg|res|spk|temp)$/i.test(base)
+    )
       tet(ensure(base, folder), +ext).file = f;
-    else ignored.push(f.name);
+    else ignore(f);
   }
   for (const f of cuts) {
     const folder = (f.webkitRelativePath || "")
@@ -90,7 +102,7 @@ export async function organiseFiles(
       base = clu[1];
       n = +clu[2];
     } else {
-      const m = f.name.match(/^(.*?)[_.](\d+)[a-zA-Z _.-]*\.cut$/i);
+      const m = f.name.match(/^(.*?)[_.](\d+)[a-zA-Z0-9 _.-]*\.cut$/i);
       if (m) {
         base = m[1];
         n = +m[2];
@@ -105,12 +117,12 @@ export async function organiseFiles(
       }
     }
     if (!base || !n) {
-      ignored.push(`${f.name} (cannot identify trial/tetrode)`);
+      ignore(f, "cannot identify trial/tetrode");
       continue;
     }
     const candidates = trials.filter((t) => t.name === base);
     if (!folder && !map.has(`/${base}`) && candidates.length > 1) {
-      ignored.push(`${f.name} (ambiguous trial; import with its folder)`);
+      ignore(f, "ambiguous trial; import with its folder");
       continue;
     }
     const owner =
@@ -121,6 +133,26 @@ export async function organiseFiles(
       id = fileId(f);
     if (!target.cuts.some((c) => c.id === id))
       target.cuts.push({ id, file: f, name: f.name });
+  }
+  // Associate auxiliary names after grouping, independent of input ordering.
+  // Keep only names: skipped multi-GB files need no retained handles or reads.
+  for (const { file, detail } of skipped) {
+    const folder = (file.webkitRelativePath || "")
+      .split("/")
+      .slice(0, -1)
+      .join("/");
+    const owner = trials
+      .filter(
+        (t) =>
+          t.folder === folder &&
+          (file.name.startsWith(t.name + ".") ||
+            file.name.startsWith(t.name + "_")),
+      )
+      .sort((a, b) => b.name.length - a.name.length)[0];
+    if (owner)
+      owner.otherFiles = [
+        ...new Set([...(owner.otherFiles || []), detail]),
+      ].sort();
   }
   trials.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
   for (const t of trials) {

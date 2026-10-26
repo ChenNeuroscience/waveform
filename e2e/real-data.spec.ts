@@ -1,3 +1,4 @@
+import { ready, exportCut } from "./controls";
 import { test, expect } from "@playwright/test";
 import { readdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -22,34 +23,34 @@ test("user sample: three trials and sixteen tetrodes load without cuts", async (
   await page
     .getByLabel("Import recording files", { exact: true })
     .setInputFiles(files);
+  await ready(page, 60000);
   await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled({ timeout: 60000 });
-  await expect(page.getByText("289,129", { exact: true })).toBeVisible();
+    page.getByRole("contentinfo").getByText("289,129", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "16", exact: true }).click();
-  await expect(page.getByText("164,385", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "13062025b 16", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
-  await expect(page.getByText("382,880", { exact: true })).toBeVisible();
+    page.getByRole("contentinfo").getByText("164,385", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "13062025b 16", exact: true }).click();
+  await ready(page);
+  await expect(
+    page.getByRole("contentinfo").getByText("382,880", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "01", exact: true }).click();
-  await expect(page.getByText("704,080", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("contentinfo").getByText("704,080", { exact: true }),
+  ).toBeVisible();
   await page.getByLabel("Destination cell", { exact: true }).fill("1");
   await page.getByRole("button", { name: "Lasso cut", exact: true }).click();
   const plot = page.locator(".clusters"),
     box = (await plot.boundingBox())!;
   // Select a broad rectangle inside the first channel projection. All-population mask is independent of display LOD.
-  await page.mouse.move(box.x + 25, box.y + 35);
+  await page.mouse.move(box.x + 10, box.y + 10);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 3 - 15, box.y + 35, { steps: 5 });
-  await page.mouse.move(
-    box.x + box.width / 3 - 15,
-    box.y + box.height / 2 - 25,
-    { steps: 5 },
-  );
-  await page.mouse.move(box.x + 25, box.y + box.height / 2 - 25, { steps: 5 });
-  await page.mouse.move(box.x + 25, box.y + 35, { steps: 5 });
+  await page.mouse.move(box.x + 120, box.y + 10, { steps: 5 });
+  await page.mouse.move(box.x + 120, box.y + 120, { steps: 5 });
+  await page.mouse.move(box.x + 10, box.y + 120, { steps: 5 });
+  await page.mouse.move(box.x + 10, box.y + 10, { steps: 5 });
   await page.mouse.up();
   await expect(
     page.getByRole("button", { name: "Undo", exact: true }),
@@ -83,10 +84,10 @@ test("nine million spikes and 100 cells: import, merge, undo and export", async 
   await page
     .getByLabel("Import recording files", { exact: true })
     .setInputFiles([resolve(dir!, "stress.1"), resolve(dir!, "stress_1.cut")]);
+  await ready(page, 120000);
   await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled({ timeout: 120000 });
-  await expect(page.getByText("9,000,000", { exact: true })).toBeVisible();
+    page.getByRole("contentinfo").getByText("9,000,000", { exact: true }),
+  ).toBeVisible();
   console.log(`9M browser first load: ${Date.now() - start}ms`);
   await page
     .locator('.cell-tile[data-cell="1"] .tile-waves')
@@ -100,7 +101,7 @@ test("nine million spikes and 100 cells: import, merge, undo and export", async 
   ).toBeVisible();
   const [d] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "Export cut", exact: true }).click(),
+    exportCut(page),
   ]);
   expect(d.suggestedFilename()).toBe("stress_1.cut");
   const exported = await readCut(

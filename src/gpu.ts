@@ -1,3 +1,4 @@
+import { groupPalette } from "./palette";
 import { cellRgb, type Settings, type ViewData } from "./types";
 import { projectionFrame, type WaveLayout } from "./plot-geometry";
 const vertex = `#version 300 es
@@ -8,12 +9,13 @@ layout(location=2) in uint cell;
 uniform int ax;uniform int ay;uniform float size;uniform int selected;uniform bool isolate;uniform bool drift;uniform float opacity;uniform vec2 range;
 out vec4 shade;
 float axis(int a){return a==4?time:amplitudes[a];}
-vec3 palette(float c){return .5+.35*cos(6.2831853*(vec3(0.,.33,.67)+c*.381966));}
+const vec3 groupColors[31]=vec3[31](${groupPalette.map((c) => `vec3(${c.map((v) => `${v}.`).join(",")})`).join(",")});
+vec3 palette(float c){int i=int(c);return i<31?groupColors[i]/255.:vec3(0.);}
 void main(){
  float x=axis(ax),y=axis(ay);gl_Position=vec4(x*1.86-.93,y*1.86-.93,0.,1.);gl_PointSize=size;
  bool hide=(isolate&&int(cell)!=selected)||time<range.x||time>range.y;
- vec3 rgb=cell==0u?vec3(.36,.42,.48):palette(float(cell));if(drift)rgb=mix(vec3(.22,.63,.96),vec3(.99,.58,.3),time);
- shade=vec4(rgb,hide?0.:opacity*(selected>=0&&int(cell)!=selected?.55:1.));
+ vec3 rgb=palette(float(cell));if(drift)rgb=vec3(1.-time,time,0.);
+ shade=vec4(rgb,hide?0.:opacity);
 }`;
 const fragment = `#version 300 es
 precision highp float;in vec4 shade;out vec4 outColor;void main(){if(shade.a==0.||distance(gl_PointCoord,vec2(.5))>.5)discard;outColor=shade;}`;
@@ -78,6 +80,7 @@ export class ClusterGPU {
     isolate: boolean,
     range: number[],
     axes: number[][],
+    columns = 3,
   ) {
     const gl = this.gl,
       dpr = Math.min(2, devicePixelRatio || 1),
@@ -132,18 +135,19 @@ export class ClusterGPU {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     const u = (n: string) => gl.getUniformLocation(this.p, n);
     gl.uniform1f(u("size"), s.pointSize * dpr);
-    gl.uniform1f(u("opacity"), s.opacity);
+    gl.uniform1f(u("opacity"), 1);
     gl.uniform1i(u("selected"), selected);
     gl.uniform1i(u("isolate"), isolate ? 1 : 0);
     gl.uniform1i(u("drift"), s.drift ? 1 : 0);
     gl.uniform2f(u("range"), range[0], range[1]);
     axes.forEach(([ax, ay], i) => {
-      const col = i % 3,
-        row = Math.floor(i / 3),
-        x = Math.round((col * w) / 3),
-        y = Math.round(h - ((row + 1) * h) / 2),
-        ww = Math.floor(w / 3),
-        hh = Math.floor(h / 2);
+      const rows = Math.ceil(axes.length / columns),
+        col = i % columns,
+        row = Math.floor(i / columns),
+        x = Math.round((col * w) / columns),
+        y = Math.round(h - ((row + 1) * h) / rows),
+        ww = Math.floor(w / columns),
+        hh = Math.floor(h / rows);
       const frame = projectionFrame(ww / dpr, hh / dpr);
       gl.viewport(
         x + frame.x * dpr,
@@ -175,7 +179,7 @@ export class ClusterGPU {
 const waveVertex = `#version 300 es
 precision highp float;precision highp isampler2D;
 uniform isampler2D waves;uniform int width;uniform int channel;uniform int baseWave;uniform vec3 rgb;out vec4 shade;
-void main(){int i=(gl_InstanceID+baseWave)*200+channel*50+gl_VertexID;float v=float(texelFetch(waves,ivec2(i%width,i/width),0).r)/128.;float x=(float(channel)+(float(gl_VertexID)/49.)*.84+.08)/4.;gl_Position=vec4(x*2.-1.,v*.78,0.,1.);shade=vec4(rgb,.16);}`;
+void main(){int i=(gl_InstanceID+baseWave)*200+channel*50+gl_VertexID;float v=float(texelFetch(waves,ivec2(i%width,i/width),0).r)/128.;float x=(float(channel)+(float(gl_VertexID)/49.)*.84+.08)/4.;gl_Position=vec4(x*2.-1.,v*.78,0.,1.);shade=vec4(rgb,1.);}`;
 const waveFragment = `#version 300 es
 precision highp float;in vec4 shade;out vec4 c;void main(){c=shade;}`;
 export function drawWaves(
@@ -209,6 +213,7 @@ export function drawWaves(
     vao = gl.createVertexArray()!;
   gl.useProgram(p);
   gl.bindVertexArray(vao);
+  gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
@@ -279,6 +284,7 @@ export function drawWaveOverview(
     vao = gl.createVertexArray()!;
   gl.useProgram(p);
   gl.bindVertexArray(vao);
+  gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
@@ -309,7 +315,7 @@ export function drawWaveOverview(
       rowStride = (layout?.rowStride || 120) * dpr;
     gl.viewport(
       col * stride + (layout?.inset || 0) * dpr,
-      canvas.height - row * rowStride - h,
+      canvas.height - row * rowStride - h - (layout?.top || 0) * dpr,
       w,
       h,
     );

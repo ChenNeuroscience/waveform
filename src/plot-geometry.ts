@@ -18,8 +18,8 @@ export function fitGrid(
   };
 }
 export function projectionFrame(width: number, height: number) {
-  const box = fitGrid(Math.max(1, width - 34), Math.max(1, height - 50), 1, 1);
-  return { ...box, x: box.x + 22, y: box.y + 26 };
+  const box = fitGrid(Math.max(1, width - 4), Math.max(1, height - 4), 1, 1);
+  return { ...box, x: box.x + 2, y: box.y + 2 };
 }
 
 export interface WaveLayout {
@@ -29,4 +29,5 @@ export interface WaveLayout {
   waveWidth: number;
   waveHeight: number;
   inset: number;
+  top?: number;
 }
