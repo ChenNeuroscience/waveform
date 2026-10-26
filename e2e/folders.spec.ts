@@ -1,3 +1,4 @@
+import { ready } from "./controls";
 import { test, expect } from "@playwright/test";
 import { mkdtemp, mkdir, writeFile, utimes, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -39,9 +40,7 @@ test("identical basenames in different folders keep separate cuts and histories"
     await page
       .getByLabel("Import recording folder", { exact: true })
       .setInputFiles(dir);
-    await expect(
-      page.getByRole("button", { name: "Export cut", exact: true }),
-    ).toBeEnabled();
+    await ready(page);
     await expect(
       page.getByRole("button", { name: "Select cell 1", exact: true }),
     ).toBeVisible();

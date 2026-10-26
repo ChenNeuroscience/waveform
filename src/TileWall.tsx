@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { drawWaveOverview } from "./gpu";
 import { drawDensity } from "./density-gpu";
 import { AnalysisPlot } from "./plots";
+import { CellStats } from "./CellStats";
 import { request } from "./client";
 import type { WaveLayout } from "./plot-geometry";
 import { useTileGestures, type DragComparison } from "./tile-gestures";
 import {
   color,
+  groupTextColor,
   type ViewData,
   type AnalysisData,
   type Settings,
@@ -23,8 +26,6 @@ export function TileWall({
   posKey,
   selected,
   shown,
-  filter,
-  sort,
   onSelect,
   splitPoint,
   grabMode,
@@ -41,8 +42,6 @@ export function TileWall({
   posKey: string;
   selected: number;
   shown: VisiblePlots;
-  filter: string;
-  sort: boolean;
   onSelect: (n: number) => void;
   splitPoint: SplitPoint | null;
   grabMode: boolean;
@@ -58,27 +57,33 @@ export function TileWall({
     cache = useRef(new Map<number, AnalysisData>()),
     [maps, setMaps] = useState(new Map<number, AnalysisData>()),
     [scroll, setScroll] = useState(0),
+    [hovered, setHovered] = useState<number | null>(null),
+    [glow, setGlow] = useState<DOMRect | null>(null),
     [height, setHeight] = useState(800),
     [width, setWidth] = useState(800),
     [density, setDensity] = useState<{
       key: string;
       texture: Uint16Array;
+      samples: Uint32Array;
     } | null>(null);
   const all = Array.from(data.counts, (n, i) => ({ n, i }))
     .filter(
       (c) =>
-        (c.n > 0 && String(c.i).includes(filter)) ||
+        c.n > 0 ||
         (splitPoint &&
           [splitPoint.source, splitPoint.source + 1].includes(c.i)),
     )
-    .sort((a, b) => (sort && !splitPoint ? b.n - a.n : a.i - b.i))
+    .sort((a, b) => a.i - b.i)
     .map((c) => c.i);
   const wavePixels = shown.waveforms ? ROW * 4 : 0,
     tuningWidth = shown.ac
       ? 128
       : (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0),
     numericWidth = (shown.spatial ? 128 : 0) + tuningWidth,
-    tileWidth = wavePixels + numericWidth + 27,
+    tileWidth = wavePixels + numericWidth + 3,
+    waveFrameWidth = numericWidth ? wavePixels : Math.max(0, wavePixels - 24),
+    waveFrameHeight = waveFrameWidth / 4,
+    waveFrameTop = (ROW - waveFrameHeight) / 2,
     tileStride = tileWidth + 2,
     columns = Math.max(1, Math.floor((width - 4) / tileStride)),
     totalRows = Math.ceil(all.length / columns),
@@ -96,13 +101,14 @@ export function TileWall({
       columns,
       tileStride,
       rowStride: STRIDE,
-      waveWidth: wavePixels,
-      waveHeight: ROW,
+      waveWidth: waveFrameWidth,
+      waveHeight: waveFrameHeight,
+      top: waveFrameTop,
       inset: 2,
     },
     signature = visible.join(","),
     waveScope = `${data.session}|${data.revision}`,
-    scope = `${data.session}|${data.revision}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}`;
+    scope = `${data.session}|${data.revision}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}|${settings.speedMax}`;
   const gestures = useTileGestures({
     splitSource: splitPoint?.source,
     grab: grabMode,
@@ -120,6 +126,33 @@ export function TileWall({
         transparentBadge: true,
       })?.toDataURL(),
   });
+  const waveCounts = useMemo(() => {
+    const counts = new Uint32Array(data.counts.length);
+    for (const cell of data.waveLabels) counts[cell]++;
+    return counts;
+  }, [data.waveLabels]);
+  // The scroller clips ordinary shadows. Paint only the halo in the page layer,
+  // above the toolbar, while leaving the shared waveform canvas unobstructed.
+  useLayoutEffect(() => {
+    const highlighted =
+      gestures.target ?? (gestures.dragging === null ? hovered : null);
+    const row =
+      highlighted === null
+        ? null
+        : scroller.current?.querySelector<HTMLElement>(
+            `.cell-tile[data-cell="${highlighted}"]`,
+          );
+    setGlow(row?.getBoundingClientRect() ?? null);
+  }, [
+    hovered,
+    gestures.dragging,
+    gestures.target,
+    scroll,
+    width,
+    height,
+    signature,
+    tileStride,
+  ]);
   useEffect(() => {
     const ro = new ResizeObserver(() => {
       setHeight(scroller.current!.clientHeight);
@@ -173,7 +206,7 @@ export function TileWall({
   useEffect(() => {
     let live = true;
     if (settings.density && shown.waveforms && visible.length)
-      request<{ texture: Uint16Array }>("wave_density", {
+      request<{ texture: Uint16Array; samples: Uint32Array }>("wave_density", {
         session: data.session,
         cells: visible,
       })
@@ -182,6 +215,7 @@ export function TileWall({
             setDensity({
               key: waveScope + "|" + signature,
               texture: r.texture,
+              samples: r.samples,
             });
         })
         .catch(() => {});
@@ -197,6 +231,7 @@ export function TileWall({
         density.texture,
         visible.length,
         layout,
+        density.samples,
       );
     return drawWaveOverview(waveCanvas.current, data, visible, columns, layout);
   }, [
@@ -204,6 +239,7 @@ export function TileWall({
     signature,
     columns,
     tileStride,
+    waveFrameWidth,
     shown.waveforms,
     settings.density,
     density,
@@ -245,6 +281,12 @@ export function TileWall({
           )}
           {visible.map((cell, i) => {
             const a = maps.get(cell),
+              renderedWaves = settings.density
+                ? waveCounts[cell]
+                : Math.min(waveCounts[cell], 256),
+              sampled =
+                (shown.waveforms && data.counts[cell] > renderedWaves) ||
+                (shown.ac && !!a?.sampledPairs),
               paired =
                 !!splitPoint &&
                 [splitPoint.source, splitPoint.source + 1].includes(cell),
@@ -260,8 +302,12 @@ export function TileWall({
               marker = point
                 ? {
                     x:
-                      (point.channel + 0.08 + (0.84 * point.sample) / 49) * ROW,
-                    y: ((64 - point.threshold * 0.39) * ROW) / 128,
+                      ((point.channel + 0.08 + (0.84 * point.sample) / 49) *
+                        waveFrameWidth) /
+                      4,
+                    y:
+                      waveFrameTop +
+                      ((64 - point.threshold * 0.39) * waveFrameHeight) / 128,
                   }
                 : null;
             return (
@@ -269,6 +315,7 @@ export function TileWall({
                 key={cell}
                 className={`cell-tile ${selected === cell ? "selected" : ""} ${gestures.target === cell ? "merge-target" : ""} ${splitPoint && !paired ? "split-muted" : ""} ${paired ? "split-pair" : ""} ${gestures.dragging === cell || gestures.settling?.source === cell ? "drag-origin" : ""}`}
                 data-cell={cell}
+                data-sampled={sampled ? "true" : "false"}
                 style={{
                   top: Math.floor(i / columns) * STRIDE,
                   left: (i % columns) * tileStride,
@@ -281,6 +328,7 @@ export function TileWall({
                     e.preventDefault();
                 }}
                 onPointerEnter={() => {
+                  setHovered(cell);
                   if (
                     gestures.dragging === null &&
                     !grabMode &&
@@ -289,17 +337,19 @@ export function TileWall({
                     onHover(cell);
                 }}
                 onPointerLeave={() => {
+                  setHovered(null);
                   if (gestures.dragging === null) onHover(null);
                 }}
               >
-                <div className="tile-waves" style={{ width: waveWidth }}>
+                <div
+                  className="tile-waves"
+                  data-plot-width={waveFrameWidth}
+                  data-plot-height={waveFrameHeight}
+                  data-plot-top={waveFrameTop}
+                  style={{ width: waveWidth }}
+                >
                   {shown.waveforms && (
                     <>
-                      <span className="wave-channel-names">
-                        1 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2
-                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 3
-                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 4
-                      </span>
                       {marker && (
                         <svg className="wave-split-marker">
                           <line x1={marker.x} x2={marker.x} y1="0" y2="100%" />
@@ -310,10 +360,6 @@ export function TileWall({
                           >{`Ch ${point!.channel + 1} · sample ${point!.sample} · ${point!.threshold}`}</text>
                         </svg>
                       )}
-                      <span className="tile-wave-caption">
-                        {data.waveLabels.filter((c) => c === cell).length}{" "}
-                        sampled waves
-                      </span>
                     </>
                   )}
                 </div>
@@ -324,6 +370,7 @@ export function TileWall({
                   {shown.spatial && (
                     <div
                       className="tile-spatial"
+                      style={{ paddingRight: tuningWidth ? 2 : 24 }}
                       title={`Spatial peak: ${a?.peak.toFixed(2) || "—"} Hz`}
                     >
                       {a && pos ? (
@@ -344,7 +391,10 @@ export function TileWall({
                     <div className="tile-tuning" style={{ width: tuningWidth }}>
                       <div className="tile-tuning-top">
                         {shown.direction && (
-                          <div className="tile-direction">
+                          <div
+                            className="tile-direction"
+                            style={{ paddingRight: shown.speed ? 0 : 24 }}
+                          >
                             {a && pos && (
                               <AnalysisPlot
                                 data={a}
@@ -378,9 +428,6 @@ export function TileWall({
                               compact
                             />
                           )}
-                          {a?.sampledPairs && (
-                            <span title="Sampled reference spikes">s</span>
-                          )}
                         </div>
                       )}
                     </div>
@@ -391,8 +438,8 @@ export function TileWall({
                     aria-label={`Select cell ${cell}`}
                     title={`Cell ${cell}${cell === 0 ? " (noise)" : ""}`}
                     style={{
-                      background: cell ? color(cell) : "#e9e9e9",
-                      color: cell ? "white" : "black",
+                      background: color(cell),
+                      color: groupTextColor(cell),
                     }}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -411,21 +458,50 @@ export function TileWall({
                     {gestures.dragging === cell ? `[group ${cell}]` : ""}
                   </div>
                 )}
-                <div className="tile-caption">
-                  <span>{data.counts[cell].toLocaleString()} spikes</span>
-                  <span>{a ? `${a.rate.toFixed(2)} Hz` : "…"}</span>
-                  {a && pos && <span>spa {a.peak.toFixed(1)} Hz</span>}
-                  {a && (
-                    <span title="Consecutive intervals under 2 ms">
-                      ISI {a.refractory.toFixed(2)}%
-                    </span>
-                  )}
-                </div>
+                {sampled && (
+                  <span className="sampling-warning">
+                    WARNING: using sampled rendering
+                  </span>
+                )}
+                <CellStats
+                  entries={[
+                    ...(a && pos && a.peak > 0
+                      ? [{ label: "spa max", value: `${a.peak.toFixed(1)}Hz` }]
+                      : []),
+                    ...(a && pos && Math.max(...a.direction) > 0
+                      ? [
+                          {
+                            label: "dir max",
+                            value: `${Math.max(...a.direction).toFixed(1)}Hz`,
+                          },
+                        ]
+                      : []),
+                    {
+                      label: "n spikes",
+                      value: data.counts[cell].toLocaleString(),
+                    },
+                  ]}
+                />
               </section>
             );
           })}
         </div>
       </div>
+      {glow &&
+        createPortal(
+          <div
+            className="tile-hover-glow"
+            aria-hidden="true"
+            style={{
+              zIndex: gestures.target === null ? 90 : 1001,
+              left: glow.x,
+              top: glow.y,
+              width: glow.width,
+              height: glow.height,
+            }}
+          />,
+          document.body,
+        )}
       {!all.length && <div className="no-cells">No matching cells.</div>}
       {[gestures.ghost, gestures.settling].map(
         (tile, i) =>
@@ -456,8 +532,8 @@ export function TileWall({
               <span
                 className="tile-drag-badge"
                 style={{
-                  background: tile.source ? color(tile.source) : "#e9e9e9",
-                  color: tile.source ? "white" : "black",
+                  background: color(tile.source),
+                  color: groupTextColor(tile.source),
                 }}
               >
                 {tile.source}
@@ -551,5 +627,6 @@ export function captureTile(
         info.top - rect.top + heading + 17 + i * 18,
       );
   }
+  if (options.transparentBadge) ctx.clearRect(rect.width - 24, heading, 24, 24);
   return canvas;
 }

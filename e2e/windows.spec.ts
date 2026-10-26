@@ -1,3 +1,4 @@
+import { ready } from "./controls";
 import { test, expect } from "@playwright/test";
 
 test("Space closes windows; copied tiles have one title and frozen stats only on hover", async ({
@@ -7,9 +8,7 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   await page.getByText("Explore a synthetic demo").click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   const source = page.locator('.cell-tile[data-cell="1"]');
   await source.hover();
   await expect(page.locator(".position-path")).toHaveAttribute(
@@ -54,9 +53,7 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
   await copy.locator(".floating-titlebar").hover();
   await expect(stats).toBeHidden();
   await page.getByRole("button", { name: "02", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   expect(await stats.textContent()).toBe(frozen);
   expect(await image.getAttribute("src")).toBe(src);
   await page.keyboard.down("Space");

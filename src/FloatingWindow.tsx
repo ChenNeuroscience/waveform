@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { usePreference, fitWindowLayout } from "./preferences";
 import { X } from "lucide-react";
 let top = 100;
 export function FloatingWindow({
@@ -12,6 +13,7 @@ export function FloatingWindow({
   height = 470,
   label,
   grabMode = false,
+  preferenceKey,
 }: {
   title: string;
   children: ReactNode;
@@ -23,20 +25,58 @@ export function FloatingWindow({
   height?: number;
   label?: string;
   grabMode?: boolean;
+  preferenceKey?: string;
 }) {
-  const [position, setPosition] = useState({ x, y }),
-    [z, setZ] = useState(() => ++top);
+  const root = useRef<HTMLElement>(null),
+    [geometry, setGeometry] = usePreference(preferenceKey || null, {
+      x,
+      y,
+      width,
+      height,
+    }),
+    [z, setZ] = useState(() => ++top),
+    position = fitWindowLayout(geometry, innerWidth, innerHeight);
+  useEffect(() => {
+    const clamp = () =>
+      setGeometry((g) => fitWindowLayout(g, innerWidth, innerHeight));
+    clamp();
+    const observer = new ResizeObserver(() => {
+      const b = root.current!.getBoundingClientRect();
+      setGeometry((g) =>
+        Math.abs(g.width - b.width) > 0.5 || Math.abs(g.height - b.height) > 0.5
+          ? fitWindowLayout(
+              { ...g, width: b.width, height: b.height },
+              innerWidth,
+              innerHeight,
+            )
+          : g,
+      );
+    });
+    observer.observe(root.current!);
+    addEventListener("resize", clamp);
+    return () => {
+      observer.disconnect();
+      removeEventListener("resize", clamp);
+    };
+  }, []);
   const focus = () => {
     setZ(++top);
     onFocus?.();
   };
   return (
     <section
+      ref={root}
       className="floating-window"
       role="dialog"
       aria-modal="false"
       aria-label={label || title}
-      style={{ left: position.x, top: position.y, width, height, zIndex: z }}
+      style={{
+        left: position.x,
+        top: position.y,
+        width: position.width,
+        height: position.height,
+        zIndex: z,
+      }}
       onPointerDownCapture={(event) => {
         if (grabMode && event.button === 0) {
           event.preventDefault();
@@ -55,16 +95,17 @@ export function FloatingWindow({
             y: e.clientY - position.y,
           };
           const move = (event: PointerEvent) =>
-            setPosition({
-              x: Math.max(
-                0,
-                Math.min(innerWidth - 80, event.clientX - origin.x),
+            setGeometry((g) =>
+              fitWindowLayout(
+                {
+                  ...g,
+                  x: event.clientX - origin.x,
+                  y: event.clientY - origin.y,
+                },
+                innerWidth,
+                innerHeight,
               ),
-              y: Math.max(
-                0,
-                Math.min(innerHeight - 30, event.clientY - origin.y),
-              ),
-            });
+            );
           const end = () => {
             window.removeEventListener("pointermove", move);
             window.removeEventListener("pointerup", end);

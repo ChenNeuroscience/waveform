@@ -27,6 +27,7 @@ pub struct Engine {
     groups_dirty: bool,
     density: std::collections::HashMap<u16, Vec<u16>>,
     density_atlas: Vec<u16>,
+    density_sizes: Vec<u32>,
 }
 impl Engine {
     pub fn new(n: usize) -> Self {
@@ -46,6 +47,7 @@ impl Engine {
             groups_dirty: true,
             density: Default::default(),
             density_atlas: vec![],
+            density_sizes: vec![],
         }
     }
     pub fn push(&mut self, data: &[u8]) {
@@ -214,6 +216,13 @@ pub unsafe extern "C" fn free_bytes(p: *mut u8, n: usize) {
 #[no_mangle]
 pub extern "C" fn engine_new(n: usize) -> *mut Engine {
     Box::into_raw(Box::new(Engine::new(n)))
+}
+/// A label-only engine for exporting an inactive cut; waveform arrays stay empty.
+#[no_mangle]
+pub extern "C" fn engine_new_cut(n: usize) -> *mut Engine {
+    let mut e = Engine::new(0);
+    e.labels = vec![0; n];
+    Box::into_raw(Box::new(e))
 }
 #[no_mangle]
 pub unsafe extern "C" fn engine_free(e: *mut Engine) {

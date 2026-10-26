@@ -1,17 +1,17 @@
 # Verification record
 
-Local verification on 25 October 2026, macOS arm64, Node 24.14.0, stable Rust, Chromium 156 through Playwright. Browser rendering used software WebGL2 (SwiftShader) for reproducibility. Hardware/browser/OS differences affect timings.
+Local verification on 26 October 2026, macOS arm64, Node 24.14.0, stable Rust, Chromium 156 through Playwright. Browser rendering used software WebGL2 (SwiftShader) for reproducibility. Hardware/browser/OS differences affect timings.
 
 ## Passing checks
 
-| Check                                           | Result                                                                                                                                                   |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 92 KB, main app JS about 297 KB before gzip                                                                                    |
-| Rust tests                                      | 11 passed: decoding, cut streaming, exact edits/patches, inserted-cell split, density invalidation, position/analysis and 9-million-label integrity      |
-| TypeScript unit tests                           | 8 passed: grouping, cut/CLu validation, binary boundary, patches, occupancy/AC and 96 kHz position clock/window/bearing regression and plot-bin geometry |
-| Chromium browser tests                          | 14 passed, including two optional local data tests                                                                                                       |
-| Dependency audit after updating the test runner | Zero reported vulnerabilities                                                                                                                            |
-| Git diff whitespace check                       | Passed                                                                                                                                                   |
+| Check                                           | Result                                                                                                                                                                                                                        |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 93 KB, main app JS about 303 KB before gzip                                                                                                                                                         |
+| Rust tests                                      | 11 passed: decoding, cut streaming, exact edits/patches, inserted-cell split, density invalidation, position/analysis and 9-million-label integrity                                                                           |
+| TypeScript unit tests                           | 11 passed: grouping, cut/CLu validation, binary boundary, patches, occupancy/AC and 96 kHz position clock/window/bearing regression, plot-bin geometry, original palette/contrast, clock formatting and viewport-safe geometry |
+| Chromium browser tests                          | 21 passed, including two optional local data tests                                                                                                                                                                            |
+| Dependency audit after updating the test runner | Zero reported vulnerabilities                                                                                                                                                                                                 |
+| Git diff whitespace check                       | Passed                                                                                                                                                                                                                        |
 
 Browser scenarios:
 
@@ -29,6 +29,13 @@ Browser scenarios:
 12. Space-click closes copies and tool windows without activating the plot or control underneath. Copied tiles have no embedded title strip, a single window title, and a separate frozen hover-only stats overlay.
 13. Import two folders with identical trial/tetrode/cut basenames and timestamps. Verify separate assignments, undo histories, and cut duplication without creating a spurious trial.
 
+14. Verify collapsed/expanded inline cuts, automatic blue cut creation, independent imported/local/duplicated undo and redo, and inactive-cut drag payloads and label contents without changing the active recording.
+15. Compare every pixel in the waveform region before/after hover; verify transparent wave hit targets, original bottom-right stats, badge positions and speed clearance, the prominent sampling warning, and a page-layer halo above both the toolbar and snapped fade. Verify frozen copies retain the same badge/warning behaviour.
+16. Switch flag → density → flag three times, require the exact original flag pixels each time, and check for non-flat waveforms and no WebGL errors.
+17. Check A1–A4 corner labels are baked into Space-copy PNGs, square feature viewports after resizing, and settings/divider/tool-window restoration on a smaller screen.
+18. Check the original drop-title animation has 11 keyframes and an 800 ms cycle, stops on drag leave, and ignores internal cut drags.
+19. Click trial rows and set/pos chips, keep the current tetrode, restore its last cut/history, and verify the hover-only recorded clock time/duration and left-aligned speed axis. Auxiliary file counts and tooltip details stay beside set/pos markers without a skipped-file toast.
+
 ## Timings observed
 
 | Workload                                    | Observed time | What is included                                                                                                                                                      |
@@ -36,10 +43,10 @@ Browser scenarios:
 | 9M synthetic records, Wasm benchmark        | 1.31 s        | Chunk generation/timestamp writes, copying chunks into Wasm, signed-wave amplitude extraction and timestamp decoding                                                  |
 | Merge about 89K members of one of 100 cells | 7.94 ms       | Rust relabel + population recount; excludes patch persistence and UI                                                                                                  |
 | Wasm memory after 9M decode                 | 93.81 MiB     | Includes full population arrays, allocator overhead and scratch allocation high-water mark; excludes JS/GPU/browser memory                                            |
-| 9M fixture, browser first load              | 3.4–4.6 s     | File picker automation, cut parsing, chunked file reads, Rust decoding, reservoir creation, population summary, bounded view transfer and initial React/GPU rendering |
+| 9M fixture, browser first load              | 3.3–4.6 s     | File picker automation, cut parsing, chunked file reads, Rust decoding, reservoir creation, population summary, bounded view transfer and initial React/GPU rendering |
 | Real sample tetrode, 704,080 spikes         | 125 ms        | Node/Wasm chunked decoder benchmark, including local file reads                                                                                                       |
 
-These timings do not establish a universal frame-rate or memory ceiling. The browser first-load measurement ends when Export cut becomes enabled; selected-cell analysis can finish afterwards. Warm operating-system file caches may improve local IO timings. The two large fixtures are optional in CI so contributors do not need to download private data or generate 2 GB for routine checks.
+These timings do not establish a universal frame-rate or memory ceiling. The browser first-load measurement ends when the workspace reports that the recording is ready; selected-cell analysis can finish afterwards. Warm operating-system file caches may improve local IO timings. The two large fixtures are optional in CI so contributors do not need to download private data or generate 2 GB for routine checks.
 
 ## Reproduce
 
@@ -62,6 +69,6 @@ Screenshots and browser traces are written under ignored `test-results/`. Only t
 
 ## Remaining verification boundaries
 
-The local browser checks use Chromium. Safari and Firefox have not been exercised here. Position processing and scientific metrics have sanity tests and were exercised with the supplied unlabelled recordings; numerical equivalence to the original algorithms has not been established with a curated labelled reference set. Full-population waveform-density images and exhaustive large autocorrelation pairs are outside this implementation's display model. Those differences are documented in [FEATURES.md](FEATURES.md).
+The local browser checks use Chromium. Native Windows Explorer/macOS Finder drop acceptance has not been exercised here; browser tests verify the prepared File/DownloadURL payload and reparse its exact assignments. Safari and Firefox have not been exercised here. Position processing and scientific metrics have sanity tests and were exercised with the supplied unlabelled recordings; numerical equivalence to the original algorithms has not been established with a curated labelled reference set. Full-population waveform-density images and exhaustive large autocorrelation pairs are outside this implementation's display model. Those differences are documented in [FEATURES.md](FEATURES.md).
 
-The GitHub workflow is included. Deployment to the upstream Pages domain requires the upstream administrator to select the GitHub Actions publishing source and merge the pull request. Local `/waveform/` mount verification does not itself mean the live site has been deployed.
+The GitHub workflow builds and tests pull requests, then deploys pushes to upstream `main`. The real `/waveform/` static-mount check verifies the Pages asset paths locally; the deployment run is checked separately when this PR is merged.

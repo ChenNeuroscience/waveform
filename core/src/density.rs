@@ -60,6 +60,16 @@ pub unsafe extern "C" fn engine_density(e: *mut Engine, cells: *const u16, n: us
     for &c in cells {
         e.density_for(c);
     }
+    e.density_sizes = cells
+        .iter()
+        .map(|&cell| {
+            e.samples
+                .indices
+                .iter()
+                .filter(|&&i| e.labels[i as usize] == cell)
+                .count() as u32
+        })
+        .collect();
     e.density_atlas.clear();
     e.density_atlas.reserve(n * W * H);
     for c in cells {
@@ -105,4 +115,9 @@ mod tests {
         e.density_for(1);
         assert!(e.density[&1].iter().any(|&p| p > 0));
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn engine_density_sizes(e: *const Engine) -> *const u32 {
+    (*e).density_sizes.as_ptr()
 }

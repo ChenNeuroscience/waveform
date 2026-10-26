@@ -3,16 +3,23 @@ import { Check, History, Redo2, Search, Undo2, X } from "lucide-react";
 import { DesktopShell } from "./DesktopShell";
 import type { DragComparison } from "./tile-gestures";
 import { FloatingWindow } from "./FloatingWindow";
+import { CellStats, type CellStat } from "./CellStats";
+import { captureFeatureGrid } from "./plots";
 import { captureTile, type VisiblePlots } from "./TileWall";
+import { CutDownloads, cutDownloadKey, writeCutDrag } from "./cut-downloads";
+import { usePreference } from "./preferences";
 import { organiseFiles } from "./files";
 import { request } from "./client";
 import { demoFiles } from "./demo";
 import {
   color,
+  groupTextColor,
   fileId,
   defaultSettings,
   type Settings,
   type Trial,
+  type Tetrode,
+  type CutFile,
   type ViewData,
   type AnalysisData,
   type PlotMode,
@@ -29,10 +36,18 @@ const time = (n: number) =>
   `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, "0")}`;
 function readSettings(): Settings {
   try {
-    return {
-      ...defaultSettings,
-      ...JSON.parse(localStorage.getItem("waveform-desktop-settings") || "{}"),
-    };
+    const saved = JSON.parse(
+      localStorage.getItem("waveform-desktop-settings") || "{}",
+    );
+    return Object.fromEntries(
+      Object.entries(defaultSettings).map(([key, value]) => [
+        key,
+        typeof saved[key] === typeof value &&
+        (typeof value !== "number" || Number.isFinite(saved[key]))
+          ? saved[key]
+          : value,
+      ]),
+    ) as Settings;
   } catch {
     return defaultSettings;
   }
@@ -59,9 +74,8 @@ export default function App() {
     [sources, setSources] = useState<number[]>([1]),
     [dest, setDest] = useState(2),
     [tool, setTool] = useState("select"),
-    [isolate, setIsolate] = useState(false),
-    [range, setRange] = useState([0, 1]),
-    [shown, setShown] = useState<VisiblePlots>({
+    [isolate, setIsolate] = usePreference("isolate", false),
+    [shown, setShown] = usePreference<VisiblePlots>("plots", {
       waveforms: true,
       spatial: true,
       direction: true,
@@ -84,15 +98,15 @@ export default function App() {
         title: string;
         image: string;
         cell?: number;
-        stats?: string[];
+        stats?: CellStat[];
+        sampled?: boolean;
         x: number;
         y: number;
         width: number;
         height: number;
       }[]
     >([]),
-    [filter, setFilter] = useState(""),
-    [sort, setSort] = useState(false),
+    [downloadVersion, setDownloadVersion] = useState(0),
     [busy, setBusy] = useState(false),
     [progress, setProgress] = useState(0),
     [message, setMessage] = useState(""),
@@ -105,9 +119,15 @@ export default function App() {
     loadGen = useRef(0),
     analysisGen = useRef(0),
     lastCuts = useRef(new Map<string, string>()),
-    lastTets = useRef(new Map<string, number>()),
     dirtySessions = useRef(new Set<string>()),
-    finishingSplit = useRef(false);
+    finishingSplit = useRef(false),
+    cutDownloads = useRef(new CutDownloads());
+  useEffect(() => () => cutDownloads.current.dispose(), []);
+  useEffect(() => {
+    document.title = trials.find((t) => t.id === trialId)?.name
+      ? `${trials.find((t) => t.id === trialId)!.name} [Waveform]`
+      : "Waveform";
+  }, [trialId, trials]);
   const trial = trials.find((t) => t.id === trialId),
     tet = trial?.tetrodes.find((t) => t.number === tetNum),
     cut = tet?.cuts.find((c) => c.id === cutId),
@@ -137,10 +157,6 @@ export default function App() {
       setError("");
       const result = await organiseFiles(files, trials);
       setTrials(result.trials);
-      if (result.ignored.length)
-        setNotice(
-          `${result.ignored.length} auxiliary or unrecognised files skipped. ${result.ignored.slice(0, 5).join(", ")}`,
-        );
       if (!trialId) {
         const first = result.trials.find((t) => t.tetrodes.some((e) => e.file));
         if (first) {
@@ -161,25 +177,27 @@ export default function App() {
   };
   const chooseTrial = (t: Trial) => {
     if (tet) lastCuts.current.set(tet.id, cutId);
-    if (trial) lastTets.current.set(trial.id, tetNum);
     const e =
-      t.tetrodes.find(
-        (e) => e.number === (lastTets.current.get(t.id) || tetNum) && e.file,
-      ) || t.tetrodes.find((e) => e.file);
+      t.tetrodes.find((e) => e.number === tetNum && e.file) ||
+      t.tetrodes.find((e) => e.file);
     if (!e) return;
     setTrialId(t.id);
     setTetNum(e.number);
-    setCutId(lastCuts.current.get(e.id) || e.cuts[0]?.id || "");
+    setCutId(lastCuts.current.get(e.id) ?? e.cuts[0]?.id ?? "");
   };
   const chooseTet = (n: number) => {
     const e = trial?.tetrodes.find((t) => t.number === n && t.file);
     if (!e) return;
     if (tet) lastCuts.current.set(tet.id, cutId);
     setTetNum(n);
-    setCutId(lastCuts.current.get(e.id) || e.cuts[0]?.id || "");
+    setCutId(lastCuts.current.get(e.id) ?? e.cuts[0]?.id ?? "");
   };
   useEffect(() => {
     if (!tet?.file) return;
+    if (
+      data?.session === `${tet.id}|${fileId(tet.file)}|${cutId || "unsorted"}`
+    )
+      return;
     const gen = ++loadGen.current;
     setBusy(true);
     setProgress(0);
@@ -188,7 +206,6 @@ export default function App() {
     setHoverCell(null);
     setError("");
     setAnalysis(null);
-    setRange([0, 1]);
     request(
       "load",
       {
@@ -303,8 +320,64 @@ export default function App() {
     settings.posSmooth,
     settings.dirBin,
     settings.speedBin,
+    settings.speedMax,
     busy,
   ]);
+  const newCut = () => {
+    let n = 1,
+      name: string;
+    do {
+      name = `${trial!.name}_${tetNum} edited${n > 1 ? ` ${n}` : ""}.cut`;
+      n++;
+    } while (tet!.cuts.some((c) => c.name === name));
+    return { id: crypto.randomUUID(), name };
+  };
+  const adopt = (d: ViewData) => {
+    setData(d);
+    if (d.localCut) {
+      const metadata = d.localCut;
+      setTrials((ts) =>
+        ts.map((t) =>
+          t.id === trial?.id
+            ? {
+                ...t,
+                tetrodes: t.tetrodes.map((e) =>
+                  e.id === tet?.id
+                    ? {
+                        ...e,
+                        cuts: [
+                          ...e.cuts.filter((c) => c.id !== metadata.id),
+                          {
+                            ...metadata,
+                            file: new File([], metadata.name),
+                            local: true,
+                            revision: d.revision,
+                          },
+                        ],
+                      }
+                    : e,
+                ),
+              }
+            : t,
+        ),
+      );
+      setCutId(metadata.id);
+    }
+  };
+  const prepareCut = async (t: Trial, e: Tetrode, c: CutFile) => {
+    try {
+      await cutDownloads.current.prepare(t, e, c);
+      setDownloadVersion((v) => v + 1);
+    } catch (error) {
+      if (!String(error).includes("Superseded"))
+        setNotice(`Could not prepare ${c.name}: ${String(error)}`);
+    }
+  };
+  useEffect(() => {
+    if (!trial || !tet || !cut?.local || busy || splitPoint) return;
+    const timer = setTimeout(() => prepareCut(trial, tet, cut), 150);
+    return () => clearTimeout(timer);
+  }, [cut?.id, cut?.revision, busy, splitPoint]);
   const operation = async (
     type: string,
     payload: Record<string, unknown> = {},
@@ -318,7 +391,11 @@ export default function App() {
     try {
       const d = await request(
         type,
-        { session: data!.session, ...payload },
+        {
+          session: data!.session,
+          ...(type === "edit" && !cut?.local ? { newCut: newCut() } : {}),
+          ...payload,
+        },
         (p, m) => {
           if (generation === loadGen.current) {
             setProgress(p);
@@ -326,7 +403,7 @@ export default function App() {
           }
         },
       );
-      if (generation === loadGen.current) setData(d);
+      if (generation === loadGen.current) adopt(d);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -380,10 +457,11 @@ export default function App() {
     setBusy(true);
     setHoverCell(null);
     try {
-      setData(
+      adopt(
         await request("split", {
           session: data!.session,
           phase: cancel ? "cancel" : "finish",
+          ...(!cancel && !cut?.local ? { newCut: newCut() } : {}),
         }),
       );
     } catch (error) {
@@ -488,16 +566,12 @@ export default function App() {
       height = ((width - 2) * canvas.height) / canvas.width + 27,
       stats = [
         ...document.querySelectorAll(
-          `.cell-tile[data-cell="${n}"] .tile-caption span`,
+          `.cell-tile[data-cell="${n}"] .caption-inner`,
         ),
-      ]
-        .map((el) => el.textContent || "")
-        .filter((text) => text && text !== "…");
-    if (
-      !stats.some((text) => !text.startsWith("spa") && text.endsWith(" Hz")) &&
-      data?.duration
-    )
-      stats.splice(1, 0, `${(data.counts[n] / data.duration).toFixed(2)} Hz`);
+      ].map((el) => ({
+        label: el.querySelector(".stat-label")?.textContent || "",
+        value: el.querySelector(".stat-value")?.textContent || "",
+      }));
     setCopies((cs) => [
       ...cs,
       {
@@ -505,6 +579,10 @@ export default function App() {
         title: `${trial?.name} · T${tetNum} · cell ${n} (copy)`,
         cell: n,
         stats,
+        sampled:
+          document
+            .querySelector(`.cell-tile[data-cell="${n}"]`)
+            ?.getAttribute("data-sampled") === "true",
         image: canvas.toDataURL(),
         x: Math.max(0, Math.min(innerWidth - width - 8, x + 15)),
         y: Math.max(0, Math.min(innerHeight - height - 8, y + 15)),
@@ -514,12 +592,16 @@ export default function App() {
     ]);
   };
   const popPlot = (kind: "path" | "features", x: number, y: number) => {
-    const source = document.querySelector<HTMLCanvasElement>(
-      kind === "path" ? ".position-path canvas" : ".clusters canvas",
-    );
+    const source =
+      kind === "features"
+        ? captureFeatureGrid()
+        : document.querySelector<HTMLCanvasElement>(".position-path canvas");
     if (!source) return;
-    const width = Math.max(240, Math.min(700, source.clientWidth)),
-      height = source.clientHeight + 26;
+    const ratio = Math.min(2, devicePixelRatio || 1),
+      sourceWidth =
+        kind === "features" ? source.width / ratio : source.clientWidth,
+      width = Math.max(240, Math.min(700, sourceWidth)),
+      height = ((width - 2) * source.height) / source.width + 27;
     setCopies((cs) => [
       ...cs,
       {
@@ -549,32 +631,7 @@ export default function App() {
       }
     });
   };
-  const forkCut = async () => {
-    if (!ready) return;
-    try {
-      const blob = await request<Blob>("export", {
-          session: data!.session,
-          format: "cut",
-          trial: trial!.name,
-        }),
-        file = new File([blob], `${trial!.name}_${tetNum} edited.cut`, {
-          lastModified: Date.now(),
-        }),
-        result = await organiseFiles(
-          [
-            Object.defineProperty(file, "webkitRelativePath", {
-              value: trial!.folder ? `${trial!.folder}/${file.name}` : "",
-            }),
-          ],
-          trials,
-        );
-      setTrials(result.trials);
-      setCutId(fileId(file));
-      setNotice("Created a cut copy. Each version keeps its own edit history.");
-    } catch (e) {
-      setError(String(e));
-    }
-  };
+  const forkCut = () => operation("clone_cut", { newCut: newCut() });
   const update = <K extends keyof Settings>(k: K, v: Settings[K]) =>
     setSettings((s) => ({ ...s, [k]: v }));
   useEffect(() => {
@@ -607,6 +664,11 @@ export default function App() {
       if (cmd && e.key === "y") {
         e.preventDefault();
         operation("redo");
+        return;
+      }
+      if (cmd && e.key === "c" && ready) {
+        e.preventDefault();
+        copyPlot();
         return;
       }
       if (cmd && e.key === "s") {
@@ -662,6 +724,7 @@ export default function App() {
   const drop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDrag(false);
+    if (e.dataTransfer.types.includes("application/x-waveform-cut")) return;
     const entries = Array.from(e.dataTransfer.items)
       .map((i) => i.webkitGetAsEntry?.())
       .filter(Boolean);
@@ -702,14 +765,6 @@ export default function App() {
         step={0.1}
         unit="px"
         onChange={(v) => update("pointSize", v)}
-      />
-      <Slider
-        label="Opacity"
-        value={settings.opacity}
-        min={0.05}
-        max={1}
-        step={0.05}
-        onChange={(v) => update("opacity", v)}
       />
       <label className="field">
         Display budget
@@ -794,6 +849,15 @@ export default function App() {
         unit="cm/s"
         onChange={(v) => update("speedBin", v)}
       />
+      <Slider
+        label="Maximum speed shown"
+        value={settings.speedMax}
+        min={10}
+        max={200}
+        step={5}
+        unit="cm/s"
+        onChange={(v) => update("speedMax", v)}
+      />
       <h3>Position processing</h3>
       <label className="field">
         Tracked LEDs
@@ -864,7 +928,6 @@ export default function App() {
       dest={dest}
       tool={tool}
       isolate={isolate}
-      range={range}
       shown={shown}
       grabMode={grabMode}
       hoverCell={hoverCell}
@@ -896,8 +959,6 @@ export default function App() {
       error={error}
       notice={notice}
       drag={drag}
-      filter={filter}
-      sort={sort}
       fileInput={fileInput}
       folderInput={folderInput}
       onImport={importFiles}
@@ -914,37 +975,41 @@ export default function App() {
         );
       }}
       onCut={setCutId}
+      downloadVersion={downloadVersion}
+      cutDownloads={cutDownloads.current}
+      onPrepareCut={prepareCut}
+      onCutDrag={(event, t, e, c) => {
+        event.stopPropagation();
+        const prepared = cutDownloads.current.entries.get(cutDownloadKey(e, c));
+        if (!prepared) {
+          event.preventDefault();
+          prepareCut(t, e, c);
+          setNotice(`Preparing ${c.name}. Drag it once it is ready.`);
+          return;
+        }
+        writeCutDrag(event.dataTransfer, prepared);
+      }}
       onCell={selectCell}
       onSources={setSources}
       onDest={setDest}
       onTool={setTool}
       onIsolate={setIsolate}
-      onRange={setRange}
       onToggle={(m) => setShown((s) => ({ ...s, [m]: !s[m] }))}
       onPanel={setPane}
       onOperation={operation}
       onEdit={edit}
       onPolygon={polygon}
-      onExport={() => exportCut()}
       onSettings={update}
       onDemo={startDemo}
-      onFilter={setFilter}
-      onSort={() => setSort(!sort)}
       onError={() => setError("")}
       onNotice={() => setNotice("")}
       onDrag={setDrag}
       onDrop={drop}
-      onPin={() => popOut(cell)}
-      onCopy={copyPlot}
-      onImage={() =>
-        snapshot()?.toBlob((b) => {
-          if (b) download(b, `cell-${cell}.png`);
-        })
-      }
     >
       {panels.map((pane) => (
         <FloatingWindow
           key={pane}
+          preferenceKey={`window:${pane}`}
           grabMode={grabMode}
           label={
             {
@@ -1087,6 +1152,7 @@ export default function App() {
                 <Shortcut keys="⌘ / Ctrl Z" text="Undo" />
                 <Shortcut keys="⌘ / Ctrl ⇧ Z" text="Redo" />
                 <Shortcut keys="⌘ / Ctrl S" text="Export .cut" />
+                <Shortcut keys="⌘ / Ctrl C" text="Copy active cell plots" />
                 <h3>Views</h3>
                 <Shortcut
                   keys="Hover tile"
@@ -1145,20 +1211,22 @@ export default function App() {
               <span
                 className="tile-copy-badge"
                 style={{
-                  background: c.cell ? color(c.cell) : "#e9e9e9",
-                  color: c.cell ? "white" : "black",
+                  background: color(c.cell),
+                  color: groupTextColor(c.cell),
                 }}
               >
                 {c.cell}
               </span>
-              <div
+              {c.sampled && (
+                <span className="sampling-warning">
+                  WARNING: using sampled rendering
+                </span>
+              )}
+              <CellStats
+                entries={c.stats || []}
                 className="tile-copy-stats"
-                aria-label="Copied cell statistics"
-              >
-                {c.stats?.map((line, i) => (
-                  <span key={i}>{line}</span>
-                ))}
-              </div>
+                label="Copied cell statistics"
+              />
             </div>
           ) : (
             <img

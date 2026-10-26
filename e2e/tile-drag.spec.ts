@@ -1,3 +1,4 @@
+import { ready, exportCut } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { decodeCut } from "../tests/wasm";
@@ -46,14 +47,12 @@ async function fixture(page: Page) {
         ]),
       },
     ]);
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
 }
 async function assignments(page: Page) {
   const [d] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "Export cut", exact: true }).click(),
+    exportCut(page),
   ]);
   return [
     ...(await decodeCut(
@@ -80,6 +79,24 @@ async function snap(page: Page, cell: number) {
   expect(g.y).toBe(b.y);
   expect(g.width).toBe(b.width);
   expect(g.height).toBe(b.height);
+  const primary = (await tile(page, cell)
+      .locator(".tile-badge button")
+      .boundingBox())!,
+    secondary = (await ghost.locator(".tile-drag-badge").boundingBox())!;
+  expect(secondary.y).toBe(primary.y);
+  expect(secondary.width).toBe(primary.width);
+  expect(secondary.height).toBe(primary.height);
+  expect(primary.x - secondary.x - secondary.width).toBe(3);
+  const speedPlot = tile(page, cell).locator(".tile-speed canvas");
+  if (await speedPlot.count()) {
+    const speed = (await speedPlot.boundingBox())!;
+    expect(speed.y - primary.y - primary.height).toBe(5);
+  }
+  const halo = page.locator("body > .tile-hover-glow");
+  expect(await halo.boundingBox()).toEqual(b);
+  expect(
+    await halo.evaluate((el) => +getComputedStyle(el).zIndex),
+  ).toBeGreaterThan(await ghost.evaluate((el) => +getComputedStyle(el).zIndex));
   return ghost;
 }
 
@@ -126,6 +143,12 @@ test("drag comparison leaves a placeholder, fades at exact alignment, overlays b
     }),
   ).toBe("0");
   await page.screenshot({ path: "test-results/drag-snap-target.png" });
+  expect(
+    await page.locator("body > .tile-hover-glow").evaluate((el) => ({
+      opacity: getComputedStyle(el).opacity,
+      animations: el.getAnimations().length,
+    })),
+  ).toEqual({ opacity: "1", animations: 0 });
   await snap(page, 3);
   await expect(path).toHaveAttribute("data-cells", "1,3");
   // Moving out of a snap must invalidate it before mouse-up.
@@ -181,9 +204,7 @@ test("cancelling after the source scrolls out of the virtual wall restores its s
 }) => {
   await page.goto("/");
   await page.getByText("Explore a synthetic demo").click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   await start(page, 1);
   await page
     .locator(".tile-wall")

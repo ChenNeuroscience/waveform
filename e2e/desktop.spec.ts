@@ -1,10 +1,11 @@
+import { ready, exportCut } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { decodeCut } from "../tests/wasm";
 async function assignments(page: Page) {
   const [d] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "Export cut", exact: true }).click(),
+    exportCut(page),
   ]);
   return [
     ...(await decodeCut(
@@ -46,9 +47,7 @@ async function fixture(page: Page) {
         buffer: Buffer.from("3\n2\n2\n2\n2\n3\n"),
       },
     ]);
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
 }
 test("original desktop dimensions, nested cuts and independent floating tools", async ({
   page,
@@ -155,9 +154,7 @@ test("tile drag merge and right-button waveform split preserve exact undo labels
   await expect(
     page.getByRole("button", { name: "Undo", exact: true }),
   ).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   // Adjust from the spawned tile, using a different channel/sample. Membership
   // must always be recomputed from the original cell, never just one half.
   const second = (await wave(2).boundingBox())!;
@@ -168,11 +165,11 @@ test("tile drag merge and right-button waveform split preserve exact undo labels
   await page.mouse.move(xx, yy, { steps: 4 });
   await page.mouse.up({ button: "right" });
   await expect(
-    page.locator('.cell-tile[data-cell="1"] .tile-caption'),
-  ).toContainText("3 spikes");
+    page.locator('.cell-tile[data-cell="1"] .tile-caption .stat-value').last(),
+  ).toHaveText("3");
   await expect(
-    page.locator('.cell-tile[data-cell="2"] .tile-caption'),
-  ).toContainText("1 spikes");
+    page.locator('.cell-tile[data-cell="2"] .tile-caption .stat-value').last(),
+  ).toHaveText("1");
   await page.screenshot({ path: "test-results/split-mode.png" });
   await page.mouse.click(1050, 15); // Any left click completes; this click is consumed.
   await expect(page.locator(".split-pair")).toHaveCount(0);
@@ -200,9 +197,7 @@ test("hover overlays and Space copies retain plots while navigating", async ({
 }) => {
   await page.goto("/");
   await page.getByText("Explore a synthetic demo").click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   const wave = page.locator('.cell-tile[data-cell="2"] .tile-waves');
   await wave.hover();
   await expect(page.locator(".position-path")).toHaveAttribute(
@@ -224,9 +219,7 @@ test("hover overlays and Space copies retain plots while navigating", async ({
   await expect(copy).toHaveCount(1);
   const src = await copy.locator("img").getAttribute("src");
   await page.getByRole("button", { name: "02", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   expect(await copy.locator("img").getAttribute("src")).toBe(src);
   await expect(page.locator(".position-path")).toHaveAttribute(
     "data-spikes",
@@ -261,9 +254,7 @@ test("plot data keeps its proportions when panes and the window resize", async (
 }) => {
   await page.goto("/");
   await page.getByText("Explore a synthetic demo").click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   const viewport = async () =>
     page
       .locator(".clusters canvas")
@@ -309,9 +300,7 @@ test("tiles wrap at their plot width, with details only on hover and no selectio
 }) => {
   await page.goto("/");
   await page.getByText("Explore a synthetic demo").click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   const tile = (cell: number) =>
     page.locator(`.cell-tile[data-cell="${cell}"]`);
   const initial = (await tile(0).boundingBox())!;
@@ -351,4 +340,41 @@ test("tiles wrap at their plot width, with details only on hover and no selectio
     "ready",
   );
   await page.screenshot({ path: "test-results/wrapped-waveforms.png" });
+});
+
+test("flag waveforms retain their exact pixels through repeated density switches", async ({
+  page,
+}) => {
+  await fixture(page);
+  const density = page.getByLabel("density", { exact: true });
+  await density.uncheck();
+  const image = () =>
+    page.locator(".tile-wave-canvas").evaluate((el) => {
+      const c = el as HTMLCanvasElement,
+        gl = c.getContext("webgl2")!;
+      const pixels = new Uint8Array(c.width * c.height * 4);
+      gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      let raised = 0;
+      for (let y = 10; y < 45; y++)
+        for (let x = 2; x < 120; x++) {
+          const i = ((c.height - 1 - y) * c.width + x) * 4;
+          if (pixels[i] < 240 || pixels[i + 1] < 240 || pixels[i + 2] < 240)
+            raised++;
+        }
+      return { png: c.toDataURL(), raised, error: gl.getError() };
+    });
+  await expect.poll(async () => (await image()).raised).toBeGreaterThan(5);
+  const original = await image();
+  expect(original.error).toBe(0);
+  for (let i = 0; i < 3; i++) {
+    await density.check();
+    await expect(page.locator(".tile-wave-canvas")).toHaveAttribute(
+      "data-density",
+      "ready",
+    );
+    await expect.poll(async () => (await image()).png).not.toBe(original.png);
+    await density.uncheck();
+    await expect.poll(async () => (await image()).png).toBe(original.png);
+    expect((await image()).error).toBe(0);
+  }
 });

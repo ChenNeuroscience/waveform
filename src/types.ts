@@ -3,6 +3,8 @@ export interface CutFile {
   id: string;
   file: File;
   name: string;
+  local?: boolean;
+  revision?: number;
 }
 export interface Tetrode {
   id: string;
@@ -17,10 +19,10 @@ export interface Trial {
   set?: File;
   pos?: File;
   tetrodes: Tetrode[];
+  otherFiles?: string[];
 }
 export interface Settings {
   pointSize: number;
-  opacity: number;
   budget: number;
   drift: boolean;
   density: boolean;
@@ -33,10 +35,10 @@ export interface Settings {
   posSmooth: number;
   dirBin: number;
   speedBin: number;
+  speedMax: number;
 }
 export const defaultSettings: Settings = {
   pointSize: 1,
-  opacity: 0.65,
   budget: 250_000,
   drift: false,
   density: true,
@@ -49,6 +51,7 @@ export const defaultSettings: Settings = {
   posSmooth: 0.3,
   dirBin: 6,
   speedBin: 4,
+  speedMax: 45,
 };
 export type PlotMode = "waveforms" | "spatial" | "direction" | "speed" | "ac";
 export interface HistoryEntry {
@@ -64,6 +67,7 @@ export interface SplitPoint {
 }
 export interface ViewData {
   revision: number;
+  localCut?: { id: string; name: string };
   key: string;
   session: string;
   name: string;
@@ -98,6 +102,7 @@ export interface AnalysisData {
   spikes: Float32Array;
   direction: Float32Array;
   speed: Float32Array;
+  speedDwell: Float32Array;
   ac: Float32Array;
   refractory: number;
   rate: number;
@@ -105,13 +110,8 @@ export interface AnalysisData {
 }
 export const fileId = (f: File) =>
   `${f.webkitRelativePath || f.name}:${f.size}:${f.lastModified}`;
+export { groupTextColor } from "./palette";
+import { groupRgb8 } from "./palette";
 export const cellRgb = (cell: number) =>
-  cell === 0
-    ? [0.36, 0.42, 0.48]
-    : [0, 0.33, 0.67].map(
-        (v) => 0.5 + 0.35 * Math.cos(Math.PI * 2 * (v + cell * 0.381966)),
-      );
-export const color = (cell: number) =>
-  `rgb(${cellRgb(cell)
-    .map((v) => Math.round(v * 255))
-    .join(",")})`;
+  groupRgb8(cell).map((value) => value / 255);
+export const color = (cell: number) => `rgb(${groupRgb8(cell).join(",")})`;

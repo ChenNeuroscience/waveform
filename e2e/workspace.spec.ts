@@ -1,3 +1,4 @@
+import { ready, exportCut } from "./controls";
 import { test, expect } from "@playwright/test";
 test("demo imports, exact cut edits survive switching, undo/redo and export", async ({
   page,
@@ -6,9 +7,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
   await page.getByText("Explore a synthetic demo").click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled({ timeout: 30000 });
+  await ready(page, 30000);
   await expect(page.getByText("18,000", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
@@ -31,9 +30,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   await page.getByLabel("Destination cell", { exact: true }).fill("13");
   await page.getByLabel("Gate threshold", { exact: true }).fill("-128");
   await page.getByRole("button", { name: "Apply split", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   await page
     .locator(".tile-wall")
     .evaluate((el) => (el.scrollTop = el.scrollHeight));
@@ -54,16 +51,12 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveCount(0);
   await page.getByRole("button", { name: "02", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "01", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveCount(0);
@@ -74,7 +67,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   ).toHaveText(count!);
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "Export cut", exact: true }).click(),
+    exportCut(page),
   ]);
   expect(download.suggestedFilename()).toBe("demo_linear-track_1.cut");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -85,9 +78,9 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     .getByRole("button", { name: "Head direction", exact: true })
     .click();
   await expect(page.locator(".tile-wave-canvas")).toBeVisible();
-  await page
-    .getByRole("button", { name: "Pin cell snapshot", exact: true })
-    .click();
+  await page.keyboard.down("Space");
+  await page.locator('.cell-tile[data-cell="1"] .tile-waves').click();
+  await page.keyboard.up("Space");
   await expect(page.locator(".plot-copy")).toHaveCount(1);
   await page.getByRole("button", { name: "Edit history", exact: true }).click();
   await page
@@ -100,9 +93,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   await expect(
     page.getByRole("button", { name: "~_1 edited.cut", exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled();
+  await ready(page);
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect(errors).toEqual([]);
 });
@@ -111,9 +102,7 @@ test("production assets and Wasm load under the GitHub Pages subpath", async ({
 }) => {
   await page.goto("http://127.0.0.1:4174/waveform/");
   await page.getByText("Explore a synthetic demo").click();
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toBeEnabled({ timeout: 30000 });
+  await ready(page, 30000);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText("18,000", { exact: true })).toBeVisible();
 });
