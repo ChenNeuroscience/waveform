@@ -1,4 +1,8 @@
+
 # Waveform 2
+
+## WARNING: v2 is not quite ready for use - see [Waveform v1](https://github.com/ChenNeuroscience/waveform/tree/waveform-v1).
+
 
 A local-first workspace for LTX neural recordings, rebuilt with **Rust / WebAssembly, React, TypeScript and WebGL2**. Import recording files, move quickly between trials and tetrodes, inspect cells, and edit/export cuts with a separate undo/redo history for each cut.
 
