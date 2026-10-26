@@ -434,30 +434,16 @@ small {
   outline: 2px solid #333;
   outline-offset: -2px;
 }
-.feature-options {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 20px;
-  padding: 2px 4px;
-  font-size: 9px;
-  border-bottom: 1px solid #ccc;
-}
-.feature-options label {
-  white-space: nowrap;
-}
-.feature-options small {
-  margin-left: auto;
-  font-size: 8px;
-  white-space: nowrap;
-}
 .feature-stage {
+  display: flex;
   flex: 1;
   min-height: 0;
   background: white;
   overflow: auto;
 }
 .clusters {
+  margin: auto;
+  flex: none;
   position: relative;
   min-height: 210px;
   width: 100%;
@@ -548,52 +534,6 @@ small {
   color: #900;
   padding: 10px;
   font-size: 11px;
-}
-.wave-gate {
-  flex-shrink: 0;
-  border-top: 1px solid #bbb;
-  background: #f7f7f7;
-  padding: 3px 5px;
-  max-height: 150px;
-  overflow: auto;
-}
-.wave-gate summary {
-  font-size: 10px;
-  cursor: pointer;
-  min-height: 17px;
-}
-.wave-gate p {
-  font-size: 9px;
-  color: #555;
-  margin: 5px 0;
-}
-.wave-gate > div {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  padding-bottom: 3px;
-}
-.wave-gate label {
-  font-size: 9px;
-  display: block;
-  min-width: 45px;
-}
-.wave-gate input,
-.wave-gate select {
-  display: block;
-  width: 100%;
-  height: 21px;
-  font-size: 10px;
-  margin-top: 2px;
-}
-.wave-gate input {
-  max-width: 65px;
-}
-.wave-gate .secondary {
-  height: 21px;
-  min-height: 21px;
-  padding: 2px 6px;
-  white-space: nowrap;
 }
 .right-workspace {
   display: flex;
@@ -865,40 +805,10 @@ small {
   width: 100%;
   display: block;
 }
-.desktop-status {
-  height: 20px;
-  min-height: 20px;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 2px 6px;
-  border-top: 1px solid #b8b8b8;
-  background: #eee;
-  font-size: 9px;
-  color: #444;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.desktop-status > span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 60%;
-}
-.desktop-status b {
-  font-weight: normal;
-}
-.status-spacer {
-  flex: 1;
-}
-.desktop-status progress {
-  height: 8px;
-  width: 100px;
-  accent-color: #7b98b7;
-}
 .desktop-notice {
   position: fixed;
   left: 10px;
-  bottom: 26px;
+  bottom: 8px;
   right: auto;
   max-width: calc(100vw - 20px);
   display: flex;
@@ -2104,4 +2014,34 @@ kbd {
   font-size: 9px;
   color: #666;
   white-space: nowrap;
+}
+
+.toolbar-status {
+  margin-left: auto;
+  padding: 0 4px 0 12px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  font: 9px/11px Arial;
+  color: #555;
+}
+.toolbar-status > span {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toolbar-status b {
+  font-weight: normal;
+}
+.toolbar-status progress {
+  width: 55px;
+  height: 6px;
+}
+.comparison-window {
+  resize: none;
+}
+.comparison-window .floating-content {
+  cursor: move;
 }

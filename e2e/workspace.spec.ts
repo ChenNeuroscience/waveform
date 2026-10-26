@@ -26,16 +26,12 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveText(count!);
-  await page.getByText("Split by waveform sample", { exact: true }).click();
-  await page.getByLabel("Destination cell", { exact: true }).fill("13");
-  await page.getByLabel("Gate threshold", { exact: true }).fill("-128");
-  await page.getByRole("button", { name: "Apply split", exact: true }).click();
+  await page.getByLabel("Destination cell", { exact: true }).fill("2");
+  await page.getByRole("button", { name: "Merge", exact: true }).click();
   await ready(page);
-  await page
-    .locator(".tile-wall")
-    .evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await page.locator(".tile-wall").evaluate((el) => (el.scrollTop = 0));
   await expect(
-    page.getByRole("button", { name: "Select cell 13", exact: true }),
+    page.getByRole("button", { name: "Select cell 2", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
@@ -91,7 +87,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     .getByRole("button", { name: "Close panel", exact: true })
     .click();
   await expect(
-    page.getByRole("button", { name: "~_1 edited.cut", exact: true }),
+    page.getByRole("button", { name: "~_1 edited 2.cut", exact: true }),
   ).toBeVisible();
   await ready(page);
   await expect(page.getByRole("alert")).toHaveCount(0);

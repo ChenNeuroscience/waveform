@@ -1,4 +1,4 @@
-import { ready, exportCut } from "./controls";
+import { ready, exportCut, setDensity } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { decodeCut } from "../tests/wasm";
@@ -101,7 +101,7 @@ test("tile drag merge and right-button waveform split preserve exact undo labels
   await fixture(page);
   const wave = (cell: number) =>
     page.locator(`.cell-tile[data-cell="${cell}"] .tile-waves`);
-  await expect(page.getByLabel("density", { exact: true })).toBeChecked();
+  await setDensity(page, true);
   await expect
     .poll(() =>
       page.locator(".tile-wave-canvas").evaluate((c) => {
@@ -287,7 +287,7 @@ test("plot data keeps its proportions when panes and the window resize", async (
     })
     .toBe(0);
   expect((await waves.boundingBox())!.width).toBe(before.width);
-  await page.getByLabel("density", { exact: true }).uncheck();
+  await setDensity(page, false);
   expect((await waves.boundingBox())!.width).toBe(before.width);
   await page.setViewportSize({ width: 1100, height: 760 });
   const b = await viewport();
@@ -346,8 +346,7 @@ test("flag waveforms retain their exact pixels through repeated density switches
   page,
 }) => {
   await fixture(page);
-  const density = page.getByLabel("density", { exact: true });
-  await density.uncheck();
+  await setDensity(page, false);
   const image = () =>
     page.locator(".tile-wave-canvas").evaluate((el) => {
       const c = el as HTMLCanvasElement,
@@ -367,13 +366,13 @@ test("flag waveforms retain their exact pixels through repeated density switches
   const original = await image();
   expect(original.error).toBe(0);
   for (let i = 0; i < 3; i++) {
-    await density.check();
+    await setDensity(page, true);
     await expect(page.locator(".tile-wave-canvas")).toHaveAttribute(
       "data-density",
       "ready",
     );
     await expect.poll(async () => (await image()).png).not.toBe(original.png);
-    await density.uncheck();
+    await setDensity(page, false);
     await expect.poll(async () => (await image()).png).toBe(original.png);
     expect((await image()).error).toBe(0);
   }

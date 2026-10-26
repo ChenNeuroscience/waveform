@@ -14,6 +14,7 @@ export function FloatingWindow({
   label,
   grabMode = false,
   preferenceKey,
+  comparison = false,
 }: {
   title: string;
   children: ReactNode;
@@ -26,6 +27,7 @@ export function FloatingWindow({
   label?: string;
   grabMode?: boolean;
   preferenceKey?: string;
+  comparison?: boolean;
 }) {
   const root = useRef<HTMLElement>(null),
     [geometry, setGeometry] = usePreference(preferenceKey || null, {
@@ -63,10 +65,41 @@ export function FloatingWindow({
     setZ(++top);
     onFocus?.();
   };
+  const drag = (e: React.PointerEvent) => {
+    if (
+      e.button !== 0 ||
+      (e.target as HTMLElement).closest("button,input,select,textarea,a")
+    )
+      return;
+    e.preventDefault();
+    const origin = {
+      x: e.clientX - position.x,
+      y: e.clientY - position.y,
+    };
+    const move = (event: PointerEvent) =>
+      setGeometry((g) =>
+        fitWindowLayout(
+          {
+            ...g,
+            x: event.clientX - origin.x,
+            y: event.clientY - origin.y,
+          },
+          innerWidth,
+          innerHeight,
+        ),
+      );
+    const end = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+  };
   return (
     <section
       ref={root}
-      className="floating-window"
+      className={`floating-window ${comparison ? "comparison-window" : ""}`}
+      onPointerDown={comparison ? drag : undefined}
       role="dialog"
       aria-modal="false"
       aria-label={label || title}
@@ -87,32 +120,7 @@ export function FloatingWindow({
     >
       <header
         className="floating-titlebar"
-        onPointerDown={(e) => {
-          if ((e.target as HTMLElement).closest("button")) return;
-          e.preventDefault();
-          const origin = {
-            x: e.clientX - position.x,
-            y: e.clientY - position.y,
-          };
-          const move = (event: PointerEvent) =>
-            setGeometry((g) =>
-              fitWindowLayout(
-                {
-                  ...g,
-                  x: event.clientX - origin.x,
-                  y: event.clientY - origin.y,
-                },
-                innerWidth,
-                innerHeight,
-              ),
-            );
-          const end = () => {
-            window.removeEventListener("pointermove", move);
-            window.removeEventListener("pointerup", end);
-          };
-          window.addEventListener("pointermove", move);
-          window.addEventListener("pointerup", end);
-        }}
+        onPointerDown={comparison ? undefined : drag}
       >
         <span>{title}</span>
         <button aria-label="Close panel" title="Close" onClick={onClose}>

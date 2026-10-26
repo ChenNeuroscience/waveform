@@ -17,7 +17,7 @@ import {
   X,
   HelpCircle,
 } from "lucide-react";
-import { Clusters, AnalysisPlot, WaveformGate } from "./plots";
+import { Clusters, AnalysisPlot } from "./plots";
 import { TileWall, type VisiblePlots } from "./TileWall";
 import {
   color,
@@ -88,13 +88,11 @@ interface Props {
   onSources: (n: number[]) => void;
   onDest: (n: number) => void;
   onTool: (s: string) => void;
-  onIsolate: (v: boolean) => void;
   onToggle: (m: PlotMode) => void;
   onPanel: (p: "settings" | "history" | "headers" | "help") => void;
-  onOperation: (type: string, p?: Record<string, unknown>) => void;
   onEdit: (action: string) => void;
+  onOperation: (type: string, p?: Record<string, unknown>) => void;
   onPolygon: (p: number[], a: number, b: number) => void;
-  onSettings: (k: keyof Settings, v: any) => void;
   onDemo: () => void;
   onError: () => void;
   onNotice: () => void;
@@ -103,8 +101,6 @@ interface Props {
   children?: ReactNode;
 }
 const FULL_RANGE = [0, 1];
-const time = (n: number) =>
-  `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, "0")}`;
 export function DesktopShell(p: Props) {
   const root = useRef<HTMLDivElement>(null),
     left = useRef<HTMLDivElement>(null),
@@ -112,7 +108,7 @@ export function DesktopShell(p: Props) {
   const fitted = fitPaneLayout(
       layout,
       root.current?.clientWidth || innerWidth,
-      left.current?.clientHeight || innerHeight - 55,
+      left.current?.clientHeight || innerHeight - 35,
     ),
     split = fitted.left,
     rows = [fitted.files, fitted.features],
@@ -123,7 +119,7 @@ export function DesktopShell(p: Props) {
         fitPaneLayout(
           saved,
           root.current?.clientWidth || innerWidth,
-          left.current?.clientHeight || innerHeight - 55,
+          left.current?.clientHeight || innerHeight - 35,
         ),
       );
     resize();
@@ -337,6 +333,34 @@ export function DesktopShell(p: Props) {
                 }
               </button>
             ))}
+            <div
+              className="toolbar-status"
+              role="group"
+              aria-label="Recording details"
+              title={
+                p.data
+                  ? `Feature display: ${Math.min(p.data.n, p.settings.budget).toLocaleString()} of ${p.data.n.toLocaleString()} spikes; edits use all spikes.`
+                  : undefined
+              }
+            >
+              {p.data && (
+                <span>
+                  Spikes: <b>{p.data.n.toLocaleString()}</b> ·{" "}
+                  {timing.durationText}
+                </span>
+              )}
+              <span>
+                {p.busy ? (
+                  <>
+                    <progress max="1" value={p.progress} /> {p.message}
+                  </>
+                ) : p.data ? (
+                  `${(p.data.residentBytes / 1048576).toFixed(0)} MB cached · Local files`
+                ) : (
+                  "Preparing…"
+                )}
+              </span>
+            </div>
           </div>
           <div
             className="desktop-workspace"
@@ -642,40 +666,6 @@ export function DesktopShell(p: Props) {
                         </button>
                       ))}
                 </div>
-                <div className="feature-options">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={p.isolate}
-                      onChange={(e) => p.onIsolate(e.target.checked)}
-                    />
-                    isolate
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={p.settings.drift}
-                      onChange={(e) => p.onSettings("drift", e.target.checked)}
-                    />
-                    drift
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={p.settings.density}
-                      onChange={(e) =>
-                        p.onSettings("density", e.target.checked)
-                      }
-                    />
-                    density
-                  </label>
-                  <small>
-                    {p.data
-                      ? `${Math.min(p.data.n, p.settings.budget).toLocaleString()} / ${p.data.n.toLocaleString()} displayed`
-                      : "Preparing…"}{" "}
-                    · cuts use all spikes
-                  </small>
-                </div>
                 <div
                   className="feature-stage"
                   onPointerDownCapture={(e) => {
@@ -698,21 +688,6 @@ export function DesktopShell(p: Props) {
                     />
                   )}
                 </div>
-                <WaveformGate
-                  disabled={!ready || !p.sources.length}
-                  onGate={(channel, sample, threshold, above) =>
-                    p.onOperation("edit", {
-                      action: "gate",
-                      sources: p.sources,
-                      dest: p.dest,
-                      channel,
-                      sample,
-                      threshold,
-                      above,
-                      description: `Waveform Ch ${channel + 1} sample ${sample} ${above ? "≥" : "<"} ${threshold} → ${p.dest}`,
-                    })
-                  }
-                />
               </section>
             </div>
             <div
@@ -824,27 +799,6 @@ export function DesktopShell(p: Props) {
           </button>
         </div>
       )}
-      <footer className="desktop-status">
-        <span>
-          {p.busy
-            ? p.message
-            : p.data
-              ? `${p.data.name}${p.data.dirty ? " *" : ""}`
-              : "Drop files to begin"}
-        </span>
-        {p.busy && <progress max="1" value={p.progress} />}
-        <span className="status-spacer" />
-        {p.data && (
-          <>
-            <span>
-              Spikes: <b>{p.data.n.toLocaleString()}</b>
-            </span>
-            <span>{time(p.data.duration)}</span>
-            <span>{(p.data.residentBytes / 1048576).toFixed(0)} MB cached</span>
-          </>
-        )}
-        <span>Local files</span>
-      </footer>
       {p.drag && p.trials.length > 0 && (
         <div className="drag-overlay">
           <p className="drop-title-wobble">drag &amp; drop files here</p>

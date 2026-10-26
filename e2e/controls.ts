@@ -29,3 +29,17 @@ export async function exportCutFromHistory(page: Page) {
       .getByRole("button", { name: "Close panel", exact: true })
       .click();
 }
+
+export async function setDensity(page: Page, enabled: boolean) {
+  const panel = page.getByRole("dialog", { name: "Settings", exact: true });
+  const opened = !(await panel.isVisible());
+  if (opened)
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await panel
+    .getByRole("checkbox", { name: "Density rendering", exact: true })
+    .setChecked(enabled);
+  if (opened)
+    await panel
+      .getByRole("button", { name: "Close panel", exact: true })
+      .click();
+}

@@ -288,11 +288,11 @@ test("trial rows keep the current tetrode and cut history; clock/speed summaries
         vertical: [...ctx.getImageData(0, Math.floor(c.height / 2), 1, 1).data],
       };
     });
-  expect(axisPixels.horizontal[0]).toBe(255);
-  expect(axisPixels.horizontal[1]).toBe(0);
-  expect(axisPixels.horizontal[2]).toBe(0);
-  expect(axisPixels.horizontal[3]).toBeGreaterThan(200);
-  expect(axisPixels.vertical[3]).toBe(0);
+  expect(axisPixels.vertical[0]).toBe(255);
+  expect(axisPixels.vertical[1]).toBe(0);
+  expect(axisPixels.vertical[2]).toBe(0);
+  expect(axisPixels.vertical[3]).toBeGreaterThan(200);
+  expect(axisPixels.horizontal[3]).toBe(0);
   await expect(page.locator(".speed-axis-limit")).toHaveText("45 cm/s max");
   await cut(page, "02").click();
   await page.getByLabel("Destination cell", { exact: true }).fill("3");

@@ -47,6 +47,18 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
   await image.hover();
   await expect(stats).toBeVisible();
   await expect(stats).toContainText("spikes");
+  expect(await copy.evaluate((el) => getComputedStyle(el).resize)).toBe("none");
+  const beforeDrag = (await copy.boundingBox())!,
+    content = (await image.boundingBox())!;
+  await page.mouse.move(content.x + 70, content.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(content.x - 40, content.y + 90, { steps: 4 });
+  await page.mouse.up();
+  const afterDrag = (await copy.boundingBox())!;
+  expect(afterDrag.x - beforeDrag.x).toBe(-110);
+  expect(afterDrag.y - beforeDrag.y).toBe(50);
+  expect(afterDrag.width).toBe(beforeDrag.width);
+  expect(afterDrag.height).toBe(beforeDrag.height);
   const frozen = await stats.textContent();
   expect(await image.getAttribute("src")).toBe(src);
   await page.screenshot({ path: "test-results/copied-tile-hover.png" });

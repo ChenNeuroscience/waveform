@@ -788,6 +788,11 @@ export default function App() {
         </select>
       </label>
       <Toggle
+        label="Isolate selected cell"
+        checked={isolate}
+        onChange={setIsolate}
+      />
+      <Toggle
         label="Colour by recording time"
         checked={settings.drift}
         onChange={(v) => update("drift", v)}
@@ -996,13 +1001,11 @@ export default function App() {
       onSources={setSources}
       onDest={setDest}
       onTool={setTool}
-      onIsolate={setIsolate}
       onToggle={(m) => setShown((s) => ({ ...s, [m]: !s[m] }))}
       onPanel={setPane}
-      onOperation={operation}
       onEdit={edit}
+      onOperation={operation}
       onPolygon={polygon}
-      onSettings={update}
       onDemo={startDemo}
       onError={() => setError("")}
       onNotice={() => setNotice("")}
@@ -1195,6 +1198,7 @@ export default function App() {
       {copies.map((c) => (
         <FloatingWindow
           key={c.id}
+          comparison
           grabMode={grabMode}
           title={c.title}
           x={c.x}

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { usePreference } from "./preferences";
 import { fitGrid, projectionFrame } from "./plot-geometry";
 import { ClusterGPU, drawWaves, drawWaveOverview, projections } from "./gpu";
 import {
@@ -53,12 +52,15 @@ export function Clusters({
       setColumns(
         Math.max(
           1,
-          Math.min(6, Math.floor(wrapper.current!.clientWidth / 128)),
+          Math.min(
+            6,
+            Math.floor(wrapper.current!.parentElement!.clientWidth / 128),
+          ),
         ),
       );
       setVersion((v) => v + 1);
     });
-    ro.observe(wrapper.current!);
+    ro.observe(wrapper.current!.parentElement!);
     return () => {
       ro.disconnect();
       gpu.current?.dispose();
@@ -92,7 +94,7 @@ export function Clusters({
       className="clusters"
       ref={wrapper}
       data-columns={columns}
-      style={{ height: Math.ceil(6 / columns) * 128 }}
+      style={{ width: columns * 128, height: Math.ceil(6 / columns) * 128 }}
       onPointerDown={(e) => {
         if (tool !== "lasso" && tool !== "brush") return;
         const p = point(e),
@@ -222,99 +224,6 @@ export function WavePlot({ data, cell }: { data: ViewData; cell: number }) {
         {data.waveLabels.filter((c) => c === cell).length} sampled spikes
       </small>
     </div>
-  );
-}
-export function WaveformGate({
-  disabled,
-  onGate,
-}: {
-  disabled: boolean;
-  onGate: (
-    channel: number,
-    sample: number,
-    threshold: number,
-    above: boolean,
-  ) => void;
-}) {
-  const [gate, setGate] = usePreference("waveform-gate", {
-    channel: 0,
-    sample: 14,
-    threshold: 40,
-    above: true,
-  });
-  const { channel, sample, threshold, above } = gate,
-    setChannel = (channel: number) => setGate((g) => ({ ...g, channel })),
-    setSample = (sample: number) => setGate((g) => ({ ...g, sample })),
-    setThreshold = (threshold: number) => setGate((g) => ({ ...g, threshold })),
-    setAbove = (above: boolean) => setGate((g) => ({ ...g, above }));
-  return (
-    <details className="wave-gate">
-      <summary>Split by waveform sample</summary>
-      <p>
-        Apply a sample threshold to every spike in the chosen source cells. The
-        first use reads one waveform column; repeated cuts reuse it.
-      </p>
-      <div>
-        <label>
-          Channel
-          <select
-            aria-label="Gate channel"
-            value={channel}
-            onChange={(e) => setChannel(+e.target.value)}
-          >
-            {[0, 1, 2, 3].map((c) => (
-              <option key={c} value={c}>
-                {c + 1}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Sample
-          <input
-            aria-label="Gate sample"
-            type="number"
-            value={sample}
-            min="0"
-            max="49"
-            onChange={(e) =>
-              setSample(Math.max(0, Math.min(49, +e.target.value)))
-            }
-          />
-        </label>
-        <label>
-          Threshold
-          <input
-            aria-label="Gate threshold"
-            type="number"
-            value={threshold}
-            min="-128"
-            max="127"
-            onChange={(e) =>
-              setThreshold(Math.max(-128, Math.min(127, +e.target.value)))
-            }
-          />
-        </label>
-        <label>
-          Move
-          <select
-            aria-label="Gate direction"
-            value={above ? "above" : "below"}
-            onChange={(e) => setAbove(e.target.value === "above")}
-          >
-            <option value="above">At or above</option>
-            <option value="below">Below</option>
-          </select>
-        </label>
-        <button
-          className="secondary"
-          disabled={disabled}
-          onClick={() => onGate(channel, sample, threshold, above)}
-        >
-          Apply split
-        </button>
-      </div>
-    </details>
   );
 }
 export function CellOverview({
@@ -568,7 +477,7 @@ export function AnalysisPlot({
             }
             if (positionSpeed) {
               ctx.fillStyle = "#f00";
-              ctx.fillRect(0, h - 0.6, w, 0.6);
+              ctx.fillRect(0, 0, 0.6, h);
             }
           }
         } else {
