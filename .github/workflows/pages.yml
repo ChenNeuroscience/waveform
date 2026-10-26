@@ -41,7 +41,7 @@ jobs:
           name: browser-test-results
           path: test-results
   deploy:
-    if: github.event_name != 'pull_request' && github.repository == 'ChenNeuroscience/waveform' && (github.ref == 'refs/heads/gh-pages' || github.ref == 'refs/heads/main')
+    if: github.event_name != 'pull_request' && github.repository == 'ChenNeuroscience/waveform' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
