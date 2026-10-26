@@ -10,7 +10,6 @@ import { CutDownloads, cutDownloadKey, writeCutDrag } from "./cut-downloads";
 import { usePreference } from "./preferences";
 import { organiseFiles } from "./files";
 import { request } from "./client";
-import { demoFiles } from "./demo";
 import {
   color,
   groupTextColor,
@@ -719,15 +718,37 @@ export default function App() {
     return () => removeEventListener("keydown", key);
   });
   const startDemo = async () => {
+    if (busy) return;
     setDemo(true);
-    setMessage("Creating synthetic demo…");
-    await new Promise((r) => setTimeout(r, 20));
-    await importFiles(demoFiles());
+    setBusy(true);
+    setMessage("Preparing simulated recordings…");
+    try {
+      const quick =
+        new URLSearchParams(location.search).get("demo") === "quick";
+      const seed = quick ? 4271 : crypto.getRandomValues(new Uint32Array(1))[0];
+      const files = await request<File[]>(
+        "demo",
+        { options: { quick, seed } },
+        (value, message) => {
+          setProgress(value);
+          setMessage(message);
+        },
+      );
+      setBusy(false);
+      await importFiles(files);
+    } catch (error) {
+      setBusy(false);
+      setError(String(error));
+    }
   };
   const drop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDrag(false);
     if (e.dataTransfer.types.includes("application/x-waveform-cut")) return;
+    if (e.dataTransfer.types.includes("application/x-waveform-demo")) {
+      startDemo();
+      return;
+    }
     const entries = Array.from(e.dataTransfer.items)
       .map((i) => i.webkitGetAsEntry?.())
       .filter(Boolean);

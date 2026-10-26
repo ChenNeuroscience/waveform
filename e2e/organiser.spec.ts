@@ -22,7 +22,7 @@ async function fixture(
       raw,
     ]),
   });
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await page
     .getByLabel("Import recording files", { exact: true })
     .setInputFiles([

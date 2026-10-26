@@ -186,7 +186,8 @@ export function DesktopShell(p: Props) {
       onDragOver={(e) => {
         e.preventDefault();
         if (
-          e.dataTransfer.types.includes("Files") &&
+          (e.dataTransfer.types.includes("Files") ||
+            e.dataTransfer.types.includes("application/x-waveform-demo")) &&
           !e.dataTransfer.types.includes("application/x-waveform-cut")
         )
           p.onDrag(true);
@@ -355,7 +356,7 @@ export function DesktopShell(p: Props) {
                     <progress max="1" value={p.progress} /> {p.message}
                   </>
                 ) : p.data ? (
-                  `${(p.data.residentBytes / 1048576).toFixed(0)} MB cached · Local files`
+                  `${(p.data.residentBytes / 1048576).toFixed(0)} MB cached`
                 ) : (
                   "Preparing…"
                 )}
@@ -776,12 +777,46 @@ export function DesktopShell(p: Props) {
               <img src={video} alt="Watch the original Waveform introduction" />
               <span>Original video introduction ↗</span>
             </a>
-            <button className="demo-link" onClick={p.onDemo}>
-              Explore a synthetic demo
+            <button
+              className="demo-files"
+              aria-label="Explore a synthetic demo"
+              disabled={p.busy}
+              draggable={!p.busy}
+              onClick={p.onDemo}
+              onDragStart={(event) => {
+                event.dataTransfer.setData(
+                  "application/x-waveform-demo",
+                  "generate",
+                );
+                event.dataTransfer.effectAllowed = "copy";
+                p.onDrag(true);
+              }}
+              onDragEnd={() => p.onDrag(false)}
+            >
+              <span className="demo-file-stack" aria-hidden="true">
+                <span className="demo-file-card">.pos</span>
+                <span className="demo-file-card">.cut</span>
+                <span className="demo-file-card">.1</span>
+                <svg viewBox="0 0 100 40">
+                  <path d="M5 10 Q45 40 85 12 M70 12 L85 12 L82 27" />
+                </svg>
+              </span>
+              <span>
+                <b>Explore a synthetic demo</b>
+                <small>Drag these files here, or click to try</small>
+                <small>
+                  {new URLSearchParams(location.search).get("demo") === "quick"
+                    ? "Quick preview"
+                    : "9 million spikes · 100 cells · 2 trials"}
+                </small>
+              </span>
             </button>
-            <small>
-              Files are processed locally and stay on this computer.
-            </small>
+            {p.busy && (
+              <div className="demo-progress" role="status">
+                <progress max="1" value={p.progress} />
+                {p.message}
+              </div>
+            )}
           </div>
         </main>
       )}

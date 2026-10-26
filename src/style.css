@@ -2045,3 +2045,84 @@ kbd {
 .comparison-window .floating-content {
   cursor: move;
 }
+
+.demo-files {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 360px;
+  margin: 12px auto;
+  padding: 8px 14px;
+  border: 1px dashed #bbb;
+  background: #fafafa;
+  cursor: grab;
+  text-align: left;
+  white-space: normal;
+}
+.demo-files > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.demo-files b {
+  font-size: 12px;
+}
+.demo-files small {
+  display: block;
+  font-size: 10px;
+}
+.demo-file-stack {
+  position: relative;
+  width: 100px;
+  height: 78px;
+  flex: none;
+}
+.demo-file-card {
+  position: absolute;
+  width: 43px;
+  height: 54px;
+  top: 10px;
+  left: 3px;
+  display: flex;
+  align-items: flex-end;
+  padding: 6px;
+  border: 1px solid #999;
+  background: #fff;
+  color: #333;
+  font: 11px monospace;
+  box-shadow: 1px 2px 3px #0002;
+  transform: rotate(-12deg);
+}
+.demo-file-card:nth-child(2) {
+  left: 24px;
+  top: 5px;
+  transform: rotate(0);
+  background: #fff4ef;
+}
+.demo-file-card:nth-child(3) {
+  left: 46px;
+  transform: rotate(12deg);
+  background: #fffbe6;
+}
+.demo-file-stack svg {
+  position: absolute;
+  width: 78px;
+  height: 32px;
+  left: 29px;
+  top: 52px;
+  fill: none;
+  stroke: #777;
+  stroke-width: 1.5;
+}
+.demo-progress {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0;
+  font-size: 11px;
+}
+.demo-progress progress {
+  width: 80px;
+  height: 7px;
+}

@@ -5,7 +5,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await page.getByText("Explore a synthetic demo").click();
   await ready(page, 30000);
   await expect(page.getByText("18,000", { exact: true })).toBeVisible();
@@ -96,7 +96,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
 test("production assets and Wasm load under the GitHub Pages subpath", async ({
   page,
 }) => {
-  await page.goto("http://127.0.0.1:4174/waveform/");
+  await page.goto("http://127.0.0.1:4174/waveform/?demo=quick");
   await page.getByText("Explore a synthetic demo").click();
   await ready(page, 30000);
   await expect(page.getByRole("alert")).toHaveCount(0);
@@ -104,7 +104,7 @@ test("production assets and Wasm load under the GitHub Pages subpath", async ({
 });
 test("mobile welcome stays within the viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await expect(
     page.getByRole("button", { name: "Browse files", exact: true }),
   ).toBeVisible();

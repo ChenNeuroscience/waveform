@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { ready } from "./controls";
 
 async function demo(page: Page) {
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await page.getByText("Explore a synthetic demo").click();
   await ready(page);
 }
@@ -10,7 +10,7 @@ async function demo(page: Page) {
 test("hover preserves waveform pixels, aligns the badge and displays the sampling warning above the toolbar", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await expect(page).toHaveTitle("Waveform");
   await page.getByText("Explore a synthetic demo").click();
   await ready(page);
@@ -180,7 +180,7 @@ test("feature corner labels survive Space copies; settings and divider positions
 test("external file readiness uses the original 800 ms pivot animation; internal cut drags do not", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   const enter = (internal = false) =>
     page.locator(".desktop-app").evaluate((el, internal) => {
       const data = new DataTransfer();

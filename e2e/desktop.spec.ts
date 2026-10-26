@@ -22,7 +22,7 @@ async function fixture(page: Page) {
     raw[i * 216 + 4 + 14] = v;
     raw[i * 216 + 54 + 4 + 20] = [10, 25, 40, 100, 0][i];
   });
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await page
     .getByLabel("Import recording files", { exact: true })
     .setInputFiles([
@@ -195,7 +195,7 @@ test("tile drag merge and right-button waveform split preserve exact undo labels
 test("hover overlays and Space copies retain plots while navigating", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await page.getByText("Explore a synthetic demo").click();
   await ready(page);
   const wave = page.locator('.cell-tile[data-cell="2"] .tile-waves');
@@ -252,7 +252,7 @@ test("hover overlays and Space copies retain plots while navigating", async ({
 test("plot data keeps its proportions when panes and the window resize", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await page.getByText("Explore a synthetic demo").click();
   await ready(page);
   const viewport = async () =>
@@ -298,7 +298,7 @@ test("plot data keeps its proportions when panes and the window resize", async (
 test("tiles wrap at their plot width, with details only on hover and no selection checkboxes", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   await page.getByText("Explore a synthetic demo").click();
   await ready(page);
   const tile = (cell: number) =>

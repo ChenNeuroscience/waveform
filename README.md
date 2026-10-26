@@ -33,12 +33,14 @@ npm run build:wasm
 npm run dev
 ```
 
-Open the URL printed by Vite. Use **Explore a synthetic demo** without supplying recordings, or drop LTX files into the workspace. For a production build:
+Open **http://localhost:5173**. Drag or click the simulated file stack to generate two trials with three tetrodes each, including **9 million spikes and 100 cells** in the largest recording. Each run uses a fresh seed. Record bytes are generated in Rust as the loader requests chunks; the demo uses the same decoder, editing engine and rendering pipeline as imported files. The 9M-record byte stream is not retained as a multi-GB fake file. You can also drop LTX files into the workspace. For a production build:
 
 ```sh
 npm run build
 npm run preview
 ```
+
+The dev server uses port 5173 and refuses to silently move to another port. Browser tests use a separate preview server on 4173; their start/stop lifecycle does not control the dev server. Generated test artifacts and Rust build outputs are excluded from the dev watcher.
 
 The Rust core has no dependencies and uses a small explicit Wasm ABI, so neither `wasm-pack` nor `wasm-bindgen` is needed.
 

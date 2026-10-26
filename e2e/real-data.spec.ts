@@ -16,7 +16,7 @@ test("user sample: three trials and sixteen tetrodes load without cuts", async (
   test.setTimeout(120000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   const files = readdirSync(dir!)
     .filter((f) => /\.(set|pos|\d+)$/.test(f))
     .map((f) => resolve(dir!, f));
@@ -87,7 +87,7 @@ test("nine million spikes and 100 cells: import, merge, undo and export", async 
   test.setTimeout(180000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await page.goto("/?demo=quick");
   const start = Date.now();
   await page
     .getByLabel("Import recording files", { exact: true })

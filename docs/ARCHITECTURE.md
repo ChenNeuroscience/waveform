@@ -76,3 +76,11 @@ Rate-map colour ceilings only recolour an existing map. Position options reproce
 ## Static hosting
 
 Vite emits relative asset paths and a content-hashed Wasm asset. Main-thread initialisation resolves the imported Wasm URL against the document and passes it to the worker, so JavaScript and Wasm stay version-matched under `/waveform/`. Cargo also copies the module to `public/wasm` for native Node verification/benchmarks before Vite builds. No thread-shared Wasm memory, SharedArrayBuffer, custom server, authentication service or cross-origin isolation header is required.
+
+## Generated recordings
+
+The landing-page file stack is both draggable and clickable. The default generates two trials and three tetrodes per trial; the largest has 9,000,000 spikes and 100 cells plus noise. A fresh seed determines cell templates, waveform variation, noise and spatial firing preferences. Tetrodes in a trial share one generated position trajectory and acquisition clock.
+
+Rust generates position records, cut labels and random-access tetrode record ranges. The worker returns normal set/pos/cut Files and small tetrode markers; before decoding, a marker resolves to a worker-only File adapter whose size and slice/stream methods expose the full generated recording. Only requested chunks are materialised. The existing decoder, waveform reservoir, gating reads, caches and edit/export paths operate on the full population. This avoids retaining several GB of artificial waveform Blobs and adds no worker or Wasm instance. Generated-demo timings include synthesis, not real disk throughput.
+
+`?demo=quick` uses the same generator at a smaller scale with a fixed seed for routine interaction tests. CI separately exercises the full default 9M demo, including exact merge/undo/export integrity. The generated cut files remain ordinary exportable files.
