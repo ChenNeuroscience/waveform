@@ -326,3 +326,52 @@ test("completed merges and swaps jiggle the updated result tiles with the existi
   await expect(page.locator(".tile-edit-cover")).toHaveCount(0);
   expect(await labels(page)).toEqual([0, 1, 1, 6, 6, 4]);
 });
+
+test("long source sets wrap between full-height braces while tools stay on the top line", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", {
+      name: "Try it now with simulated data",
+      exact: true,
+    })
+    .click();
+  await ready(page);
+  const initial = await page.locator(".painting-sources").evaluate((el) => {
+    const chip = el.querySelector("button")!.getBoundingClientRect(),
+      brace = el.querySelector(".source-brace")!.getBoundingClientRect();
+    return Math.abs(chip.y + chip.height / 2 - brace.y - brace.height / 2);
+  });
+  expect(initial).toBeLessThan(1);
+  const shortWidth = await page
+    .locator(".painting-sources")
+    .evaluate((el) => el.getBoundingClientRect().width);
+  expect(shortWidth).toBeLessThan(50);
+  for (let n = 2; n <= 20; n++)
+    await chip(page, n).click({ button: "right", modifiers: ["Shift"] });
+  const layout = await page.locator(".feature-group-heading").evaluate((el) => {
+    const tools = el.querySelector(".feature-tools")!.getBoundingClientRect(),
+      chips = [...el.querySelectorAll(".source-chips button")].map((x) =>
+        x.getBoundingClientRect(),
+      ),
+      braces = [...el.querySelectorAll(".source-brace")].map((x) =>
+        x.getBoundingClientRect(),
+      );
+    return {
+      toolsY: tools.y,
+      firstY: chips[0].y,
+      rows: new Set(chips.map((x) => x.y)).size,
+      sourceTop: chips[0].top,
+      sourceBottom: Math.max(...chips.map((x) => x.bottom)),
+      braces: braces.map((x) => ({ top: x.top, bottom: x.bottom })),
+    };
+  });
+  expect(layout.rows).toBeGreaterThan(1);
+  expect(layout.toolsY).toBeLessThanOrEqual(layout.firstY);
+  for (const brace of layout.braces) {
+    expect(brace.top).toBeLessThanOrEqual(layout.sourceTop);
+    expect(brace.bottom).toBeGreaterThanOrEqual(layout.sourceBottom);
+  }
+  await page.screenshot({ path: "test-results/long-source-set.png" });
+});

@@ -25,6 +25,22 @@ export function GroupSelector({
   onNew: () => void;
   onHover: (group: number | null) => void;
 }) {
+  const brace = (closing = false) => (
+    <span
+      className={`source-brace ${closing ? "closing" : ""}`}
+      aria-hidden="true"
+    >
+      <svg viewBox="0 0 8 100" preserveAspectRatio="none">
+        <path
+          d="M7 1 C2 1 3 17 3 32 C3 45 1 48 1 50 C1 52 3 55 3 68 C3 83 2 99 7 99"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    </span>
+  );
   const chip = (group: number, role: "Destination" | "Source" | "Group") => (
     <button
       key={group}
@@ -63,13 +79,11 @@ export function GroupSelector({
             ←
           </span>
           <span className="painting-sources" aria-label="Source groups">
-            <span className="set-symbol" aria-hidden="true">
-              {"{"}
+            {brace()}
+            <span className="source-chips">
+              {sources.map((group) => chip(group, "Source"))}
             </span>
-            {sources.map((group) => chip(group, "Source"))}
-            <span className="set-symbol" aria-hidden="true">
-              {"}"}
-            </span>
+            {brace(true)}
           </span>
         </div>
       </div>

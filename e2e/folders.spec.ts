@@ -67,15 +67,6 @@ test("identical basenames in different folders keep separate cuts and histories"
     await expect(
       page.getByRole("button", { name: "Select cell 2", exact: true }),
     ).toBeVisible();
-    await page
-      .getByRole("button", { name: "Edit history", exact: true })
-      .click();
-    await page
-      .getByRole("button", { name: "Duplicate cut", exact: true })
-      .click();
-    await page
-      .getByRole("button", { name: "Close panel", exact: true })
-      .click();
     await expect(trials).toHaveCount(2);
     await expect(
       page.getByRole("button", { name: "~_1 edited.cut", exact: true }),

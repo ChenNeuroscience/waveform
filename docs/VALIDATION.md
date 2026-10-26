@@ -6,10 +6,10 @@ Local verification on 26 October 2026, macOS arm64, Node 24.14.0, stable Rust, C
 
 | Check                                           | Result                                                                                                                                                                                                                         |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 123 KB, main app JS about 302 KB before gzip                                                                                                                                                         |
+| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 123 KB, main app JS about 308 KB before gzip                                                                                                                                                         |
 | Rust tests                                      | 14 passed: decoding, cut streaming, exact edits/patches, inserted-cell split, density invalidation, position/analysis and 9-million-label integrity                                                                            |
 | TypeScript unit tests                           | 12 passed: grouping, cut/CLu validation, binary boundary, patches, occupancy/AC and 96 kHz position clock/window/bearing regression, plot-bin geometry, original palette/contrast, clock formatting and viewport-safe geometry |
-| Chromium browser tests                          | 30 passed, including two optional local data tests                                                                                                                                                                             |
+| Chromium browser tests                          | 35 passed, including two optional private-data tests                                                                                                                                                                           |
 | Dependency audit after updating the test runner | Zero reported vulnerabilities                                                                                                                                                                                                  |
 | Git diff whitespace check                       | Passed                                                                                                                                                                                                                         |
 
@@ -17,7 +17,7 @@ Browser scenarios:
 
 1. Import the supplied private sample directory, organise three trials with 16 tetrodes each, switch among recordings, create a lasso cut, and undo it. The supplied data contains no cut files. No sample bytes are checked into the repository or sent to a server.
 2. Import a generated **9,000,000-spike** tetrode and **100 cells plus noise**, drag-snap merge, undo, export, reparse the export, and compare a hash of **every label** with the original synthetic assignment vector.
-3. Synthetic demo: merge, waveform split, undo/redo, switch away and back, tile wall, floating settings, direction view, Space comparison, cut duplication and cut export.
+3. Synthetic demo: merge, waveform split, undo/redo, switch away and back, tile wall, floating settings, direction view, Space comparison, alternative cut versions and cut export.
 4. Serve the production build from an actual `/waveform/` static mount and load the demo, worker and Wasm module successfully.
 5. Verify the 390-pixel mobile welcome screen fits the viewport.
 6. Verify 350 px default / 240 px minimum, nested cut/CLu files, simultaneous movable/resizable header/settings windows, and nonblank density rendering.
@@ -27,9 +27,9 @@ Browser scenarios:
 10. Toggle plots and verify intrinsic tile widths, wrapping, shared density/flag canvas, absent tile checkboxes and larger numeric overlays only on hover.
 11. Verify the drag placeholder, exact cross-column snap alignment, 1.5-second alpha cycle, simultaneous source/target position spikes, hidden stats, snap-only merge, unsnapped/Escape cancellation, and settling animation. Verify restoration after the source scrolls out of the virtual wall.
 12. Space-click closes copies and tool windows without activating the plot or control underneath. Comparison content drags its window and has no resize handle; tool windows remain resizable. Copied tiles have no embedded title strip, a single window title, and a separate frozen hover-only stats overlay.
-13. Import two folders with identical trial/tetrode/cut basenames and timestamps. Verify separate assignments, undo histories, and cut duplication without creating a spurious trial.
+13. Import two folders with identical trial/tetrode/cut basenames and timestamps. Verify separate assignments, undo histories, and separate edited cuts without creating a spurious trial.
 
-14. Verify collapsed/expanded inline cuts, automatic blue cut creation, independent imported/local/duplicated undo and redo, and inactive-cut drag payloads and label contents without changing the active recording.
+14. Verify collapsed/expanded inline cuts, automatic blue cut creation, independent imported/edited undo and redo, and inactive-cut drag payloads and label contents without changing the active recording.
 15. Compare every pixel in the waveform region before/after hover; verify transparent wave hit targets, original bottom-right stats, badge positions and speed clearance, the prominent sampling warning, and a page-layer halo above both the toolbar and snapped fade. Verify frozen copies retain the same badge/warning behaviour.
 16. Switch flag → density → flag three times, require the exact original flag pixels each time, and check for non-flat waveforms and no WebGL errors.
 17. Check the centred feature grid has no footer, numeric split form or feature-pane checkboxes; recording details fit in the toolbar. Verify A1–A4 corner labels are baked into Space-copy PNGs, square feature viewports after resizing, and settings/divider/tool-window restoration on a smaller screen.
@@ -82,3 +82,5 @@ The local browser checks use Chromium. Native Windows Explorer/macOS Finder drop
 The GitHub workflow builds and tests pull requests, then deploys pushes to upstream `main`. The real `/waveform/` static-mount check verifies the Pages asset paths locally; the deployment run is checked separately when this PR is merged.
 
 The group-selection follow-up adds exact-label browser checks for the original destination/source set notation, right-click and Shift-right-click source toggles, hover E/F/Shift-F shortcuts, unused destinations and multi-source transfers. Coincident-point checks verify that tile focus changes the frontmost group colour without any feature-buffer uploads. Swaps verify hover-only entry, a centred prompt with a focused input, persistent source glow, number validation, both empty-neighbour choices, two occupied groups, cancellation, navigation cleanup and undo/redo. Completed merges and swaps reuse the 650 ms settling jiggle on their updated result tiles. Existing edit/history tests use painting or tile gestures through the restored UI.
+
+Selector polish verifies short source sets hug their braces, long sets wrap between spanning braces, and the tools remain on the first line. Edit history omits storage-location text, export/duplicate buttons and completion checkmarks. Cut exports continue through Ctrl/Cmd-S and organiser drag data.

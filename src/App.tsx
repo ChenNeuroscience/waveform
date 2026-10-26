@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, History, Redo2, Search, Undo2, X } from "lucide-react";
+import { History, Redo2, Search, Undo2, X } from "lucide-react";
 import { DesktopShell } from "./DesktopShell";
 import type { DragComparison } from "./tile-gestures";
 import { FloatingWindow } from "./FloatingWindow";
@@ -625,20 +625,15 @@ export default function App() {
       description: `${tool === "brush" ? "Brush" : "Lasso"} ${sources.join(", ")} → ${dest}`,
     });
   };
-  const exportCut = async (format = "cut") => {
+  const exportCut = async () => {
     if (!ready) return;
     try {
       const b = await request<Blob>("export", {
         session: data!.session,
-        format,
+        format: "cut",
         trial: trial!.name,
       });
-      download(
-        b,
-        format === "clu"
-          ? `${trial!.name}.clu.${tetNum}`
-          : `${trial!.name}_${tetNum}.cut`,
-      );
+      download(b, `${trial!.name}_${tetNum}.cut`);
       setNotice("Cut exported. Original files are never overwritten.");
     } catch (e) {
       setError(String(e));
@@ -725,7 +720,6 @@ export default function App() {
       }
     });
   };
-  const forkCut = () => operation("clone_cut", { newCut: newCut() });
   const update = <K extends keyof Settings>(k: K, v: Settings[K]) =>
     setSettings((s) => ({ ...s, [k]: v }));
   useEffect(() => {
@@ -1205,8 +1199,7 @@ export default function App() {
               <>
                 <p className="muted">
                   Each cut keeps its own undo and redo history when you switch
-                  trials or tetrodes. History is stored locally for this
-                  workspace session.
+                  trials or tetrodes.
                 </p>
                 <div className="history-actions">
                   <button
@@ -1233,7 +1226,6 @@ export default function App() {
                           <b>{h.description}</b>
                           <small>{fmt(h.changed)} spikes changed</small>
                         </div>
-                        <Check size={14} />
                       </div>
                     ))
                   ) : (
@@ -1258,35 +1250,14 @@ export default function App() {
                       </div>
                     ))}
                 </div>
-                <button
-                  className="primary full"
-                  disabled={!ready}
-                  onClick={() => exportCut()}
-                >
-                  Export .cut
-                </button>
-                <button
-                  className="secondary full"
-                  disabled={!ready}
-                  onClick={forkCut}
-                >
-                  Duplicate cut
-                </button>
-                <button
-                  className="secondary full"
-                  disabled={!ready}
-                  onClick={() => exportCut("clu")}
-                >
-                  Export .clu (1-based)
-                </button>
               </>
             )}
             {pane === "headers" && <Headers headers={data?.headers || {}} />}
             {pane === "help" && (
               <>
                 <p className="muted">
-                  Your files stay on your device. Import a selection of LTX
-                  files or a folder to begin. Add cut files at any time.
+                  Import a selection of LTX files or a folder to begin. Add cut
+                  files at any time.
                 </p>
                 <h3>Navigation</h3>
                 <Shortcut keys="0–9" text="Jump to tetrode (ones digit)" />

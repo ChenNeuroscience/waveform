@@ -1,5 +1,5 @@
 import { adjacentSwap, destination, paintSources } from "./controls";
-import { ready, exportCutFromHistory as exportCut } from "./controls";
+import { ready, exportCut } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { decodeCut } from "../tests/wasm";
@@ -153,18 +153,10 @@ test("cut files remain inline when collapsed; edits create independently navigab
   await expect(cut(page, "Undo")).toBeDisabled();
   expect(await assignments(page)).toEqual([0, 0, 0, 0, 0, 0]);
   await first.click();
-  await page.getByRole("button", { name: "Edit history", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Duplicate cut", exact: true })
-    .click();
-  await page
-    .getByRole("dialog", { name: "Edit history", exact: true })
-    .getByRole("button", { name: "Close panel", exact: true })
-    .click();
-  await expect(cut(page, "~_1 edited 3.cut")).toHaveClass(/active/);
   await expect(cut(page, "Redo")).toBeEnabled();
   await cut(page, "Redo").click();
   expect(await assignments(page)).toEqual([2, 2, 2, 2, 3, 3]);
+  await cut(page, "Undo").click();
   await first.click();
   expect(await assignments(page)).toEqual([1, 1, 2, 2, 3, 3]);
   await expect(cut(page, "Undo")).toBeDisabled();

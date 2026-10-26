@@ -376,10 +376,11 @@ small {
   flex-shrink: 0;
   border-bottom: 1px solid #ccc;
   background: #fafafa;
+  padding-top: 4px;
 }
 .feature-group-heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px;
   padding-right: 3px;
 }
@@ -427,12 +428,10 @@ small {
   outline: 2px solid #333;
   outline-offset: -2px;
 }
-.painting-set,
-.painting-sources {
+.painting-set {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 2px;
-  flex-wrap: wrap;
   max-width: 100%;
 }
 .painting-set {
@@ -440,14 +439,44 @@ small {
   min-width: 0;
 }
 .painting-sources {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) 8px;
+  gap: 2px;
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
+}
+.source-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  gap: 2px;
+  padding: 2px 0;
+  min-height: 23px;
+}
+.source-brace {
+  position: relative;
+  min-height: 23px;
+}
+.source-brace svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.source-brace.closing svg {
+  transform: scaleX(-1);
 }
 .painting-destination {
   display: inline-flex;
+  align-items: center;
+  height: 23px;
 }
 .set-symbol {
   font-size: 23px;
-  line-height: 20px;
+  line-height: 23px;
 }
 .feature-group-strip .new-group {
   background: #ffffe0;
@@ -1151,10 +1180,6 @@ small {
   font-size: 9px;
   color: #777;
   margin-top: 3px;
-}
-.history-list svg:last-child {
-  margin-left: auto;
-  color: #777;
 }
 .history-list .empty-history {
   flex-direction: column;
