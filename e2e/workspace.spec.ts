@@ -67,7 +67,10 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   ]);
   expect(download.suggestedFilename()).toBe("demo_box-a_1.cut");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  // CI's software WebGL renderer can still be finishing the restored tile wall.
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible({
+    timeout: 15000,
+  });
   await page.getByLabel("Spatial bin width", { exact: true }).fill("5");
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   await page
