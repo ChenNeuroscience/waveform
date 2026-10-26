@@ -203,7 +203,7 @@ test("cancelling after the source scrolls out of the virtual wall restores its s
   page,
 }) => {
   await page.goto("/?demo=quick");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
   await start(page, 1);
   await page

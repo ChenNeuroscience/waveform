@@ -5,7 +5,7 @@ import { parseHeader } from "../src/files";
 it("generated files share an acquisition clock and support exact random-access byte ranges", async () => {
   const w = await corePromise;
   const files = await demoFiles(w, { quick: true, seed: 4271 }, () => {});
-  const marker = files.find((f) => f.name === "demo_linear-track.1")!,
+  const marker = files.find((f) => f.name === "demo_box-a.1")!,
     source = recordingSource(w, marker),
     prefix = new Uint8Array(await source.slice(0, 65536).arrayBuffer()),
     { header, offset } = parseHeader(prefix);
@@ -20,7 +20,7 @@ it("generated files share an acquisition clock and support exact random-access b
   );
   expect(a).toEqual(b.subarray(43, 216 * 7 + 17));
   expect(await source.slice(-10).text()).toBe("\r\ndata_end");
-  const cut = files.find((f) => f.name === "demo_linear-track_1.cut")!;
+  const cut = files.find((f) => f.name === "demo_box-a_1.cut")!;
   const labels = await decodeCut(cut, 18000);
   expect(Math.max(...labels)).toBe(12);
   const p = w.alloc_bytes(216 * 9),

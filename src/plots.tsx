@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { fitGrid, projectionFrame } from "./plot-geometry";
+import {
+  fitGrid,
+  projectionFrame,
+  FEATURE_PLOT,
+  FEATURE_GAP,
+  FEATURE_STRIDE,
+  featureGridSize,
+  featurePlotOrigin,
+} from "./plot-geometry";
 import { ClusterGPU, drawWaves, drawWaveOverview, projections } from "./gpu";
 import {
   color,
@@ -54,7 +62,10 @@ export function Clusters({
           1,
           Math.min(
             6,
-            Math.floor(wrapper.current!.parentElement!.clientWidth / 128),
+            Math.floor(
+              (wrapper.current!.parentElement!.clientWidth + FEATURE_GAP) /
+                FEATURE_STRIDE,
+            ),
           ),
         ),
       );
@@ -85,6 +96,7 @@ export function Clusters({
       setError(String(e));
     }
   }, [data, settings, selected, isolate, range, axes, version, columns]);
+  const grid = featureGridSize(columns);
   const point = (e: React.PointerEvent) => {
     const b = e.currentTarget.getBoundingClientRect();
     return [e.clientX - b.left, e.clientY - b.top];
@@ -94,12 +106,21 @@ export function Clusters({
       className="clusters"
       ref={wrapper}
       data-columns={columns}
-      style={{ width: columns * 128, height: Math.ceil(6 / columns) * 128 }}
+      style={grid}
       onPointerDown={(e) => {
-        if (tool !== "lasso" && tool !== "brush") return;
+        if (e.button !== 0 || (tool !== "lasso" && tool !== "brush")) return;
         const p = point(e),
-          plot = Math.floor(p[1] / 128) * columns + Math.floor(p[0] / 128);
-        if (p[0] >= columns * 128 || plot >= 6) return;
+          plot =
+            Math.floor(p[1] / FEATURE_STRIDE) * columns +
+            Math.floor(p[0] / FEATURE_STRIDE);
+        if (
+          p[0] >= grid.width ||
+          p[1] >= grid.height ||
+          p[0] % FEATURE_STRIDE >= FEATURE_PLOT ||
+          p[1] % FEATURE_STRIDE >= FEATURE_PLOT ||
+          plot >= 6
+        )
+          return;
         drawing.current = { plot, points: [p] };
         setStroke([p]);
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -115,23 +136,23 @@ export function Clusters({
         drawing.current = null;
         setStroke([]);
         if (!d) return;
-        const w = 128,
-          h = 128,
-          col = d.plot % columns,
-          row = Math.floor(d.plot / columns),
-          frame = projectionFrame(w, h),
+        const origin = featurePlotOrigin(d.plot, columns),
+          frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT),
           points = d.points;
         if (tool !== "brush" && points.length < 3) return;
         const poly = points.flatMap(([x, y]) => [
           Math.max(
             0,
-            Math.min(1, ((x - col * w - frame.x) / frame.width - 0.035) / 0.93),
+            Math.min(
+              1,
+              ((x - origin.x - frame.x) / frame.width - 0.035) / 0.93,
+            ),
           ),
           Math.max(
             0,
             Math.min(
               1,
-              1 - ((y - row * h - frame.y) / frame.height - 0.035) / 0.93,
+              1 - ((y - origin.y - frame.y) / frame.height - 0.035) / 0.93,
             ),
           ),
         ]);
@@ -140,16 +161,16 @@ export function Clusters({
     >
       <canvas
         ref={canvas}
-        style={{ width: columns * 128, height: Math.ceil(6 / columns) * 128 }}
+        style={grid}
         aria-label="Six WebGL2 spike feature projections"
       />
       <div
         className="projection-labels"
         style={{
-          width: columns * 128,
-          height: Math.ceil(6 / columns) * 128,
-          gridTemplateColumns: `repeat(${columns},128px)`,
-          gridTemplateRows: `repeat(${Math.ceil(6 / columns)},128px)`,
+          ...grid,
+          gap: FEATURE_GAP,
+          gridTemplateColumns: `repeat(${columns},${FEATURE_PLOT}px)`,
+          gridTemplateRows: `repeat(${Math.ceil(6 / columns)},${FEATURE_PLOT}px)`,
         }}
       >
         {axes.map(([x, y], i) => (
@@ -195,8 +216,10 @@ export function captureFeatureGrid(): HTMLCanvasElement | undefined {
   for (const [i, label] of [
     ...root.querySelectorAll<HTMLElement>(".projection-labels>div"),
   ].entries()) {
-    const x = (i % columns) * 128,
-      y = Math.floor(i / columns) * 128;
+    const { x, y } = featurePlotOrigin(i, columns);
+    ctx.strokeStyle = "#bbb";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, FEATURE_PLOT - 1, FEATURE_PLOT - 1);
     ctx.fillStyle = "#ffffffe8";
     ctx.fillRect(x + 2, y + 2, 20, 13);
     ctx.fillRect(x + 106, y + 113, 20, 13);

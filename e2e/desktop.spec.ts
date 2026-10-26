@@ -196,7 +196,7 @@ test("hover overlays and Space copies retain plots while navigating", async ({
   page,
 }) => {
   await page.goto("/?demo=quick");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
   const wave = page.locator('.cell-tile[data-cell="2"] .tile-waves');
   await wave.hover();
@@ -253,7 +253,7 @@ test("plot data keeps its proportions when panes and the window resize", async (
   page,
 }) => {
   await page.goto("/?demo=quick");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
   const viewport = async () =>
     page
@@ -299,7 +299,7 @@ test("tiles wrap at their plot width, with details only on hover and no selectio
   page,
 }) => {
   await page.goto("/?demo=quick");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
   const tile = (cell: number) =>
     page.locator(`.cell-tile[data-cell="${cell}"]`);

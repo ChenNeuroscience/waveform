@@ -410,15 +410,16 @@ small {
   padding: 1px 2px;
 }
 .feature-group-strip {
-  height: 24px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  height: auto;
   min-height: 24px;
   display: flex;
   gap: 2px;
   align-items: center;
   padding: 2px 3px;
-  overflow-x: auto;
-  white-space: nowrap;
-  scrollbar-width: thin;
+  overflow: visible;
+  white-space: normal;
 }
 .feature-group-strip button {
   width: 21px;
@@ -1847,8 +1848,7 @@ kbd {
 .projection-labels > div,
 .projection-labels > div:nth-child(3n),
 .projection-labels > div:nth-child(n + 4) {
-  border-right: 1px solid #bbb;
-  border-bottom: 1px solid #bbb;
+  border: 1px solid #bbb;
   padding: 0;
 }
 .projection-labels .axis-y,
@@ -2055,7 +2055,7 @@ kbd {
   padding: 8px 14px;
   border: 1px dashed #bbb;
   background: #fafafa;
-  cursor: grab;
+  cursor: pointer;
   text-align: left;
   white-space: normal;
 }

@@ -8,9 +8,8 @@ import {
   Settings2,
   History,
   List,
-  Scissors,
+  Lasso,
   PenLine,
-  MousePointer2,
   GitMerge,
   ArrowLeftRight,
   Plus,
@@ -67,6 +66,7 @@ interface Props {
   ) => void;
   onPopOut: (cell: number, x?: number, y?: number) => void;
   onPopPlot: (kind: "path" | "features", x: number, y: number) => void;
+  ready: boolean;
   busy: boolean;
   progress: number;
   message: string;
@@ -126,6 +126,11 @@ export function DesktopShell(p: Props) {
     addEventListener("resize", resize);
     return () => removeEventListener("resize", resize);
   }, []);
+  useEffect(() => {
+    root.current
+      ?.querySelector<HTMLElement>(".trial-block.selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [p.trial?.id]);
   const pathCell = p.dragComparison?.source ?? p.hoverCell,
     primary = p.analysis?.cell === pathCell ? p.analysis : null,
     secondary =
@@ -136,7 +141,7 @@ export function DesktopShell(p: Props) {
     pathLayers = [primary, secondary]
       .filter((a): a is AnalysisData => !!a)
       .map((a) => ({ cell: a.cell, spikes: a.spikes, color: color(a.cell) }));
-  const ready = !!p.data && !p.busy,
+  const ready = p.ready,
     active = p.trial?.tetrodes.find((t) => t.number === p.tetNum),
     numbers = [
       ...new Set(p.trials.flatMap((t) => t.tetrodes.map((t) => t.number))),
@@ -186,8 +191,7 @@ export function DesktopShell(p: Props) {
       onDragOver={(e) => {
         e.preventDefault();
         if (
-          (e.dataTransfer.types.includes("Files") ||
-            e.dataTransfer.types.includes("application/x-waveform-demo")) &&
+          e.dataTransfer.types.includes("Files") &&
           !e.dataTransfer.types.includes("application/x-waveform-cut")
         )
           p.onDrag(true);
@@ -578,11 +582,12 @@ export function DesktopShell(p: Props) {
               <section className="feature-pane">
                 <div className="feature-tools">
                   <button
-                    className={p.tool === "select" ? "active" : ""}
-                    title="Select"
-                    onClick={() => p.onTool("select")}
+                    className={p.tool === "brush" ? "active" : ""}
+                    aria-label="Paint source spikes"
+                    title="Paint source spikes"
+                    onClick={() => p.onTool("brush")}
                   >
-                    <MousePointer2 size={14} />
+                    <PenLine size={14} />
                   </button>
                   <button
                     className={p.tool === "lasso" ? "active" : ""}
@@ -590,15 +595,7 @@ export function DesktopShell(p: Props) {
                     title="Lasso source spikes [L]"
                     onClick={() => p.onTool("lasso")}
                   >
-                    <Scissors size={14} />
-                  </button>
-                  <button
-                    className={p.tool === "brush" ? "active" : ""}
-                    aria-label="Paint source spikes"
-                    title="Paint source spikes"
-                    onClick={() => p.onTool("brush")}
-                  >
-                    <PenLine size={14} />
+                    <Lasso size={14} />
                   </button>
                   <span>
                     Source: {p.sources.length ? p.sources.join(", ") : "none"} →
@@ -684,7 +681,7 @@ export function DesktopShell(p: Props) {
                       selected={p.cell}
                       isolate={p.isolate}
                       range={FULL_RANGE}
-                      tool={ready ? p.tool : "select"}
+                      tool={ready ? p.tool : "disabled"}
                       onPolygon={p.onPolygon}
                     />
                   )}
@@ -779,35 +776,29 @@ export function DesktopShell(p: Props) {
             </a>
             <button
               className="demo-files"
-              aria-label="Explore a synthetic demo"
+              draggable={false}
+              aria-label="Try it now with simulated data"
               disabled={p.busy}
-              draggable={!p.busy}
               onClick={p.onDemo}
-              onDragStart={(event) => {
-                event.dataTransfer.setData(
-                  "application/x-waveform-demo",
-                  "generate",
-                );
-                event.dataTransfer.effectAllowed = "copy";
-                p.onDrag(true);
-              }}
-              onDragEnd={() => p.onDrag(false)}
             >
               <span className="demo-file-stack" aria-hidden="true">
                 <span className="demo-file-card">.pos</span>
                 <span className="demo-file-card">.cut</span>
                 <span className="demo-file-card">.1</span>
                 <svg viewBox="0 0 100 40">
-                  <path d="M5 10 Q45 40 85 12 M70 12 L85 12 L82 27" />
+                  <path d="M35 4 L35 28 L42 22 L49 35 L54 32 L47 20 L59 20 Z M25 4 L20 0 M23 14 H16" />
                 </svg>
               </span>
               <span>
-                <b>Explore a synthetic demo</b>
-                <small>Drag these files here, or click to try</small>
+                <b>Try it now with simulated data</b>
+                <small>Click here to explore</small>
                 <small>
                   {new URLSearchParams(location.search).get("demo") === "quick"
                     ? "Quick preview"
-                    : "9 million spikes · 100 cells · 2 trials"}
+                    : new URLSearchParams(location.search).get("demo") ===
+                        "stress"
+                      ? "9 million spikes · 100 cells · stress test"
+                      : "~50k spikes/tetrode · 20 minutes · 5 trials"}
                 </small>
               </span>
             </button>

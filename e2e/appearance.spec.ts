@@ -3,7 +3,7 @@ import { ready } from "./controls";
 
 async function demo(page: Page) {
   await page.goto("/?demo=quick");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
 }
 
@@ -12,7 +12,7 @@ test("hover preserves waveform pixels, aligns the badge and displays the samplin
 }) => {
   await page.goto("/?demo=quick");
   await expect(page).toHaveTitle("Waveform");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
   await expect(page).toHaveTitle(/demo_.* \[Waveform\]/);
   await expect(page.locator(".toolbar-title")).toHaveCount(0);
@@ -115,9 +115,7 @@ test("feature corner labels survive Space copies; settings and divider positions
   });
   for (const ink of labelInk) expect(ink).toBeGreaterThan(5);
   const png = await page.locator(".plot-copy").getAttribute("src");
-  await page
-    .getByRole("button", { name: "demo_open-field 3", exact: true })
-    .click();
+  await page.getByRole("button", { name: "demo_box-b 8", exact: true }).click();
   await ready(page);
   expect(await page.locator(".plot-copy").getAttribute("src")).toBe(png);
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
@@ -155,7 +153,7 @@ test("feature corner labels survive Space copies; settings and divider positions
     .toBeGreaterThan(800);
   await page.setViewportSize({ width: 900, height: 650 });
   await page.reload();
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
   const left = (await page.locator(".left-workspace").boundingBox())!;
   expect(left.width).toBe(563);

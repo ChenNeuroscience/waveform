@@ -88,26 +88,31 @@ export function recordingSource(wasm: Core, file: File): File {
 /** Generate cuts/position files; raw tetrode bytes are synthesised only when read. */
 export async function demoFiles(
   w: Core,
-  options: { quick?: boolean; seed: number },
+  options: { quick?: boolean; stress?: boolean; seed: number },
   progress: (fraction: number, message: string) => void,
 ): Promise<File[]> {
   const files: File[] = [],
     modified = Date.now(),
-    cells = options.quick ? 12 : 100,
-    duration = options.quick ? 600 : 1500,
-    sizes = options.quick
-      ? [
-          [36000, 36000, 36000],
-          [18000, 18000, 18000],
-        ]
-      : [
-          [1800000, 900000, 450000],
-          [9000000, 1200000, 600000],
-        ],
+    duration = options.quick ? 600 : 1200,
+    sizes = Array.from({ length: 5 }, (_, trial) =>
+      Array.from({ length: 8 }, (_, tet) =>
+        options.quick
+          ? trial === 0
+            ? 18000
+            : 36000
+          : options.stress
+            ? trial === 0 && tet === 0
+              ? 9000000
+              : 50000
+            : tet === 0
+              ? 50000
+              : 40000 + ((trial * 317 + tet * 2711) % 20001),
+      ),
+    ),
     total = sizes.flat().reduce((a, b) => a + b, 0);
   let completed = 0;
-  for (let trial = 0; trial < 2; trial++) {
-    const name = `demo_${trial ? "linear-track" : "open-field"}`;
+  for (let trial = 0; trial < 5; trial++) {
+    const name = `demo_box-${String.fromCharCode(97 + trial)}`;
     files.push(
       new File(
         [
@@ -117,14 +122,18 @@ export async function demoFiles(
         { lastModified: modified },
       ),
     );
-    for (let tet = 1; tet <= 3; tet++) {
-      const spikes = sizes[trial][tet - 1],
+    for (let tet = 1; tet <= 8; tet++) {
+      const cells = options.quick
+          ? 12
+          : options.stress
+            ? 100
+            : [24, 36, 48][(tet - 1) % 3],
+        spikes = sizes[trial][tet - 1],
         context = w.synthetic_new(
           (options.seed + trial * 173) >>> 0,
           cells,
           spikes,
           duration,
-          trial,
           tet,
         ),
         header = encode.encode(
@@ -143,7 +152,7 @@ export async function demoFiles(
           files.push(
             new File(
               [
-                `duration ${duration}\nnum_pos_samples ${duration * 50}\nsample_rate 50 hz\ntimestamp_timebase 96000 hz\npixels_per_metre 300\nwindow_min_x 0\nwindow_min_y 0\nwindow_max_x 300\nwindow_max_y ${trial ? 60 : 300}\npos_format t,x1,y1,x2,y2,numpix1,numpix2\r\ndata_start`,
+                `duration ${duration}\nnum_pos_samples ${duration * 50}\nsample_rate 50 hz\ntimestamp_timebase 96000 hz\npixels_per_metre 300\nwindow_min_x 0\nwindow_min_y 0\nwindow_max_x 300\nwindow_max_y 300\npos_format t,x1,y1,x2,y2,numpix1,numpix2\r\ndata_start`,
                 copyU8(w, p, length),
                 tail,
               ],

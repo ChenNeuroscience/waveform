@@ -6,7 +6,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/?demo=quick");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page, 30000);
   await expect(page.getByText("18,000", { exact: true })).toBeVisible();
   await expect(
@@ -65,7 +65,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     page.waitForEvent("download"),
     exportCut(page),
   ]);
-  expect(download.suggestedFilename()).toBe("demo_linear-track_1.cut");
+  expect(download.suggestedFilename()).toBe("demo_box-a_1.cut");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
   await page.getByLabel("Spatial bin width", { exact: true }).fill("5");
@@ -97,7 +97,7 @@ test("production assets and Wasm load under the GitHub Pages subpath", async ({
   page,
 }) => {
   await page.goto("http://127.0.0.1:4174/waveform/?demo=quick");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page, 30000);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText("18,000", { exact: true })).toBeVisible();

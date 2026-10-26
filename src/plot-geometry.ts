@@ -31,3 +31,20 @@ export interface WaveLayout {
   inset: number;
   top?: number;
 }
+
+export const FEATURE_PLOT = 128;
+export const FEATURE_GAP = 4;
+export const FEATURE_STRIDE = FEATURE_PLOT + FEATURE_GAP;
+export function featureGridSize(columns: number, plots = 6) {
+  const rows = Math.ceil(plots / columns);
+  return {
+    width: columns * FEATURE_STRIDE - FEATURE_GAP,
+    height: rows * FEATURE_STRIDE - FEATURE_GAP,
+  };
+}
+export function featurePlotOrigin(index: number, columns: number) {
+  return {
+    x: (index % columns) * FEATURE_STRIDE,
+    y: Math.floor(index / columns) * FEATURE_STRIDE,
+  };
+}

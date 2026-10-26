@@ -7,7 +7,7 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/?demo=quick");
-  await page.getByText("Explore a synthetic demo").click();
+  await page.getByText("Try it now with simulated data").click();
   await ready(page);
   const source = page.locator('.cell-tile[data-cell="1"]');
   await source.hover();

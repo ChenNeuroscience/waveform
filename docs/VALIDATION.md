@@ -6,10 +6,10 @@ Local verification on 26 October 2026, macOS arm64, Node 24.14.0, stable Rust, C
 
 | Check                                           | Result                                                                                                                                                                                                                         |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 109 KB, main app JS about 300 KB before gzip                                                                                                                                                         |
-| Rust tests                                      | 13 passed: decoding, cut streaming, exact edits/patches, inserted-cell split, density invalidation, position/analysis and 9-million-label integrity                                                                            |
+| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 123 KB, main app JS about 302 KB before gzip                                                                                                                                                         |
+| Rust tests                                      | 14 passed: decoding, cut streaming, exact edits/patches, inserted-cell split, density invalidation, position/analysis and 9-million-label integrity                                                                            |
 | TypeScript unit tests                           | 12 passed: grouping, cut/CLu validation, binary boundary, patches, occupancy/AC and 96 kHz position clock/window/bearing regression, plot-bin geometry, original palette/contrast, clock formatting and viewport-safe geometry |
-| Chromium browser tests                          | 25 passed, including two optional local data tests                                                                                                                                                                             |
+| Chromium browser tests                          | 30 passed, including two optional local data tests                                                                                                                                                                             |
 | Dependency audit after updating the test runner | Zero reported vulnerabilities                                                                                                                                                                                                  |
 | Git diff whitespace check                       | Passed                                                                                                                                                                                                                         |
 
@@ -37,7 +37,11 @@ Browser scenarios:
 19. Verify Ctrl/Cmd/Alt+R/W cannot toggle plot visibility before the unsaved-work warning; plain R still toggles rate maps. Verify the position canvas uses the entire pane.
 20. Click trial rows and set/pos chips, keep the current tetrode, restore its last cut/history, and verify the always-visible recorded clock time/duration and left-aligned speed bars with a red vertical line and no horizontal axis. Auxiliary file counts and tooltip details stay beside set/pos markers without a skipped-file toast.
 
-21. Drag the simulated file stack into the workspace. Generate the full default demo without external fixtures, verify 9M spikes and 100 cells, merge/undo and compare a hash of the entire canonical cut export. Ordinary interaction tests use the same native generator with `?demo=quick`.
+21. Click the simulated-files card to create five trials and eight tetrodes per trial. Verify the default 50k-spike/20-minute demo and 24–48 cells. Generate the stress preset without external fixtures, verify 9M spikes and 100 cells, merge/undo and compare a hash of the entire canonical cut export. Ordinary interaction tests use the same native generator with `?demo=quick`.
+
+22. Browser Back/Forward restores trial/tetrode/cut selections and existing cut undo history. Duplicate choices, edits and display/window settings add no entries; navigation cancels a pending split preview.
+
+23. Verify default paint, absence of select mode, the lasso icon, wrapped group chips, complete plot borders and 4 px gaps. Paint/lasso a known point cloud on the second projection and compare every exported label; clicking a gap must not edit. Space copies retain plot borders.
 
 ## Timings observed
 
@@ -46,7 +50,7 @@ Browser scenarios:
 | 9M synthetic records, Wasm benchmark        | 1.31 s        | Chunk generation/timestamp writes, copying chunks into Wasm, signed-wave amplitude extraction and timestamp decoding                                                  |
 | Merge about 89K members of one of 100 cells | 7.94 ms       | Rust relabel + population recount; excludes patch persistence and UI                                                                                                  |
 | Wasm memory after 9M decode                 | 93.81 MiB     | Includes full population arrays, allocator overhead and scratch allocation high-water mark; excludes JS/GPU/browser memory                                            |
-| Generated 9M demo, browser ready            | 4.83 s        | Cut/position generation, chunk-by-chunk native record synthesis and full decoding, reservoir preparation and initial UI; excludes real disk I/O                       |
+| Generated 9M stress demo, browser ready     | 4.83 s        | Cut/position generation, chunk-by-chunk native record synthesis and full decoding, reservoir preparation and initial UI; excludes real disk I/O                       |
 | 9M fixture, browser first load              | 3.3–5.8 s     | File picker automation, cut parsing, chunked file reads, Rust decoding, reservoir creation, population summary, bounded view transfer and initial React/GPU rendering |
 | Real sample tetrode, 704,080 spikes         | 125 ms        | Node/Wasm chunked decoder benchmark, including local file reads                                                                                                       |
 
