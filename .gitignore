@@ -33,7 +33,6 @@ local.properties
 .buildpath
 
 node_modules/
-package-lock.json
 
 #################
 ## Visual Studio
@@ -221,3 +220,13 @@ pip-log.txt
 .mr.developer.cfg
 waveform-win32-x64/
 waveform-electron-win32-x64.zip
+
+# Modern application build and local verification artifacts
+core/target/
+public/wasm/*.wasm
+src/generated/*.wasm
+*.tsbuildinfo
+playwright-report/
+test-results/
+artifacts/
+sample_data/

@@ -1,31 +1,43 @@
 {
   "name": "waveform",
-  "version": "1.0.0",
-  "description": "The application is available live at [d1manson.github.io/waveform](http://d1manson.github.io/waveform).",
-  "main": "electron-entrypoint.js",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first LTX spike exploration with Rust/Wasm, React and WebGL2",
   "dependencies": {
-    "bower": "^1.8.8",
-    "electron-prompt": "^1.6.0"
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
-    "electron": "=1.7.0",
-    "electron-packager": "^15.1.0",
-    "vulcanize": "^1.14.8"
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "prettier": "^3.9.10",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.10",
+    "vitest": "^5.0.5"
   },
   "scripts": {
-    "vulcanize": "vulcanize index_full.html --inline-scripts --strip-comments > index.html",
-    "build-windows": "electron-packager . waveform --platform=win32",
-    "build-mac": "electron-packager . waveform --platform=darwin",
-    "start": "electron ."
+    "dev": "vite --host 127.0.0.1",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build": "npm run build:wasm && tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "npm run build:wasm && vitest run",
+    "test:rust": "cargo test --manifest-path core/Cargo.toml",
+    "bench": "node scripts/benchmark.mjs",
+    "test:e2e": "playwright test"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/d1manson/waveform.git"
+    "url": "git+https://github.com/ChenNeuroscience/waveform.git"
   },
   "author": "Daniel Manson",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
-    "url": "https://github.com/d1manson/waveform/issues"
+    "url": "https://github.com/ChenNeuroscience/waveform/issues"
   },
-  "homepage": "https://github.com/d1manson/waveform#readme"
+  "homepage": "https://github.com/ChenNeuroscience/waveform#readme"
 }

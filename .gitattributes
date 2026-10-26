@@ -1,4 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-
+# Historical generated Polymer bundle: preserve its original formatting.
+legacy/** -whitespace
+legacy/index.html linguist-generated=true

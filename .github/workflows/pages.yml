@@ -1,0 +1,56 @@
+name: Build, test and deploy Waveform
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - run: npm ci
+      - run: npm run test:rust
+      - run: npm test
+      - run: npm run build
+      # Ubuntu runners include Chromium's runtime libraries. Download the pinned
+      # headless browser without upgrading optional fonts through the apt mirror.
+      - run: npx playwright install --only-shell chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: browser-test-results
+          path: test-results
+  deploy:
+    if: github.event_name != 'pull_request' && github.repository == 'ChenNeuroscience/waveform' && (github.ref == 'refs/heads/gh-pages' || github.ref == 'refs/heads/main')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
