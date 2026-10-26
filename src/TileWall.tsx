@@ -117,6 +117,7 @@ export function TileWall({
       captureTile(n, `Cell ${n}`, {
         header: false,
         details: false,
+        transparentBadge: true,
       })?.toDataURL(),
   });
   useEffect(() => {
@@ -470,7 +471,11 @@ export function TileWall({
 export function captureTile(
   cell: number,
   title: string,
-  options: { header?: boolean; details?: boolean } = {},
+  options: {
+    header?: boolean;
+    details?: boolean;
+    transparentBadge?: boolean;
+  } = {},
 ): HTMLCanvasElement | undefined {
   const row = document.querySelector<HTMLElement>(
       `.cell-tile[data-cell="${cell}"]`,
@@ -489,7 +494,7 @@ export function captureTile(
   ctx.fillRect(
     0,
     0,
-    rect.width - (options.header === false ? 24 : 0),
+    rect.width - (options.transparentBadge ? 24 : 0),
     rect.height + heading,
   );
   ctx.fillStyle = "black";

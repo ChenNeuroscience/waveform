@@ -6,10 +6,10 @@ Local verification on 25 October 2026, macOS arm64, Node 24.14.0, stable Rust, C
 
 | Check                                           | Result                                                                                                                                                   |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 92 KB, main app JS about 296 KB before gzip                                                                                    |
+| Production Rust/Wasm + TypeScript + Vite build  | Passed; Wasm module about 92 KB, main app JS about 297 KB before gzip                                                                                    |
 | Rust tests                                      | 11 passed: decoding, cut streaming, exact edits/patches, inserted-cell split, density invalidation, position/analysis and 9-million-label integrity      |
 | TypeScript unit tests                           | 8 passed: grouping, cut/CLu validation, binary boundary, patches, occupancy/AC and 96 kHz position clock/window/bearing regression and plot-bin geometry |
-| Chromium browser tests                          | 13 passed, including two optional local data tests                                                                                                       |
+| Chromium browser tests                          | 14 passed, including two optional local data tests                                                                                                       |
 | Dependency audit after updating the test runner | Zero reported vulnerabilities                                                                                                                            |
 | Git diff whitespace check                       | Passed                                                                                                                                                   |
 
@@ -26,7 +26,8 @@ Browser scenarios:
 9. Resize panes/window and check square feature viewports and fixed waveform grids in density/flag modes.
 10. Toggle plots and verify intrinsic tile widths, wrapping, shared density/flag canvas, absent tile checkboxes and larger numeric overlays only on hover.
 11. Verify the drag placeholder, exact cross-column snap alignment, 1.5-second alpha cycle, simultaneous source/target position spikes, hidden stats, snap-only merge, unsnapped/Escape cancellation, and settling animation. Verify restoration after the source scrolls out of the virtual wall.
-12. Import two folders with identical trial/tetrode/cut basenames and timestamps. Verify separate assignments, undo histories, and cut duplication without creating a spurious trial.
+12. Space-click closes copies and tool windows without activating the plot or control underneath. Copied tiles have no embedded title strip, a single window title, and a separate frozen hover-only stats overlay.
+13. Import two folders with identical trial/tetrode/cut basenames and timestamps. Verify separate assignments, undo histories, and cut duplication without creating a spurious trial.
 
 ## Timings observed
 

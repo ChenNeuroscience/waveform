@@ -11,6 +11,7 @@ export function FloatingWindow({
   width = 365,
   height = 470,
   label,
+  grabMode = false,
 }: {
   title: string;
   children: ReactNode;
@@ -21,6 +22,7 @@ export function FloatingWindow({
   width?: number;
   height?: number;
   label?: string;
+  grabMode?: boolean;
 }) {
   const [position, setPosition] = useState({ x, y }),
     [z, setZ] = useState(() => ++top);
@@ -35,7 +37,13 @@ export function FloatingWindow({
       aria-modal="false"
       aria-label={label || title}
       style={{ left: position.x, top: position.y, width, height, zIndex: z }}
-      onPointerDownCapture={focus}
+      onPointerDownCapture={(event) => {
+        if (grabMode && event.button === 0) {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        } else focus();
+      }}
     >
       <header
         className="floating-titlebar"

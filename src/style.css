@@ -1811,3 +1811,49 @@ kbd {
 .tile-wall[data-dragging] .wave-channel-names {
   opacity: 0;
 }
+
+.tile-copy {
+  position: relative;
+  background: white;
+}
+.tile-copy-stats {
+  position: absolute;
+  right: 26px;
+  top: 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 4px 7px;
+  font: 14px/18px Arial;
+  background: #fffffff0;
+  color: #222;
+  visibility: hidden;
+  pointer-events: none;
+}
+.tile-copy:hover .tile-copy-stats {
+  visibility: visible;
+}
+.tile-copy-badge {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 21px;
+  height: 21px;
+  border: 1px solid #555;
+  text-align: center;
+  font: 10px/19px Arial;
+}
+.grab-mode .floating-window:hover {
+  outline: 3px solid red;
+  outline-offset: -3px;
+}
+.grab-mode .floating-window,
+.grab-mode .floating-window * {
+  cursor: pointer;
+}
+.grab-mode .tile-copy-stats {
+  visibility: hidden;
+}
+.grab-mode:after {
+  content: "Space: click a plot to copy · click a window to close";
+}

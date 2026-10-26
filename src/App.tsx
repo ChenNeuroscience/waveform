@@ -83,6 +83,8 @@ export default function App() {
         id: string;
         title: string;
         image: string;
+        cell?: number;
+        stats?: string[];
         x: number;
         y: number;
         width: number;
@@ -479,16 +481,30 @@ export default function App() {
       `${trial?.name} · T${tetNum} · cell ${cell} · ${fmt(data?.counts[cell] || 0)} spikes`,
     );
   const popOut = (n: number, x = 45, y = 70) => {
-    const canvas = captureTile(n, `${trial?.name} · T${tetNum} · cell ${n}`);
+    const canvas = captureTile(n, "", { header: false, details: false });
     if (!canvas) return;
     const ratio = Math.min(2, devicePixelRatio || 1),
       width = Math.min(innerWidth - 20, Math.max(280, canvas.width / ratio)),
-      height = Math.max(120, canvas.height / ratio + 26);
+      height = ((width - 2) * canvas.height) / canvas.width + 27,
+      stats = [
+        ...document.querySelectorAll(
+          `.cell-tile[data-cell="${n}"] .tile-caption span`,
+        ),
+      ]
+        .map((el) => el.textContent || "")
+        .filter((text) => text && text !== "…");
+    if (
+      !stats.some((text) => !text.startsWith("spa") && text.endsWith(" Hz")) &&
+      data?.duration
+    )
+      stats.splice(1, 0, `${(data.counts[n] / data.duration).toFixed(2)} Hz`);
     setCopies((cs) => [
       ...cs,
       {
         id: crypto.randomUUID(),
         title: `${trial?.name} · T${tetNum} · cell ${n} (copy)`,
+        cell: n,
+        stats,
         image: canvas.toDataURL(),
         x: Math.max(0, Math.min(innerWidth - width - 8, x + 15)),
         y: Math.max(0, Math.min(innerHeight - height - 8, y + 15)),
@@ -929,6 +945,7 @@ export default function App() {
       {panels.map((pane) => (
         <FloatingWindow
           key={pane}
+          grabMode={grabMode}
           label={
             {
               settings: "Settings",
@@ -1077,7 +1094,7 @@ export default function App() {
                 />
                 <Shortcut
                   keys="Hold Space"
-                  text="Click a tile, path or feature plot to pop out a copy"
+                  text="Click a plot to copy it; click a window to close it"
                 />
                 <Shortcut
                   keys="W / R / C / V / T"
@@ -1109,6 +1126,7 @@ export default function App() {
       {copies.map((c) => (
         <FloatingWindow
           key={c.id}
+          grabMode={grabMode}
           title={c.title}
           x={c.x}
           y={c.y}
@@ -1116,7 +1134,40 @@ export default function App() {
           height={c.height}
           onClose={() => setCopies((cs) => cs.filter((v) => v.id !== c.id))}
         >
-          <img className="plot-copy" src={c.image} alt={c.title} />
+          {c.cell !== undefined ? (
+            <div className="tile-copy">
+              <img
+                className="plot-copy"
+                src={c.image}
+                alt="Copied cell plots"
+                draggable={false}
+              />
+              <span
+                className="tile-copy-badge"
+                style={{
+                  background: c.cell ? color(c.cell) : "#e9e9e9",
+                  color: c.cell ? "white" : "black",
+                }}
+              >
+                {c.cell}
+              </span>
+              <div
+                className="tile-copy-stats"
+                aria-label="Copied cell statistics"
+              >
+                {c.stats?.map((line, i) => (
+                  <span key={i}>{line}</span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <img
+              className="plot-copy"
+              src={c.image}
+              alt="Copied plot"
+              draggable={false}
+            />
+          )}
         </FloatingWindow>
       ))}
     </DesktopShell>
