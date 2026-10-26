@@ -65,6 +65,15 @@ export interface SplitPoint {
   sample: number;
   threshold: number;
 }
+export interface SwapState {
+  source: number;
+}
+export interface TileFeedback {
+  id: string;
+  session: string;
+  revision: number;
+  cells: number[];
+}
 export interface ViewData {
   revision: number;
   localCut?: { id: string; name: string };

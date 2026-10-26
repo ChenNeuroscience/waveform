@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, History, Redo2, Search, Undo2, X } from "lucide-react";
+import { History, Redo2, Search, Undo2, X } from "lucide-react";
 import { DesktopShell } from "./DesktopShell";
 import type { DragComparison } from "./tile-gestures";
 import { FloatingWindow } from "./FloatingWindow";
@@ -24,6 +24,8 @@ import {
   type AnalysisData,
   type PlotMode,
   type SplitPoint,
+  type SwapState,
+  type TileFeedback,
 } from "./types";
 const fmt = (n: number) => n.toLocaleString("en-GB");
 const compact = (n: number) =>
@@ -92,6 +94,8 @@ export default function App() {
       data: AnalysisData;
     } | null>(null),
     [splitPoint, setSplitPoint] = useState<SplitPoint | null>(null),
+    [swap, setSwap] = useState<SwapState | null>(null),
+    [tileFeedback, setTileFeedback] = useState<TileFeedback | null>(null),
     [copies, setCopies] = useState<
       {
         id: string;
@@ -123,6 +127,7 @@ export default function App() {
     finishingSplit = useRef(false),
     splitCompletion = useRef<Promise<void> | null>(null),
     cutDownloads = useRef(new CutDownloads());
+  const hoveredTile = useRef<number | null>(null);
   useEffect(() => () => cutDownloads.current.dispose(), []);
   useEffect(() => {
     document.title = trials.find((t) => t.id === trialId)?.name
@@ -181,6 +186,9 @@ export default function App() {
     }
   };
   const applySelection = (next: RecordingSelection) => {
+    setSwap(null);
+    setTileFeedback(null);
+    hoveredTile.current = null;
     const target = trials
       .find((t) => t.id === next.trialId)
       ?.tetrodes.find((e) => e.number === next.tetNum && e.file);
@@ -268,7 +276,8 @@ export default function App() {
           c = first < 0 ? 0 : first;
         setCell(c);
         setSources([c]);
-        setDest(d.counts.findIndex((n, i) => n === 0 && i > 0));
+        const empty = d.counts.findIndex((n, i) => n === 0 && i > 0);
+        setDest(empty < 0 ? 0 : empty);
         setBusy(false);
       })
       .catch((e) => {
@@ -420,6 +429,7 @@ export default function App() {
     payload: Record<string, unknown> = {},
   ) => {
     if (!ready) return;
+    setSwap(null);
     const generation = loadGen.current;
     setHoverCell(null);
     setBusy(true);
@@ -440,7 +450,10 @@ export default function App() {
           }
         },
       );
-      if (generation === loadGen.current) adopt(d);
+      if (generation === loadGen.current) {
+        adopt(d);
+        return d as ViewData;
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -556,14 +569,46 @@ export default function App() {
       window.removeEventListener("keydown", cancel, true);
     };
   }, [splitPoint]);
-  const edit = (action: string) => {
-    if (!data) return;
-    operation("edit", {
-      action,
-      source: cell,
-      dest,
-      description: `${action === "swap" ? "Swap" : action === "merge" ? "Merge" : "Move"} cell ${cell} ${action === "swap" ? "↔" : "→"} ${dest}`,
+  const selectSource = (group: number, toggle = false) => {
+    setSources((current) =>
+      toggle
+        ? current.includes(group)
+          ? current.filter((n) => n !== group)
+          : [...current, group]
+        : [group],
+    );
+  };
+  const selectDest = (group: number) => {
+    setDest(group);
+    setSources((current) => current.filter((n) => n !== group));
+  };
+  const newDestination = () => {
+    const group = data?.counts.findIndex((count, n) => n > 0 && !count) ?? -1;
+    if (group > 0) selectDest(group);
+  };
+  const swapGroup = async (group: number) => {
+    if (!ready || !swap) return;
+    const source = swap.source;
+    if (source === group) return;
+    const result = await operation("edit", {
+      action: "swap",
+      source,
+      dest: group,
+      description: `Swap groups ${source} and ${group}`,
     });
+    if (result) {
+      const remap = (n: number) =>
+        n === source ? group : n === group ? source : n;
+      setCell(remap);
+      setSources((current) => current.map(remap));
+      setDest(remap);
+      setTileFeedback({
+        id: crypto.randomUUID(),
+        session: result.session,
+        revision: result.revision,
+        cells: [source, group].filter((n) => result.counts[n] > 0),
+      });
+    }
   };
   const polygon = (points: number[], ax: number, ay: number) => {
     if (!sources.length) {
@@ -580,20 +625,15 @@ export default function App() {
       description: `${tool === "brush" ? "Brush" : "Lasso"} ${sources.join(", ")} → ${dest}`,
     });
   };
-  const exportCut = async (format = "cut") => {
+  const exportCut = async () => {
     if (!ready) return;
     try {
       const b = await request<Blob>("export", {
         session: data!.session,
-        format,
+        format: "cut",
         trial: trial!.name,
       });
-      download(
-        b,
-        format === "clu"
-          ? `${trial!.name}.clu.${tetNum}`
-          : `${trial!.name}_${tetNum}.cut`,
-      );
+      download(b, `${trial!.name}_${tetNum}.cut`);
       setNotice("Cut exported. Original files are never overwritten.");
     } catch (e) {
       setError(String(e));
@@ -601,7 +641,6 @@ export default function App() {
   };
   const selectCell = (c: number) => {
     setCell(c);
-    setSources([c]);
   };
   const snapshot = () =>
     captureTile(
@@ -681,7 +720,6 @@ export default function App() {
       }
     });
   };
-  const forkCut = () => operation("clone_cut", { newCut: newCut() });
   const update = <K extends keyof Settings>(k: K, v: Settings[K]) =>
     setSettings((s) => ({ ...s, [k]: v }));
   useEffect(() => {
@@ -693,7 +731,7 @@ export default function App() {
       }
       if (e.code === "Space" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
-        setGrabMode(true);
+        if (!swap) setGrabMode(true);
         return;
       }
       if (splitPoint) {
@@ -729,6 +767,19 @@ export default function App() {
       // Browser commands (reload, close tab, back, etc.) must never fall
       // through to the unmodified plot/navigation shortcuts.
       if (cmd || e.altKey) return;
+      if (swap) {
+        e.preventDefault();
+        if (e.key === "Escape" || (e.key.toLowerCase() === "s" && !e.repeat))
+          setSwap(null);
+        return;
+      }
+      if (e.key === "s" && ready && !e.repeat && hoveredTile.current !== null) {
+        e.preventDefault();
+        setGrabMode(false);
+        setCell(hoveredTile.current);
+        setSwap({ source: hoveredTile.current });
+        return;
+      }
       if (e.key === "Escape") {
         if (pane) setPanels((ps) => ps.filter((p) => p !== pane));
         setPane(null);
@@ -741,11 +792,25 @@ export default function App() {
       if (e.key === "z") setPane((p) => (p === "history" ? null : "history"));
       if (e.key === "d") update("drift", !settings.drift);
       if (e.key === "p") update("density", !settings.density);
-      if (e.key === "e") setDest(cell);
-      if (e.key === "f")
-        setSources(e.shiftKey ? [...new Set([...sources, cell])] : [cell]);
+      if (
+        e.key.toLowerCase() === "e" &&
+        hoverCell !== null &&
+        ready &&
+        !e.repeat
+      )
+        selectDest(hoverCell);
+      if (
+        e.key.toLowerCase() === "f" &&
+        hoverCell !== null &&
+        ready &&
+        !e.repeat
+      )
+        selectSource(hoverCell, e.shiftKey);
       if (e.key === "l") setTool("lasso");
-      if (e.key === "Enter") setDest((d) => Math.min(1023, d + 1));
+      if (e.key === "Enter" && ready) {
+        e.preventDefault();
+        newDestination();
+      }
       if (/^[0-9]$/.test(e.key)) {
         const n = Math.floor(tetNum / 10) * 10 + +e.key;
         chooseTet(n);
@@ -1015,21 +1080,37 @@ export default function App() {
       }
       onCompare={setDragComparison}
       onHover={setHoverCell}
+      onTileHover={(group) => {
+        hoveredTile.current = group;
+        setHoverCell(group);
+      }}
+      tileFeedback={tileFeedback}
       onPopOut={popOut}
       onPopPlot={popPlot}
-      onMerge={(a, b) => {
+      onMerge={async (a, b) => {
         const source = Math.max(a, b),
           dest = Math.min(a, b);
-        operation("edit", {
+        const result = await operation("edit", {
           action: "merge",
           source,
           dest,
           description: `Merge cells ${a} and ${b}`,
         });
-        setCell(dest);
-        setSources([dest]);
+        if (result) {
+          setCell(dest);
+          setSources([dest]);
+          setTileFeedback({
+            id: crypto.randomUUID(),
+            session: result.session,
+            revision: result.revision,
+            cells: [dest],
+          });
+        }
       }}
       splitPoint={splitPoint}
+      swap={swap}
+      onSwapGroup={swapGroup}
+      onCancelSwap={() => setSwap(null)}
       onWaveSplit={previewSplit}
       ready={ready}
       busy={busy}
@@ -1068,12 +1149,12 @@ export default function App() {
         writeCutDrag(event.dataTransfer, prepared);
       }}
       onCell={selectCell}
-      onSources={setSources}
-      onDest={setDest}
+      onSource={selectSource}
+      onDest={selectDest}
+      onNewGroup={newDestination}
       onTool={setTool}
       onToggle={(m) => setShown((s) => ({ ...s, [m]: !s[m] }))}
       onPanel={setPane}
-      onEdit={edit}
       onOperation={operation}
       onPolygon={polygon}
       onDemo={startDemo}
@@ -1118,8 +1199,7 @@ export default function App() {
               <>
                 <p className="muted">
                   Each cut keeps its own undo and redo history when you switch
-                  trials or tetrodes. History is stored locally for this
-                  workspace session.
+                  trials or tetrodes.
                 </p>
                 <div className="history-actions">
                   <button
@@ -1146,7 +1226,6 @@ export default function App() {
                           <b>{h.description}</b>
                           <small>{fmt(h.changed)} spikes changed</small>
                         </div>
-                        <Check size={14} />
                       </div>
                     ))
                   ) : (
@@ -1171,35 +1250,14 @@ export default function App() {
                       </div>
                     ))}
                 </div>
-                <button
-                  className="primary full"
-                  disabled={!ready}
-                  onClick={() => exportCut()}
-                >
-                  Export .cut
-                </button>
-                <button
-                  className="secondary full"
-                  disabled={!ready}
-                  onClick={forkCut}
-                >
-                  Duplicate cut
-                </button>
-                <button
-                  className="secondary full"
-                  disabled={!ready}
-                  onClick={() => exportCut("clu")}
-                >
-                  Export .clu (1-based)
-                </button>
               </>
             )}
             {pane === "headers" && <Headers headers={data?.headers || {}} />}
             {pane === "help" && (
               <>
                 <p className="muted">
-                  Your files stay on your device. Import a selection of LTX
-                  files or a folder to begin. Add cut files at any time.
+                  Import a selection of LTX files or a folder to begin. Add cut
+                  files at any time.
                 </p>
                 <h3>Navigation</h3>
                 <Shortcut keys="0–9" text="Jump to tetrode (ones digit)" />
@@ -1222,9 +1280,28 @@ export default function App() {
                 />
                 <Shortcut
                   keys="E / F"
-                  text="Selected cell as destination / source"
+                  text="Group under pointer as destination / source"
                 />
-                <Shortcut keys="Enter" text="Next destination cell" />
+                <Shortcut
+                  keys="Shift F"
+                  text="Toggle the group under the pointer in the source set"
+                />
+                <Shortcut
+                  keys="Left / right click chip"
+                  text="Choose destination / source; Shift-right toggles a source"
+                />
+                <Shortcut
+                  keys="Enter / +"
+                  text="First unused destination group"
+                />
+                <Shortcut
+                  keys="Click tile"
+                  text="Bring the group's feature points to the front"
+                />
+                <Shortcut
+                  keys="S"
+                  text="Hover a tile, then click or type the group to swap with; Escape cancels"
+                />
                 <Shortcut keys="⌘ / Ctrl Z" text="Undo" />
                 <Shortcut keys="⌘ / Ctrl ⇧ Z" text="Redo" />
                 <Shortcut keys="⌘ / Ctrl S" text="Export .cut" />

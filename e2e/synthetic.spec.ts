@@ -49,9 +49,9 @@ test("the stress demo generates nine million spikes and 100 cells; merge/undo pr
   console.log(`Generated 9M demo ready: ${Date.now() - start}ms`);
   await expect(page.locator(".toolbar-status")).toContainText("9,000,000");
   await expect(page.locator(".trial-block")).toHaveCount(5);
-  await expect(
-    page.getByRole("button", { name: "Focus cell 100", exact: true }),
-  ).toHaveCount(1);
+  await expect(page.locator('.group-selector [data-group="100"]')).toHaveCount(
+    1,
+  );
   const hashExport = async () => {
     const [file] = await Promise.all([
       page.waitForEvent("download"),
@@ -62,12 +62,18 @@ test("the stress demo generates nine million spikes and 100 cells; merge/undo pr
       .digest("hex");
   };
   const before = await hashExport();
-  await page.getByLabel("Destination cell", { exact: true }).fill("2");
-  await page.getByRole("button", { name: "Merge", exact: true }).click();
+  const from = (await page
+    .locator('.cell-tile[data-cell="1"] .tile-waves')
+    .boundingBox())!;
+  const to = (await page
+    .locator('.cell-tile[data-cell="2"] .tile-waves')
+    .boundingBox())!;
+  await page.mouse.move(from.x + 40, from.y + 45);
+  await page.mouse.down();
+  await page.mouse.move(to.x + 40, to.y + 45, { steps: 8 });
+  await page.mouse.up();
   await ready(page);
-  await expect(
-    page.getByRole("button", { name: "Focus cell 1", exact: true }),
-  ).toHaveCount(0);
+  await expect(page.locator('.group-selector [data-group="2"]')).toHaveCount(0);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await ready(page);
   expect(await hashExport()).toBe(before);
@@ -100,11 +106,12 @@ test("the normal demo is a twenty-minute box experiment with typical spike and c
   await expect(page.locator(".trial-block")).toHaveCount(5);
   for (const trial of await page.locator(".trial-block").all())
     await expect(trial.locator(".tetrode-file-block")).toHaveCount(8);
+  await expect(page.locator('.group-selector [data-group="24"]')).toHaveCount(
+    1,
+  );
+  await expect(page.locator('.cell-tile[data-cell="25"]')).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Focus cell 24", exact: true }),
+    page.locator('.painting-destination [data-group="25"]'),
   ).toHaveCount(1);
-  await expect(
-    page.getByRole("button", { name: "Focus cell 25", exact: true }),
-  ).toHaveCount(0);
   await page.screenshot({ path: "test-results/simulated-box-experiment.png" });
 });

@@ -24,6 +24,7 @@ export function Clusters({
   range,
   tool,
   onPolygon,
+  onPick,
 }: {
   data: ViewData;
   settings: Settings;
@@ -32,6 +33,7 @@ export function Clusters({
   range: number[];
   tool: string;
   onPolygon: (p: number[], ax: number, ay: number) => void;
+  onPick: (group: number, source: boolean, toggle: boolean) => void;
 }) {
   const wrapper = useRef<HTMLDivElement>(null),
     [columns, setColumns] = useState(2),
@@ -41,7 +43,70 @@ export function Clusters({
     axes = projections,
     [stroke, setStroke] = useState<number[][]>([]),
     drawing = useRef<{ plot: number; points: number[][] } | null>(null),
+    pointer = useRef<number[] | null>(null),
     [version, setVersion] = useState(0);
+  useEffect(() => {
+    // Resolve the sampled cloud only when E/F is pressed, never on every move.
+    // Picking respects the focused group's foreground and displayed time range.
+    const pick = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase(),
+        p = pointer.current;
+      if (
+        !p ||
+        drawing.current ||
+        event.repeat ||
+        tool === "disabled" ||
+        !["e", "f"].includes(key) ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        (event.target as HTMLElement).matches("input,select,textarea")
+      )
+        return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const col = Math.floor(p[0] / FEATURE_STRIDE),
+        row = Math.floor(p[1] / FEATURE_STRIDE),
+        plot = row * columns + col,
+        frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT),
+        origin = featurePlotOrigin(plot, columns);
+      if (
+        col >= columns ||
+        plot >= axes.length ||
+        p[0] % FEATURE_STRIDE >= FEATURE_PLOT ||
+        p[1] % FEATURE_STRIDE >= FEATURE_PLOT
+      )
+        return;
+      const [ax, ay] = axes[plot];
+      let group: number | null = null,
+        best = 25;
+      for (let i = 0; i < data.labels.length; i++) {
+        const label = data.labels[i];
+        if (
+          (isolate && label !== selected) ||
+          data.times[i] < range[0] ||
+          data.times[i] > range[1]
+        )
+          continue;
+        const x =
+            origin.x +
+            frame.x +
+            (0.035 + (0.93 * data.features[i * 4 + ax]) / 255) * frame.width,
+          y =
+            origin.y +
+            frame.y +
+            (0.965 - (0.93 * data.features[i * 4 + ay]) / 255) * frame.height,
+          distance = (p[0] - x) ** 2 + (p[1] - y) ** 2;
+        if (distance < best || (distance === best && label === selected)) {
+          group = label;
+          best = distance;
+        }
+      }
+      if (group !== null) onPick(group, key === "f", event.shiftKey);
+    };
+    window.addEventListener("keydown", pick, true);
+    return () => window.removeEventListener("keydown", pick, true);
+  }, [data, selected, isolate, range, columns, tool, onPick]);
   useEffect(() => {
     const c = canvas.current!;
     const restore = () => setVersion((v) => v + 1),
@@ -126,10 +191,14 @@ export function Clusters({
         e.currentTarget.setPointerCapture(e.pointerId);
       }}
       onPointerMove={(e) => {
+        pointer.current = point(e);
         if (!drawing.current) return;
         const p = point(e);
         drawing.current.points.push(p);
         setStroke([...drawing.current.points]);
+      }}
+      onPointerLeave={() => {
+        pointer.current = null;
       }}
       onPointerUp={(e) => {
         const d = drawing.current;

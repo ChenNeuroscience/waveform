@@ -1,3 +1,4 @@
+import { destination } from "./controls";
 import { ready, exportCut } from "./controls";
 import { test, expect } from "@playwright/test";
 import { readdirSync, existsSync } from "node:fs";
@@ -48,7 +49,7 @@ test("user sample: three trials and sixteen tetrodes load without cuts", async (
       .getByRole("group", { name: "Recording details", exact: true })
       .getByText("704,080", { exact: true }),
   ).toBeVisible();
-  await page.getByLabel("Destination cell", { exact: true }).fill("1");
+  await destination(page, 1);
   await page.getByRole("button", { name: "Lasso cut", exact: true }).click();
   const plot = page.locator(".clusters"),
     box = (await plot.boundingBox())!;

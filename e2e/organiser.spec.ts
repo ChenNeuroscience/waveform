@@ -1,4 +1,5 @@
-import { ready, exportCutFromHistory as exportCut } from "./controls";
+import { adjacentSwap, destination, paintSources } from "./controls";
+import { ready, exportCut } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { decodeCut } from "../tests/wasm";
@@ -81,8 +82,8 @@ test("cut files remain inline when collapsed; edits create independently navigab
   }
   await expect(group(2)).not.toHaveClass(/expanded/);
   await expect(group(2).locator(".cut-file")).toBeVisible();
-  await page.getByLabel("Destination cell", { exact: true }).fill("2");
-  await cut(page, "Merge").click();
+  await destination(page, 2);
+  await paintSources(page);
   const first = cut(page, "~_1 edited.cut");
   await expect(first).toHaveAttribute("data-local", "true");
   expect(await assignments(page)).toEqual([2, 2, 2, 2, 3, 3]);
@@ -96,8 +97,8 @@ test("cut files remain inline when collapsed; edits create independently navigab
   await cut(page, "~_1.cut").click();
   await expect(cut(page, "Undo")).toBeDisabled();
   expect(await assignments(page)).toEqual([1, 1, 2, 2, 3, 3]);
-  await page.getByLabel("Destination cell", { exact: true }).fill("3");
-  await cut(page, "Merge").click();
+  await destination(page, 3);
+  await paintSources(page);
   const second = cut(page, "~_1 edited 2.cut");
   await expect(second).toHaveAttribute("data-local", "true");
   expect(await assignments(page)).toEqual([3, 3, 2, 2, 3, 3]);
@@ -109,8 +110,8 @@ test("cut files remain inline when collapsed; edits create independently navigab
   expect(await assignments(page)).toEqual([3, 3, 2, 2, 3, 3]);
   await expect(cut(page, "Undo")).toBeEnabled();
   await cut(page, "03").click();
-  await page.getByLabel("Destination cell", { exact: true }).fill("1");
-  await cut(page, "Merge").click();
+  await destination(page, 1);
+  await paintSources(page);
   const created = cut(page, "~_3 edited.cut");
   await expect(created).toHaveAttribute("data-local", "true");
   expect(await assignments(page)).toEqual([1, 1, 1, 1, 1, 1]);
@@ -152,18 +153,10 @@ test("cut files remain inline when collapsed; edits create independently navigab
   await expect(cut(page, "Undo")).toBeDisabled();
   expect(await assignments(page)).toEqual([0, 0, 0, 0, 0, 0]);
   await first.click();
-  await page.getByRole("button", { name: "Edit history", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Duplicate cut", exact: true })
-    .click();
-  await page
-    .getByRole("dialog", { name: "Edit history", exact: true })
-    .getByRole("button", { name: "Close panel", exact: true })
-    .click();
-  await expect(cut(page, "~_1 edited 3.cut")).toHaveClass(/active/);
   await expect(cut(page, "Redo")).toBeEnabled();
   await cut(page, "Redo").click();
   expect(await assignments(page)).toEqual([2, 2, 2, 2, 3, 3]);
+  await cut(page, "Undo").click();
   await first.click();
   expect(await assignments(page)).toEqual([1, 1, 2, 2, 3, 3]);
   await expect(cut(page, "Undo")).toBeDisabled();
@@ -295,8 +288,7 @@ test("trial rows keep the current tetrode and cut history; clock/speed summaries
   expect(axisPixels.horizontal[3]).toBe(0);
   await expect(page.locator(".speed-axis-limit")).toHaveText("45 cm/s max");
   await cut(page, "02").click();
-  await page.getByLabel("Destination cell", { exact: true }).fill("3");
-  await cut(page, "Merge").click();
+  await adjacentSwap(page, 2, 1);
   await expect(cut(page, "~_2 edited.cut")).toHaveClass(/active/);
   await page
     .getByLabel("Import recording files", { exact: true })

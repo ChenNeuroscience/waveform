@@ -353,7 +353,8 @@ async function handle(m: any): Promise<any> {
         `labels:${sessionKey}`,
       );
       if (stored) labels(a).set(stored);
-      else if (s.localCut) throw new Error("Local cut state is unavailable.");
+      else if (s.localCut)
+        throw new Error("Modified cut state is unavailable.");
       else if (m.cut) await readCut(m.cut, a.n, a.wasm, a.e);
       else a.wasm.engine_unsorted(a.e);
     }

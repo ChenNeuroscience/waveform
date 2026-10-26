@@ -17,7 +17,7 @@ float axis(int a){return a==4?time:amplitudes[a];}
 const vec3 groupColors[31]=vec3[31](${groupPalette.map((c) => `vec3(${c.map((v) => `${v}.`).join(",")})`).join(",")});
 vec3 palette(float c){int i=int(c);return i<31?groupColors[i]/255.:vec3(0.);}
 void main(){
- float x=axis(ax),y=axis(ay);gl_Position=vec4(x*1.86-.93,y*1.86-.93,0.,1.);gl_PointSize=size;
+ float x=axis(ax),y=axis(ay);gl_Position=vec4(x*1.86-.93,y*1.86-.93,int(cell)==selected?-.5:0.,1.);gl_PointSize=size;
  bool hide=(isolate&&int(cell)!=selected)||time<range.x||time>range.y;
  vec3 rgb=palette(float(cell));if(drift)rgb=vec3(1.-time,time,0.);
  shade=vec4(rgb,hide?0.:opacity);
@@ -69,6 +69,7 @@ export class ClusterGPU {
     const gl = canvas.getContext("webgl2", {
       antialias: false,
       alpha: false,
+      depth: true,
       preserveDrawingBuffer: true,
     });
     if (!gl)
@@ -134,7 +135,12 @@ export class ClusterGPU {
     gl.useProgram(this.p);
     gl.bindVertexArray(cached.vao);
     gl.clearColor(1, 1, 1, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    // Keep the focused group's points in front without sorting or uploading
+    // the population buffers again. Equal-depth groups retain their draw order.
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.depthMask(true);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.SCISSOR_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);

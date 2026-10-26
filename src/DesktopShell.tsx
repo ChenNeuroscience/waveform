@@ -9,10 +9,7 @@ import {
   History,
   List,
   Lasso,
-  PenLine,
-  GitMerge,
-  ArrowLeftRight,
-  Plus,
+  Paintbrush,
   X,
   HelpCircle,
 } from "lucide-react";
@@ -20,7 +17,6 @@ import { Clusters, AnalysisPlot } from "./plots";
 import { TileWall, type VisiblePlots } from "./TileWall";
 import {
   color,
-  groupTextColor,
   fileId,
   type Trial,
   type Tetrode,
@@ -35,6 +31,9 @@ import type { DragComparison } from "./tile-gestures";
 import { CutDownloads, cutDownloadKey } from "./cut-downloads";
 import { usePreference, defaultLayout, fitPaneLayout } from "./preferences";
 import { experimentTiming } from "./position-info";
+import { GroupSelector } from "./GroupSelector";
+import { SwapPrompt } from "./SwapPrompt";
+import type { SwapState, TileFeedback } from "./types";
 import video from "../img/demo_youtube.png";
 interface Props {
   trials: Trial[];
@@ -51,12 +50,17 @@ interface Props {
   isolate: boolean;
   shown: VisiblePlots;
   splitPoint: SplitPoint | null;
+  swap: SwapState | null;
+  tileFeedback: TileFeedback | null;
+  onSwapGroup: (group: number) => void;
+  onCancelSwap: () => void;
   grabMode: boolean;
   hoverCell: number | null;
   dragComparison: DragComparison | null;
   comparisonAnalysis: AnalysisData | null;
   onCompare: (pair: DragComparison | null) => void;
   onHover: (n: number | null) => void;
+  onTileHover: (n: number | null) => void;
   onMerge: (a: number, b: number) => void;
   onWaveSplit: (
     cell: number,
@@ -85,12 +89,12 @@ interface Props {
   onPrepareCut: (t: Trial, e: Tetrode, c: CutFile) => void;
   onCutDrag: (event: React.DragEvent, t: Trial, e: Tetrode, c: CutFile) => void;
   onCell: (n: number) => void;
-  onSources: (n: number[]) => void;
+  onSource: (n: number, toggle: boolean) => void;
   onDest: (n: number) => void;
+  onNewGroup: () => void;
   onTool: (s: string) => void;
   onToggle: (m: PlotMode) => void;
   onPanel: (p: "settings" | "history" | "headers" | "help") => void;
-  onEdit: (action: string) => void;
   onOperation: (type: string, p?: Record<string, unknown>) => void;
   onPolygon: (p: number[], a: number, b: number) => void;
   onDemo: () => void;
@@ -580,90 +584,36 @@ export function DesktopShell(p: Props) {
                 •••
               </div>
               <section className="feature-pane">
-                <div className="feature-tools">
-                  <button
-                    className={p.tool === "brush" ? "active" : ""}
-                    aria-label="Paint source spikes"
-                    title="Paint source spikes"
-                    onClick={() => p.onTool("brush")}
-                  >
-                    <PenLine size={14} />
-                  </button>
-                  <button
-                    className={p.tool === "lasso" ? "active" : ""}
-                    aria-label="Lasso cut"
-                    title="Lasso source spikes [L]"
-                    onClick={() => p.onTool("lasso")}
-                  >
-                    <Lasso size={14} />
-                  </button>
-                  <span>
-                    Source: {p.sources.length ? p.sources.join(", ") : "none"} →
-                  </span>
-                  <label>
-                    Destination
-                    <input
-                      aria-label="Destination cell"
-                      type="number"
-                      min="0"
-                      max="1023"
-                      value={p.dest}
-                      onChange={(e) =>
-                        p.onDest(Math.max(0, Math.min(1023, +e.target.value)))
-                      }
-                    />
-                  </label>
-                  <button
-                    aria-label="Next empty cell"
-                    title="Next empty cell"
-                    onClick={() =>
-                      p.onDest(
-                        Math.max(
-                          1,
-                          p.data?.counts.findIndex((n, i) => i > 0 && !n) || 1,
-                        ),
-                      )
-                    }
-                  >
-                    <Plus size={13} />
-                  </button>
-                  <button
-                    aria-label="Merge"
-                    title={`Merge cell ${p.cell} into ${p.dest}`}
-                    disabled={!ready || p.cell === p.dest}
-                    onClick={() => p.onEdit("merge")}
-                  >
-                    <GitMerge size={13} />
-                  </button>
-                  <button
-                    aria-label="Swap"
-                    title={`Swap ${p.cell} and ${p.dest}`}
-                    disabled={!ready || p.cell === p.dest}
-                    onClick={() => p.onEdit("swap")}
-                  >
-                    <ArrowLeftRight size={13} />
-                  </button>
-                </div>
-                <div className="feature-group-strip">
-                  {p.data &&
-                    Array.from(p.data.counts, (n, i) => ({ n, i }))
-                      .filter((c) => c.n)
-                      .map((c) => (
-                        <button
-                          key={c.i}
-                          className={c.i === p.cell ? "active" : ""}
-                          aria-label={`Focus cell ${c.i}`}
-                          title={`${c.n.toLocaleString()} spikes; click selects source`}
-                          style={{
-                            background: color(c.i),
-                            color: groupTextColor(c.i),
-                          }}
-                          onClick={() => p.onCell(c.i)}
-                        >
-                          {c.i}
-                        </button>
-                      ))}
-                </div>
+                <GroupSelector
+                  counts={p.data?.counts}
+                  sources={p.sources}
+                  dest={p.dest}
+                  selected={p.cell}
+                  disabled={!ready || !!p.swap || !!p.splitPoint}
+                  onSource={p.onSource}
+                  onDest={p.onDest}
+                  onNew={p.onNewGroup}
+                  onHover={p.onHover}
+                >
+                  <div className="feature-tools">
+                    <button
+                      className={p.tool === "brush" ? "active" : ""}
+                      aria-label="Paint source spikes"
+                      title="Paint source spikes"
+                      onClick={() => p.onTool("brush")}
+                    >
+                      <Paintbrush size={14} />
+                    </button>
+                    <button
+                      className={p.tool === "lasso" ? "active" : ""}
+                      aria-label="Lasso cut"
+                      title="Lasso source spikes [L]"
+                      onClick={() => p.onTool("lasso")}
+                    >
+                      <Lasso size={14} />
+                    </button>
+                  </div>
+                </GroupSelector>
                 <div
                   className="feature-stage"
                   onPointerDownCapture={(e) => {
@@ -681,8 +631,11 @@ export function DesktopShell(p: Props) {
                       selected={p.cell}
                       isolate={p.isolate}
                       range={FULL_RANGE}
-                      tool={ready ? p.tool : "disabled"}
+                      tool={ready && !p.swap ? p.tool : "disabled"}
                       onPolygon={p.onPolygon}
+                      onPick={(group, source, toggle) =>
+                        source ? p.onSource(group, toggle) : p.onDest(group)
+                      }
                     />
                   )}
                 </div>
@@ -696,6 +649,14 @@ export function DesktopShell(p: Props) {
               ⋮
             </div>
             <section className="right-workspace">
+              {p.swap && p.data && (
+                <SwapPrompt
+                  state={p.swap}
+                  counts={p.data.counts}
+                  onGroup={p.onSwapGroup}
+                  onCancel={p.onCancelSwap}
+                />
+              )}
               {p.data ? (
                 <TileWall
                   data={p.data}
@@ -708,10 +669,13 @@ export function DesktopShell(p: Props) {
                   shown={p.shown}
                   onSelect={p.onCell}
                   splitPoint={p.splitPoint}
+                  swap={p.swap}
+                  feedback={p.tileFeedback}
+                  onSwapGroup={p.onSwapGroup}
                   grabMode={p.grabMode}
                   busy={!ready}
                   onCompare={p.onCompare}
-                  onHover={p.onHover}
+                  onHover={p.onTileHover}
                   onMerge={p.onMerge}
                   onWaveSplit={p.onWaveSplit}
                   onPopOut={p.onPopOut}

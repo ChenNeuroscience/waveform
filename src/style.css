@@ -370,17 +370,26 @@ small {
   flex-direction: column;
   overflow: hidden;
 }
+.feature-controls {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-bottom: 1px solid #ccc;
+  background: #fafafa;
+  padding-top: 4px;
+}
+.feature-group-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding-right: 3px;
+}
 .feature-tools {
   display: flex;
   align-items: center;
-  gap: 3px;
-  min-height: 27px;
-  padding: 2px 3px;
-  border-bottom: 1px solid #ccc;
-  background: #fafafa;
-  white-space: nowrap;
-  overflow-x: auto;
-  font-size: 10px;
+  gap: 2px;
+  padding: 2px;
+  flex-shrink: 0;
 }
 .feature-tools > button {
   width: 23px;
@@ -391,29 +400,10 @@ small {
   border: 1px solid #7e9dbb;
   background: #e8eff8;
 }
-.feature-tools > span {
-  font-size: 10px;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin: 0 3px;
-}
-.feature-tools > label {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 10px;
-}
-.feature-tools input[type="number"] {
-  width: 44px;
-  height: 21px;
-  padding: 1px 2px;
-}
 .feature-group-strip {
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   flex-wrap: wrap;
-  height: auto;
-  min-height: 24px;
   display: flex;
   gap: 2px;
   align-items: center;
@@ -421,7 +411,11 @@ small {
   overflow: visible;
   white-space: normal;
 }
-.feature-group-strip button {
+.group-selector button[data-group],
+.feature-group-strip .new-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 21px;
   min-width: 21px;
   height: 19px;
@@ -429,11 +423,117 @@ small {
   font-size: 10px;
   border: 1px solid #888;
   padding: 0;
-  text-shadow: 0 0 1px #000;
 }
-.feature-group-strip button.active {
+.group-selector button[data-group].active {
   outline: 2px solid #333;
   outline-offset: -2px;
+}
+.painting-set {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 100%;
+}
+.painting-set {
+  flex: 1;
+  min-width: 0;
+}
+.painting-sources {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) 8px;
+  gap: 2px;
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+}
+.source-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  gap: 2px;
+  padding: 2px 0;
+  min-height: 23px;
+}
+.source-brace {
+  position: relative;
+  min-height: 23px;
+}
+.source-brace svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.source-brace.closing svg {
+  transform: scaleX(-1);
+}
+.painting-destination {
+  display: inline-flex;
+  align-items: center;
+  height: 23px;
+}
+.set-symbol {
+  font-size: 23px;
+  line-height: 23px;
+}
+.feature-group-strip .new-group {
+  background: #ffffe0;
+}
+.right-workspace {
+  position: relative;
+}
+.swap-prompt {
+  position: absolute;
+  z-index: 20;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: fit-content;
+  max-width: calc(100% - 10px);
+  padding: 5px 7px;
+  background: #ffffe0;
+  border: 1px solid #998c57;
+  box-shadow: 0 2px 5px #0003;
+  font-size: 12px;
+  text-align: center;
+}
+.swap-instructions {
+  margin-bottom: 4px;
+}
+.swap-prompt input {
+  width: 60px;
+  height: 23px;
+  font-size: 12px;
+}
+.swap-prompt button {
+  font-size: 11px;
+  margin: 4px 4px 0 0;
+}
+.tile-wall[data-swapping] .cell-tile {
+  cursor: crosshair;
+}
+.tile-edit-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: white;
+  pointer-events: none;
+}
+.tile-edit-jiggle {
+  position: fixed;
+  z-index: 85;
+  pointer-events: none;
+  outline: 1px solid #ccc;
+}
+.tile-edit-jiggle > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.tile-result-jiggle {
+  animation: tile-settle 650ms ease-out both;
 }
 .feature-stage {
   display: flex;
@@ -1080,10 +1180,6 @@ small {
   font-size: 9px;
   color: #777;
   margin-top: 3px;
-}
-.history-list svg:last-child {
-  margin-left: auto;
-  color: #777;
 }
 .history-list .empty-history {
   flex-direction: column;
