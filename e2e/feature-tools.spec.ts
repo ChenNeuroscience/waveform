@@ -1,3 +1,4 @@
+import { destination } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { decodeCut } from "../tests/wasm";
@@ -82,7 +83,7 @@ test("paint is the default; spaced projections paint/lasso the right axes and ig
       ),
     ).toEqual(["1px", "1px", "1px", "1px"]);
   }
-  await page.getByLabel("Destination cell", { exact: true }).fill("3");
+  await destination(page, 3);
   await page.mouse.click(first.x + first.width + 2, first.y + 60);
   await expect(
     page.getByRole("button", { name: "Undo", exact: true }),

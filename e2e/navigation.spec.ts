@@ -1,3 +1,4 @@
+import { destination, paintSources } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { ready } from "./controls";
 const selection = (page: Page) =>
@@ -60,8 +61,8 @@ test("browser back/forward restores only trial, tetrode and cut choices", async 
   await ready(page);
   expect((await selection(page)).cutId).toBe("");
   const navigations = await length(page);
-  await page.getByLabel("Destination cell", { exact: true }).fill("1");
-  await page.getByRole("button", { name: "Merge", exact: true }).click();
+  await destination(page, 1);
+  await paintSources(page);
   await ready(page);
   expect((await selection(page)).cutId).not.toBe(""); // New cut replaces this entry.
   await page.getByRole("button", { name: "Undo", exact: true }).click();

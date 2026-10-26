@@ -15,6 +15,8 @@ import {
   type Settings,
   type PlotMode,
   type SplitPoint,
+  type SwapState,
+  type TileFeedback,
 } from "./types";
 export type VisiblePlots = Record<PlotMode, boolean>;
 const ROW = 124,
@@ -28,6 +30,9 @@ export function TileWall({
   shown,
   onSelect,
   splitPoint,
+  swap,
+  feedback,
+  onSwapGroup,
   grabMode,
   busy,
   onCompare,
@@ -44,6 +49,9 @@ export function TileWall({
   shown: VisiblePlots;
   onSelect: (n: number) => void;
   splitPoint: SplitPoint | null;
+  swap: SwapState | null;
+  feedback: TileFeedback | null;
+  onSwapGroup: (group: number) => void;
   grabMode: boolean;
   busy: boolean;
   onCompare: (pair: DragComparison | null) => void;
@@ -58,7 +66,12 @@ export function TileWall({
     [maps, setMaps] = useState(new Map<number, AnalysisData>()),
     [scroll, setScroll] = useState(0),
     [hovered, setHovered] = useState<number | null>(null),
-    [glow, setGlow] = useState<DOMRect | null>(null),
+    [glows, setGlows] = useState<{ cell: number; rect: DOMRect }[]>([]),
+    [jiggles, setJiggles] = useState<
+      { cell: number; image: string; rect: DOMRect }[]
+    >([]),
+    playedFeedback = useRef(""),
+    analysisScope = useRef(""),
     [height, setHeight] = useState(800),
     [width, setWidth] = useState(800),
     [density, setDensity] = useState<{
@@ -112,7 +125,7 @@ export function TileWall({
   const gestures = useTileGestures({
     splitSource: splitPoint?.source,
     grab: grabMode,
-    busy,
+    busy: busy || !!swap,
     scope: `${scope}|${tileStride}|${columns}`,
     onSelect,
     onCompare,
@@ -134,15 +147,19 @@ export function TileWall({
   // The scroller clips ordinary shadows. Paint only the halo in the page layer,
   // above the toolbar, while leaving the shared waveform canvas unobstructed.
   useLayoutEffect(() => {
-    const highlighted =
-      gestures.target ?? (gestures.dragging === null ? hovered : null);
-    const row =
-      highlighted === null
-        ? null
-        : scroller.current?.querySelector<HTMLElement>(
-            `.cell-tile[data-cell="${highlighted}"]`,
-          );
-    setGlow(row?.getBoundingClientRect() ?? null);
+    const highlighted = new Set([
+      swap?.source,
+      gestures.target ?? (gestures.dragging === null ? hovered : null),
+    ]);
+    setGlows(
+      [...highlighted].flatMap((cell) => {
+        if (cell == null) return [];
+        const row = scroller.current?.querySelector<HTMLElement>(
+          `.cell-tile[data-cell="${cell}"]`,
+        );
+        return row ? [{ cell, rect: row.getBoundingClientRect() }] : [];
+      }),
+    );
   }, [
     hovered,
     gestures.dragging,
@@ -152,6 +169,7 @@ export function TileWall({
     height,
     signature,
     tileStride,
+    swap?.source,
   ]);
   useEffect(() => {
     const ro = new ResizeObserver(() => {
@@ -173,6 +191,7 @@ export function TileWall({
       el.scrollTop = row * STRIDE;
   }, [selected, data.session, columns]);
   useEffect(() => {
+    analysisScope.current = "";
     cache.current.clear();
     setMaps(new Map());
   }, [scope]);
@@ -196,6 +215,7 @@ export function TileWall({
       .then((results) => {
         if (!current) return;
         for (const result of results) cache.current.set(result.cell, result);
+        analysisScope.current = scope;
         setMaps(new Map(cache.current));
       })
       .catch(() => {});
@@ -245,11 +265,73 @@ export function TileWall({
     density,
   ]);
   const waveWidth = shown.waveforms ? `${ROW * 4}px` : "0px";
+  useEffect(() => {
+    setJiggles([]);
+  }, [scroll, width, height, scope]);
+  useEffect(() => {
+    if (
+      !feedback ||
+      feedback.id === playedFeedback.current ||
+      feedback.session !== data.session ||
+      feedback.revision !== data.revision ||
+      analysisScope.current !== scope ||
+      (shown.waveforms &&
+        settings.density &&
+        density?.key !== waveScope + "|" + signature)
+    )
+      return;
+    // Capture only the updated, visible result tiles after their cached plots
+    // are ready. Animate these small composites; the population stays on the GPU.
+    const focused = scroller.current?.querySelector<HTMLElement>(
+      `.cell-tile[data-cell="${selected}"]`,
+    );
+    if (
+      !focused ||
+      feedback.cells.some((cell) => visible.includes(cell) && !maps.has(cell))
+    )
+      return;
+    const tiles = feedback.cells.flatMap((cell) => {
+      const row = scroller.current?.querySelector<HTMLElement>(
+          `.cell-tile[data-cell="${cell}"]`,
+        ),
+        image =
+          row &&
+          captureTile(cell, "", {
+            header: false,
+            details: false,
+            transparentBadge: true,
+          });
+      return row && image
+        ? [
+            {
+              cell,
+              image: image.toDataURL(),
+              rect: row.getBoundingClientRect(),
+            },
+          ]
+        : [];
+    });
+    if (tiles.length) {
+      playedFeedback.current = feedback.id;
+      setJiggles(tiles);
+    }
+  }, [
+    feedback,
+    data,
+    maps,
+    density,
+    scope,
+    signature,
+    selected,
+    settings.density,
+    shown.waveforms,
+  ]);
   return (
     <div
       className="tile-wall"
       data-splitting={splitPoint ? splitPoint.source : undefined}
       data-dragging={gestures.dragging ?? undefined}
+      data-swapping={swap?.source}
       ref={scroller}
       onScroll={(e) => setScroll(e.currentTarget.scrollTop)}
       aria-label="Cell tile wall"
@@ -313,7 +395,7 @@ export function TileWall({
             return (
               <section
                 key={cell}
-                className={`cell-tile ${selected === cell ? "selected" : ""} ${gestures.target === cell ? "merge-target" : ""} ${splitPoint && !paired ? "split-muted" : ""} ${paired ? "split-pair" : ""} ${gestures.dragging === cell || gestures.settling?.source === cell ? "drag-origin" : ""}`}
+                className={`cell-tile ${selected === cell ? "selected" : ""} ${swap?.source === cell ? "swap-source" : ""} ${gestures.target === cell ? "merge-target" : ""} ${splitPoint && !paired ? "split-muted" : ""} ${paired ? "split-pair" : ""} ${gestures.dragging === cell || gestures.settling?.source === cell ? "drag-origin" : ""}`}
                 data-cell={cell}
                 data-sampled={sampled ? "true" : "false"}
                 style={{
@@ -322,7 +404,19 @@ export function TileWall({
                   width: tileWidth,
                   height: ROW,
                 }}
-                onPointerDown={(e) => gestures.begin(e, cell)}
+                onPointerDown={(e) => {
+                  if (swap) {
+                    e.preventDefault();
+                    return;
+                  }
+                  gestures.begin(e, cell);
+                }}
+                onClickCapture={(e) => {
+                  if (!swap) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSwapGroup(cell);
+                }}
                 onContextMenu={(e) => {
                   if ((e.target as HTMLElement).closest(".tile-waves"))
                     e.preventDefault();
@@ -463,6 +557,9 @@ export function TileWall({
                     WARNING: using sampled rendering
                   </span>
                 )}
+                {jiggles.some((tile) => tile.cell === cell) && (
+                  <div className="tile-edit-cover" />
+                )}
                 <CellStats
                   entries={[
                     ...(a && pos && a.peak > 0
@@ -487,10 +584,11 @@ export function TileWall({
           })}
         </div>
       </div>
-      {glow &&
+      {glows.map(({ cell, rect: glow }) =>
         createPortal(
           <div
-            className="tile-hover-glow"
+            className={`tile-hover-glow ${jiggles.some((tile) => tile.cell === cell) ? "tile-result-jiggle" : ""}`}
+            data-cell={cell}
             aria-hidden="true"
             style={{
               zIndex: gestures.target === null ? 90 : 1001,
@@ -501,7 +599,43 @@ export function TileWall({
             }}
           />,
           document.body,
-        )}
+          `glow-${cell}`,
+        ),
+      )}
+      {jiggles.map((tile) =>
+        createPortal(
+          <div
+            key={tile.cell}
+            className="tile-edit-jiggle tile-result-jiggle"
+            data-cell={tile.cell}
+            aria-hidden="true"
+            onAnimationEnd={() =>
+              setJiggles((current) =>
+                current.filter((t) => t.cell !== tile.cell),
+              )
+            }
+            style={{
+              left: tile.rect.x,
+              top: tile.rect.y,
+              width: tile.rect.width,
+              height: tile.rect.height,
+            }}
+          >
+            <img src={tile.image} alt="" />
+            <span
+              className="tile-drag-badge"
+              style={{
+                background: color(tile.cell),
+                color: groupTextColor(tile.cell),
+              }}
+            >
+              {tile.cell}
+            </span>
+          </div>,
+          document.body,
+          `jiggle-${tile.cell}`,
+        ),
+      )}
       {!all.length && <div className="no-cells">No matching cells.</div>}
       {[gestures.ghost, gestures.settling].map(
         (tile, i) =>

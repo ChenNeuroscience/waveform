@@ -1,3 +1,4 @@
+import { destination, paintSources } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { ready } from "./controls";
 
@@ -213,8 +214,8 @@ test("browser reload/close modifiers do not toggle plots before the leave warnin
   page,
 }) => {
   await demo(page);
-  await page.getByLabel("Destination cell", { exact: true }).fill("2");
-  await page.getByRole("button", { name: "Merge", exact: true }).click();
+  await destination(page, 2);
+  await paintSources(page);
   await ready(page);
   const waves = page.getByRole("button", { name: "Waveforms", exact: true }),
     rate = page.getByRole("button", { name: "Spatial rate", exact: true });
