@@ -1,7 +1,7 @@
 // Browser I/O and ABI bridge. Numeric position/analysis code is in Rust.
 import { parseHeader } from "./files";
 import { streamFile, copyF32, type Core } from "./wasm";
-import type { Header, Settings, AnalysisData } from "./types";
+import type { Header, Settings, AnalysisData, Trajectory } from "./types";
 export interface Position {
   handle: number;
   identity: string;
@@ -59,6 +59,29 @@ export async function parsePosition(
     throw e;
   }
 }
+/** The trajectory for a processed position, computed once in Rust and cached there. */
+export function trajectory(w: Core, pos: Position): Trajectory {
+  const size = w.alloc_bytes(8);
+  try {
+    w.position_size(pos.handle, size);
+    const [arenaWidth, arenaHeight] = new Float32Array(
+      w.memory.buffer,
+      size,
+      2,
+    );
+    return {
+      path: copyF32(
+        w,
+        w.position_path(pos.handle),
+        w.position_path_len(pos.handle),
+      ),
+      arenaWidth,
+      arenaHeight,
+    };
+  } finally {
+    w.free_bytes(size, 8);
+  }
+}
 export function analyse(
   w: Core,
   engine: number,
@@ -102,7 +125,6 @@ export function analyse(
     refractory: meta[4],
     rate: meta[5],
     spatial: array("spatial"),
-    path: array("path"),
     spikes: array("spikes"),
     direction: array("direction"),
     speed: array("speed"),

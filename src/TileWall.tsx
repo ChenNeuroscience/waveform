@@ -11,6 +11,7 @@ import {
   groupTextColor,
   type ViewData,
   type AnalysisData,
+  membershipKey,
   type Settings,
   type PlotMode,
   type SplitPoint,
@@ -61,8 +62,10 @@ export function TileWall({
 }) {
   const scroller = useRef<HTMLDivElement>(null),
     waveCanvas = useRef<HTMLCanvasElement>(null),
-    cache = useRef(new Map<number, AnalysisData>()),
-    [maps, setMaps] = useState(new Map<number, AnalysisData>()),
+    // Tile analyses keyed by cell membership, so edits only refetch cells whose
+    // spikes changed and renumbered cells keep theirs.
+    cache = useRef(new Map<string, AnalysisData>()),
+    [analysisVersion, setAnalysisVersion] = useState(0),
     [scroll, setScroll] = useState(0),
     [hovered, setHovered] = useState<number | null>(null),
     [glows, setGlows] = useState<{ cell: number; rect: DOMRect }[]>([]),
@@ -70,7 +73,6 @@ export function TileWall({
       { cell: number; image: string; rect: DOMRect }[]
     >([]),
     playedFeedback = useRef(""),
-    analysisScope = useRef(""),
     [height, setHeight] = useState(800),
     [width, setWidth] = useState(800),
     gpu = useRef<WaveGPU | null>(null),
@@ -120,7 +122,11 @@ export function TileWall({
     waveScope = `${data.session}|${data.revision}`,
     waveKey = `${waveScope}|${signature}|${settings.density}|${settings.drift}|${waveFrameWidth}`,
     wavesReady = wavesDone === waveKey,
-    scope = `${data.session}|${data.revision}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}|${settings.speedMax}`;
+    analysisKey = `${data.key}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}|${settings.speedMax}`,
+    // Cancels in-flight tile gestures whenever the cut or analyses change.
+    scope = `${data.session}|${data.revision}|${analysisKey}`,
+    analysisFor = (cell: number) =>
+      cache.current.get(membershipKey(data, cell));
   const gestures = useTileGestures({
     splitSource: splitPoint?.source,
     grab: grabMode,
@@ -185,14 +191,14 @@ export function TileWall({
       el.scrollTop = row * STRIDE;
   }, [selected, data.session, columns]);
   useEffect(() => {
-    analysisScope.current = "";
     cache.current.clear();
-    setMaps(new Map());
-  }, [scope]);
+    setAnalysisVersion((v) => v + 1);
+  }, [analysisKey]);
   useEffect(() => {
     let current = true;
     const batch = crypto.randomUUID(),
-      missing = visible.filter((c) => !cache.current.has(c));
+      missing = visible.filter((c) => !analysisFor(c));
+    if (!missing.length) return;
     Promise.all(
       missing.map((cell) =>
         request<AnalysisData>("analysis", {
@@ -208,15 +214,19 @@ export function TileWall({
     )
       .then((results) => {
         if (!current) return;
-        for (const result of results) cache.current.set(result.cell, result);
-        analysisScope.current = scope;
-        setMaps(new Map(cache.current));
+        // Stored under the membership the worker actually analysed, which can
+        // differ from this render's data if an edit was processed first.
+        for (const result of results)
+          if (result.membership) cache.current.set(result.membership, result);
+        while (cache.current.size > 512)
+          cache.current.delete(cache.current.keys().next().value!);
+        setAnalysisVersion((v) => v + 1);
       })
       .catch(() => {});
     return () => {
       current = false;
     };
-  }, [scope, signature]);
+  }, [analysisKey, signature, data]);
   useEffect(() => {
     if (!shown.waveforms || !waveCanvas.current) return;
     const g = new WaveGPU(
@@ -256,7 +266,6 @@ export function TileWall({
       feedback.id === playedFeedback.current ||
       feedback.session !== data.session ||
       feedback.revision !== data.revision ||
-      analysisScope.current !== scope ||
       (shown.waveforms && !wavesReady)
     )
       return;
@@ -267,7 +276,9 @@ export function TileWall({
     );
     if (
       !focused ||
-      feedback.cells.some((cell) => visible.includes(cell) && !maps.has(cell))
+      feedback.cells.some(
+        (cell) => visible.includes(cell) && !analysisFor(cell),
+      )
     )
       return;
     const tiles = feedback.cells.flatMap((cell) => {
@@ -298,7 +309,7 @@ export function TileWall({
   }, [
     feedback,
     data,
-    maps,
+    analysisVersion,
     wavesReady,
     scope,
     signature,
@@ -341,7 +352,7 @@ export function TileWall({
             />
           )}
           {visible.map((cell, i) => {
-            const a = maps.get(cell),
+            const a = analysisFor(cell),
               paired =
                 !!splitPoint &&
                 [splitPoint.source, splitPoint.source + 1].includes(cell),

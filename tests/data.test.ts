@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseHeader, organiseFiles } from "../src/files";
 import { corePromise, decodeCut as readCut, seedEngine } from "./wasm";
-import { analyse, parsePosition } from "../src/position";
+import { analyse, parsePosition, trajectory } from "../src/position";
 import { defaultSettings } from "../src/types";
 import { fitGrid, projectionFrame } from "../src/plot-geometry";
 describe("LTX import", () => {
@@ -159,7 +159,7 @@ describe("analysis", () => {
     const e = seedEngine(w, [960, 2880, 4800], [1, 1, 1]);
     try {
       const a = analyse(w, e, 1, 96000, 0.08, p, opts);
-      expect([...a.path]).toEqual(
+      expect([...trajectory(w, p).path]).toEqual(
         [0.2, 0.1, 0.3, 0.1, 0.4, 0.1, 0.5, 0.1].map(Math.fround),
       );
       expect([...a.spikes]).toEqual(

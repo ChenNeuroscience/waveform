@@ -1,12 +1,23 @@
 //! Position decoding/post-processing and numeric cell analysis, entirely in Wasm.
 use crate::Engine;
-use std::{slice, sync::Arc};
+use std::{cell::RefCell, slice, sync::Arc};
 #[derive(Default, Clone)]
 struct Raw {
     time: Vec<f64>,
     spots: Vec<[f32; 4]>,
 }
+/// Cell-independent results derived from a processed position, computed on first
+/// use and reused by every cell's analysis.
+#[derive(Default)]
+struct Derived {
+    /// Normalised (x, y) of every binnable sample, for the trajectory plot.
+    path: Option<Vec<f32>>,
+    /// Occupancy (spatial, direction, speed dwell) for one set of bin settings.
+    occupancy: Option<(OccupancyKey, [Vec<f32>; 3])>,
+}
+type OccupancyKey = (usize, usize, usize, u32, u32);
 pub(crate) struct Position {
+    derived: RefCell<Derived>,
     raw: Arc<Raw>,
     x: Vec<f32>,
     y: Vec<f32>,
@@ -49,6 +60,7 @@ impl Position {
             min_y,
             timebase,
             bearing: 0.,
+            derived: Default::default(),
         }
     }
     fn push(&mut self, data: &[u8]) {
@@ -75,6 +87,7 @@ impl Position {
         }
     }
     fn process(&mut self, leds: u32, max_speed: f32, smoothing: f64) {
+        self.derived = Default::default();
         let n = self.raw.spots.len();
         let (mut x1, mut y1, mut x2, mut y2) = (
             Vec::with_capacity(n),
@@ -174,6 +187,29 @@ impl Position {
             });
         }
     }
+    /// The duration of sample i, if it lies in the arena with a usable interval.
+    fn dwell(&self, i: usize) -> Option<f32> {
+        let (x, y) = (self.x[i] / self.width, self.y[i] / self.height);
+        if !(x.is_finite() && y.is_finite() && (0. ..1.).contains(&x) && (0. ..1.).contains(&y)) {
+            return None;
+        }
+        let dt = if i + 1 < self.raw.time.len() {
+            self.raw.time[i + 1] - self.raw.time[i]
+        } else {
+            1. / self.rate
+        };
+        (dt > 0. && dt <= 1.).then_some(dt as f32)
+    }
+    fn path(&self) -> std::cell::Ref<'_, Vec<f32>> {
+        if self.derived.borrow().path.is_none() {
+            let path = (0..self.x.len())
+                .filter(|&i| self.dwell(i).is_some())
+                .flat_map(|i| [self.x[i] / self.width, self.y[i] / self.height])
+                .collect();
+            self.derived.borrow_mut().path = Some(path);
+        }
+        std::cell::Ref::map(self.derived.borrow(), |d| d.path.as_ref().unwrap())
+    }
     fn variant(&self, leds: u32, max_speed: f32, smoothing: f64) -> Self {
         let mut p = Self {
             raw: self.raw.clone(),
@@ -189,6 +225,7 @@ impl Position {
             min_y: self.min_y,
             timebase: self.timebase,
             bearing: self.bearing,
+            derived: Default::default(),
         };
         p.process(leds, max_speed, smoothing);
         p
@@ -234,7 +271,6 @@ fn smooth(a: &mut [f32], k: usize) {
 pub(crate) struct Analysis {
     meta: [f64; 8],
     spatial: Vec<f32>,
-    path: Vec<f32>,
     spikes: Vec<f32>,
     direction: Vec<f32>,
     speed: Vec<f32>,
@@ -313,15 +349,9 @@ fn analyse(
         .unwrap_or((0, 0));
     let nd = (360. / dir_bin).ceil() as usize;
     let ns = (speed_max / speed_bin).ceil() as usize;
-    let (mut occ, mut hits, mut od, mut hd, mut os, mut hs) = (
-        vec![0.; w * h],
-        vec![0.; w * h],
-        vec![0.; nd],
-        vec![0.; nd],
-        vec![0.; ns],
-        vec![0.; ns],
-    );
-    let (mut path, mut spikes) = (vec![], vec![]);
+    let (mut hits, mut hd, mut hs) = (vec![0.; w * h], vec![0.; nd], vec![0.; ns]);
+    let mut spikes = vec![];
+    let mut occupancy = [vec![0.; w * h], vec![0.; nd], vec![0.; ns]];
     if let Some(p) = pos {
         let bin = |i: usize| -> Option<usize> {
             let x = (p.x[i] / p.width * w as f32).floor();
@@ -345,26 +375,34 @@ fn analyse(
                 None
             }
         };
-        for i in 0..p.x.len() {
-            if let Some(b) = bin(i) {
-                let dt = if i + 1 < p.raw.time.len() {
-                    p.raw.time[i + 1] - p.raw.time[i]
-                } else {
-                    1. / p.rate
-                };
-                if dt <= 0. || dt > 1. {
+        // Occupancy depends only on the position and bin settings, so it is
+        // computed once and shared by every cell's analysis.
+        let key = (w, h, nd, speed_bin.to_bits(), speed_max.to_bits());
+        let cached = p
+            .derived
+            .borrow()
+            .occupancy
+            .as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, o)| o.clone());
+        occupancy = cached.unwrap_or_else(|| {
+            let [mut occ, mut od, mut os] = [vec![0.; w * h], vec![0.; nd], vec![0.; ns]];
+            for i in 0..p.x.len() {
+                let (Some(b), Some(dt)) = (bin(i), p.dwell(i)) else {
                     continue;
-                }
-                occ[b] += dt as f32;
+                };
+                occ[b] += dt;
                 if p.dir[i].is_finite() {
-                    od[db(i)] += dt as f32;
+                    od[db(i)] += dt;
                 }
                 if let Some(b) = sb(i) {
-                    os[b] += dt as f32;
+                    os[b] += dt;
                 }
-                path.extend([p.x[i] / p.width, p.y[i] / p.height]);
             }
-        }
+            let maps = [occ, od, os];
+            p.derived.borrow_mut().occupancy = Some((key, maps.clone()));
+            maps
+        });
         let mut cursor = 0;
         for &id in ids {
             let t = e.times[id as usize] as f64 / tb;
@@ -389,6 +427,7 @@ fn analyse(
             }
         }
     }
+    let [occ, od, os] = occupancy;
     let so = box2(&occ, w, h, smoothing);
     let sh = box2(&hits, w, h, smoothing);
     let mut peak = 0f32;
@@ -438,7 +477,6 @@ fn analyse(
             pos.map(|p| p.height as f64).unwrap_or(0.),
         ],
         spatial,
-        path,
         spikes,
         direction,
         speed,
@@ -482,6 +520,20 @@ pub unsafe extern "C" fn position_variant(
     smoothing: f64,
 ) -> *mut Position {
     Box::into_raw(Box::new((*p).variant(leds, max_speed, smoothing)))
+}
+/// The trajectory (normalised x, y pairs), computed once per processed position.
+#[no_mangle]
+pub unsafe extern "C" fn position_path(p: *const Position) -> *const f32 {
+    (*p).path().as_ptr()
+}
+#[no_mangle]
+pub unsafe extern "C" fn position_path_len(p: *const Position) -> usize {
+    (*p).path().len()
+}
+#[no_mangle]
+pub unsafe extern "C" fn position_size(p: *const Position, out: *mut f32) {
+    let out = slice::from_raw_parts_mut(out, 2);
+    out.copy_from_slice(&[(*p).width, (*p).height]);
 }
 #[no_mangle]
 pub unsafe extern "C" fn position_free(p: *mut Position) {
@@ -539,7 +591,6 @@ getter!(
     engine_analysis_spatial_len,
     spatial
 );
-getter!(engine_analysis_path, engine_analysis_path_len, path);
 getter!(engine_analysis_spikes, engine_analysis_spikes_len, spikes);
 getter!(
     engine_analysis_direction,
@@ -575,6 +626,7 @@ mod tests {
             min_y: 0.,
             timebase: 1.,
             bearing: 0.,
+            derived: Default::default(),
         };
         let mut e = Engine::new(3);
         e.times = vec![100, 1100, 2100];

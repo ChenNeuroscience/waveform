@@ -93,6 +93,8 @@ export interface ViewData {
   waveStarts: Uint32Array;
   /** Two u32 halves per cell of a hash of its resident slot set. */
   waveHashes: Uint32Array;
+  /** Two u32 halves per cell of a hash of its full spike set (analysis cache key). */
+  cellHashes: Uint32Array;
   headers: Record<string, Header>;
   undo: HistoryEntry[];
   redo: HistoryEntry[];
@@ -104,7 +106,18 @@ export interface ViewData {
 /** A worker view: features/times are sent only when the recording changes. */
 export type ViewMessage = Omit<ViewData, "features" | "times"> &
   Partial<Pick<ViewData, "features" | "times">>;
+/** The animal's path, shared by every cell; sent once per position settings. */
+export interface Trajectory {
+  path: Float32Array;
+  arenaWidth: number;
+  arenaHeight: number;
+}
+/** Cache key for a cell's spike set: count plus a 64-bit membership hash. */
+export const membershipKey = (data: ViewData, cell: number) =>
+  `${data.counts[cell]}:${data.cellHashes[cell * 2]}:${data.cellHashes[cell * 2 + 1]}`;
 export interface AnalysisData {
+  /** The membership key the worker analysed (see membershipKey). */
+  membership?: string;
   arenaWidth: number;
   arenaHeight: number;
   cell: number;
@@ -112,7 +125,6 @@ export interface AnalysisData {
   width: number;
   height: number;
   peak: number;
-  path: Float32Array;
   spikes: Float32Array;
   direction: Float32Array;
   speed: Float32Array;

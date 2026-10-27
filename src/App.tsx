@@ -22,6 +22,7 @@ import {
   type CutFile,
   type ViewData,
   type AnalysisData,
+  type Trajectory,
   type PlotMode,
   type SplitPoint,
   type SwapState,
@@ -70,7 +71,8 @@ export default function App() {
     [tetNum, setTetNum] = useState(1),
     [cutId, setCutId] = useState(""),
     [data, setData] = useState<ViewData | null>(null),
-    [analysis, setAnalysis] = useState<AnalysisData | null>(null);
+    [analysis, setAnalysis] = useState<AnalysisData | null>(null),
+    [trajectory, setTrajectory] = useState<Trajectory | null>(null);
   const [settings, setSettings] = useState<Settings>(readSettings),
     [cell, setCell] = useState(1),
     [sources, setSources] = useState<number[]>([1]),
@@ -302,6 +304,34 @@ export default function App() {
         }
       });
   }, [tet?.id, tet?.file, cutId]);
+  // The path is shared by every cell, so it is fetched once per position file and
+  // processing settings rather than with each cell's analysis.
+  useEffect(() => {
+    let live = true;
+    if (!data?.key || !trial?.pos) {
+      setTrajectory(null);
+      return;
+    }
+    request<Trajectory | null>("trajectory", {
+      pos: trial.pos,
+      posKey: `${trial.id}|${fileId(trial.pos)}`,
+      settings,
+    })
+      .then((t) => {
+        if (live) setTrajectory(t);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [
+    data?.key,
+    trial?.id,
+    trial?.pos,
+    settings.leds,
+    settings.maxSpeed,
+    settings.posSmooth,
+  ]);
   const displayCell = dragComparison?.source ?? hoverCell ?? cell;
   const comparisonKey = `${data?.session}|${data?.revision}|${trial?.id}|${trial?.pos ? fileId(trial.pos) : ""}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${dragComparison?.target}`;
   useEffect(() => {
@@ -1058,6 +1088,7 @@ export default function App() {
       cutId={cutId}
       data={data}
       analysis={analysis}
+      trajectory={trajectory}
       settings={settings}
       cell={cell}
       sources={sources}

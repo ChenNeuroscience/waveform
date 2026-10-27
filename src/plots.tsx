@@ -15,6 +15,7 @@ import {
   type Settings,
   type AnalysisData,
   type PlotMode,
+  type Trajectory,
 } from "./types";
 export function Clusters({
   data,
@@ -302,17 +303,15 @@ export function AnalysisPlot({
   mode,
   maxRate,
   compact = false,
-  spikeLayers,
   speedAlignment = "right",
   positionSpeed = false,
 }: {
   data: AnalysisData;
-  mode: PlotMode | "path";
+  mode: PlotMode;
   maxRate: number;
   compact?: boolean;
   speedAlignment?: "left" | "right";
   positionSpeed?: boolean;
-  spikeLayers?: { cell: number; spikes: Float32Array; color: string }[];
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -358,38 +357,6 @@ export function AnalysisPlot({
               ww + 0.5,
               hh + 0.5,
             );
-          }
-        } else if (mode === "path") {
-          const box = fitGrid(
-            w,
-            h,
-            data.arenaWidth || data.width,
-            data.arenaHeight || data.height,
-          );
-          // Use the full pane width and start at its top; retain one physical
-          // scale for x/y, with any unused space below or beside the arena.
-          box.y = 0;
-          ctx.strokeStyle = "#333333";
-          ctx.lineWidth = 0.6;
-          ctx.beginPath();
-          for (let i = 0; i < data.path.length; i += 2) {
-            const x = box.x + data.path[i] * box.width,
-              y = box.y + data.path[i + 1] * box.height;
-            if (i) ctx.lineTo(x, y);
-            else ctx.moveTo(x, y);
-          }
-          ctx.stroke();
-          for (const layer of spikeLayers || [
-            { spikes: data.spikes, color: "#0044cc" },
-          ]) {
-            ctx.fillStyle = layer.color;
-            for (let i = 0; i < layer.spikes.length; i += 2)
-              ctx.fillRect(
-                box.x + layer.spikes[i] * box.width,
-                box.y + layer.spikes[i + 1] * box.height,
-                1.6,
-                1.6,
-              );
           }
         } else if (mode === "direction") {
           const a = data.direction,
@@ -489,20 +456,96 @@ export function AnalysisPlot({
     const ro = new ResizeObserver(draw);
     ro.observe(c);
     return () => ro.disconnect();
-  }, [
-    data,
-    mode,
-    maxRate,
-    compact,
-    spikeLayers,
-    speedAlignment,
-    positionSpeed,
-  ]);
+  }, [data, mode, maxRate, compact, speedAlignment, positionSpeed]);
   return (
     <canvas
       ref={canvas}
       className="analysis-canvas"
       aria-label={mode === "ac" ? "Temporal autocorrelogram" : `${mode} plot`}
     />
+  );
+}
+
+export interface SpikeLayer {
+  cell: number;
+  spikes: Float32Array;
+  color: string;
+}
+/** The trajectory with spike overlays. The path is drawn once into an offscreen
+ * canvas (per trajectory and size); layer changes, such as hovering a tile, only
+ * copy it back and draw the spike dots. One visible canvas keeps copies simple. */
+export function PathPlot({
+  trajectory,
+  layers,
+}: {
+  trajectory: Trajectory;
+  layers: SpikeLayer[];
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null),
+    base = useRef<{
+      key: string;
+      trajectory: Trajectory;
+      image: HTMLCanvasElement;
+    } | null>(null);
+  useEffect(() => {
+    const c = canvas.current!,
+      draw = () => {
+        const dpr = Math.min(2, devicePixelRatio || 1),
+          w = c.clientWidth,
+          h = c.clientHeight,
+          key = `${w}x${h}x${dpr}`,
+          // Use the full pane width and start at its top; retain one physical
+          // scale for x/y, with any unused space below or beside the arena.
+          box = {
+            ...fitGrid(w, h, trajectory.arenaWidth, trajectory.arenaHeight),
+            y: 0,
+          };
+        if (
+          base.current?.key !== key ||
+          base.current.trajectory !== trajectory
+        ) {
+          const image = document.createElement("canvas");
+          image.width = w * dpr;
+          image.height = h * dpr;
+          const ctx = image.getContext("2d")!,
+            path = trajectory.path;
+          ctx.scale(dpr, dpr);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, w, h);
+          ctx.strokeStyle = "#333333";
+          ctx.lineWidth = 0.6;
+          ctx.beginPath();
+          for (let i = 0; i < path.length; i += 2) {
+            const x = box.x + path[i] * box.width,
+              y = box.y + path[i + 1] * box.height;
+            if (i) ctx.lineTo(x, y);
+            else ctx.moveTo(x, y);
+          }
+          ctx.stroke();
+          base.current = { key, trajectory, image };
+        }
+        c.width = w * dpr;
+        c.height = h * dpr;
+        const ctx = c.getContext("2d")!;
+        ctx.drawImage(base.current.image, 0, 0);
+        ctx.scale(dpr, dpr);
+        for (const layer of layers) {
+          ctx.fillStyle = layer.color;
+          for (let i = 0; i < layer.spikes.length; i += 2)
+            ctx.fillRect(
+              box.x + layer.spikes[i] * box.width,
+              box.y + layer.spikes[i + 1] * box.height,
+              1.6,
+              1.6,
+            );
+        }
+      };
+    draw();
+    const ro = new ResizeObserver(draw);
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, [trajectory, layers]);
+  return (
+    <canvas ref={canvas} className="analysis-canvas" aria-label="path plot" />
   );
 }

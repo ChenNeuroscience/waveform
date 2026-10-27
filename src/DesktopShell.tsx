@@ -19,7 +19,7 @@ import {
   X,
   HelpCircle,
 } from "lucide-react";
-import { Clusters, AnalysisPlot } from "./plots";
+import { Clusters, AnalysisPlot, PathPlot } from "./plots";
 import { TileWall, type VisiblePlots } from "./TileWall";
 import {
   color,
@@ -28,6 +28,7 @@ import {
   type Tetrode,
   type CutFile,
   type ViewData,
+  type Trajectory,
   type AnalysisData,
   type Settings,
   type PlotMode,
@@ -48,6 +49,7 @@ interface Props {
   cutId: string;
   data: ViewData | null;
   analysis: AnalysisData | null;
+  trajectory: Trajectory | null;
   settings: Settings;
   cell: number;
   sources: number[];
@@ -533,7 +535,7 @@ export function DesktopShell(p: Props) {
               />
               <section className="position-pane">
                 <div className="position-content">
-                  {p.analysis && p.trial?.pos ? (
+                  {p.analysis && p.trajectory && p.trial?.pos ? (
                     <>
                       <div className="position-info">
                         <div className="position-time" title={timing.date}>
@@ -579,11 +581,9 @@ export function DesktopShell(p: Props) {
                           }
                         }}
                       >
-                        <AnalysisPlot
-                          data={p.analysis}
-                          spikeLayers={pathLayers}
-                          mode="path"
-                          maxRate={0}
+                        <PathPlot
+                          trajectory={p.trajectory}
+                          layers={pathLayers}
                         />
                       </div>
                     </>

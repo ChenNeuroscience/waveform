@@ -29,6 +29,9 @@ pub struct Engine {
     output: Vec<u8>,
     groups: Vec<Vec<u32>>,
     groups_dirty: bool,
+    /// Two u32 halves per cell of an order-independent hash of its full spike set;
+    /// cleared by every label change and rebuilt on first read.
+    cell_hashes: Vec<u32>,
 }
 impl Engine {
     pub fn new(n: usize) -> Self {
@@ -45,6 +48,7 @@ impl Engine {
             output: vec![],
             groups: vec![],
             groups_dirty: true,
+            cell_hashes: vec![],
         }
     }
     pub fn push(&mut self, data: &[u8]) {
@@ -65,6 +69,7 @@ impl Engine {
     }
     pub fn recount(&mut self) {
         self.groups_dirty = true;
+        self.cell_hashes.clear();
         self.counts.fill(0);
         for &c in &self.labels {
             self.counts[c as usize] += 1;

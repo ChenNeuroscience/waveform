@@ -70,8 +70,8 @@ Rendering/analysis settings, plot visibility, isolation, divider positions and n
 ## Cache limits and invalidation
 
 - Population cache: approximately 384 MiB target, evicting inactive tetrodes first. This is a retained-cache target, not a hard bound on browser/GPU/temporary memory. Wasm allocator high-water marks, edits, clones and GC can briefly increase memory.
-- Positions: four processed variants keyed by file and LED/jump/smoothing settings.
-- Analysis: up to 100 results keyed by cut identity, revision, cell, position variant and numeric bin/smoothing/window settings. An edit clears derived analysis; unchanged raw tetrode features and GPU geometry are retained.
+- Positions: four processed variants keyed by file and LED/jump/smoothing settings. Each caches its trajectory and its occupancy maps (per bin settings), which are cell-independent: the trajectory is sent once per variant rather than with every cell's analysis, and occupancy is computed once rather than per cell.
+- Analysis: up to 200 results in the worker and 512 in the tile wall, keyed by recording, the cell's membership (spike count and an order-independent 64-bit hash of its spike indices), position variant and numeric bin/smoothing/window settings. Edits therefore recompute only cells whose spikes changed; renumbered cells (for example above a split) reuse their results. Rust rebuilds the hashes lazily after any label change. The worker returns the membership it analysed so results are filed correctly even if an edit was processed first.
 - GPU: four bounded point views; render-only controls reuse buffers.
 - Cell membership: one lazy index per engine, rebuilt after label changes and reused across cell analyses.
 - Waveform tiles: one count texture per cell membership set; mode, colour and scroll changes only recomposite.

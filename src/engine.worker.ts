@@ -3,8 +3,14 @@
 // every loop over spike, label, waveform and position records.
 import { demoFiles, recordingSource } from "./demo";
 import { parseHeader, textHeader, readCut } from "./files";
-import type { Settings, Header, HistoryEntry, ViewMessage } from "./types";
-import { parsePosition, analyse, type Position } from "./position";
+import type {
+  Settings,
+  Header,
+  HistoryEntry,
+  ViewMessage,
+  AnalysisData,
+} from "./types";
+import { parsePosition, analyse, trajectory, type Position } from "./position";
 import { openStore, put, get } from "./history";
 import {
   streamFile,
@@ -39,7 +45,7 @@ interface Session {
 const assets = new Map<string, Asset>(),
   sessions = new Map<string, Session>(),
   positions = new Map<string, Position>(),
-  analyses = new Map<string, unknown>();
+  analyses = new Map<string, AnalysisData>();
 let wasmPromise: Promise<Core>,
   latestLoad = 0,
   active: Session | undefined,
@@ -245,6 +251,7 @@ function view(a: Asset, s: Session, cached: boolean): ViewMessage {
       w.engine_wave_starts(e),
       w.engine_wave_starts_len(e),
     ),
+    cellHashes: copyU32(w, w.engine_cell_hashes(e), 2048),
     waveHashes: copyU32(
       w,
       w.engine_wave_hashes(e),
@@ -322,8 +329,31 @@ async function waveformColumn(
       ),
   );
 }
+const positionKey = (m: any) =>
+  m.pos
+    ? `${m.posKey}|${m.settings.leds}|${m.settings.maxSpeed}|${m.settings.posSmooth}`
+    : "";
+/** The processed position for a request, parsed once per file and LED/speed settings. */
+async function positionFor(m: any, w: Core) {
+  const pk = positionKey(m);
+  let pos = positions.get(pk);
+  if (m.pos && !pos) {
+    const base = [...positions.values()].find((p) => p.identity === m.posKey);
+    pos = await parsePosition(m.pos, m.settings, w, m.posKey, base);
+    positions.set(pk, pos);
+    if (positions.size > 4) {
+      const oldest = positions.keys().next().value!;
+      w.position_free(positions.get(oldest)!.handle);
+      positions.delete(oldest);
+    }
+  }
+  return pos;
+}
 async function handle(m: any): Promise<any> {
-  if (splitState && !["split", "analysis", "wave_batch"].includes(m.type))
+  if (
+    splitState &&
+    !["split", "analysis", "trajectory", "wave_batch"].includes(m.type)
+  )
     throw new Error(
       "Finish the waveform split with a left click, or press Escape to cancel.",
     );
@@ -510,14 +540,12 @@ async function handle(m: any): Promise<any> {
         splitState = undefined;
       }
       s.revision++;
-      analyses.clear();
       return view(a, s, true);
     } catch (error) {
       w.engine_edit_rollback(e);
       w.engine_patch_clear(e);
       splitState = undefined;
       s.revision++;
-      analyses.clear();
       throw error;
     }
   }
@@ -584,7 +612,6 @@ async function handle(m: any): Promise<any> {
         s.dirty = true;
         s.revision++;
         acceptSession(s);
-        analyses.clear();
       }
     } catch (error) {
       w.engine_edit_rollback(e);
@@ -620,7 +647,6 @@ async function handle(m: any): Promise<any> {
       to.push(entry);
       s.dirty = true;
       s.revision++;
-      analyses.clear();
     }
     return view(a, s, true);
   }
@@ -628,42 +654,38 @@ async function handle(m: any): Promise<any> {
     if (m.asset !== a.key) throw new Error("Superseded waveform batch.");
     return { waves: await waveBatch(a, m.first, m.count) };
   }
+  if (m.type === "trajectory") {
+    const pos = await positionFor(m, w);
+    return pos ? trajectory(w, pos) : null;
+  }
   if (m.type === "analysis") {
     const opts = m.settings as Settings,
-      pk = m.pos
-        ? `${m.posKey}|${opts.leds}|${opts.maxSpeed}|${opts.posSmooth}`
-        : "";
-    let pos = positions.get(pk);
-    if (m.pos && !pos) {
-      const base = [...positions.values()].find((p) => p.identity === m.posKey);
-      pos = await parsePosition(m.pos, opts, w, m.posKey, base);
-      positions.set(pk, pos);
-      if (positions.size > 4) {
-        const oldest = positions.keys().next().value!;
-        w.position_free(positions.get(oldest)!.handle);
-        positions.delete(oldest);
-      }
+      pos = await positionFor(m, w),
+      // Keyed by the cell's spike set rather than its number or the cut
+      // revision, so edits only recompute cells whose membership changed.
+      hashes = new Uint32Array(w.memory.buffer, w.engine_cell_hashes(e), 2048),
+      membership = `${counts(a)[m.cell]}:${hashes[m.cell * 2]}:${hashes[m.cell * 2 + 1]}`,
+      key = `${a.key}|${membership}|${positionKey(m)}|${opts.binCm}|${opts.smooth}|${opts.acWindow}|${opts.dirBin}|${opts.speedBin}|${opts.speedMax}`;
+    let result = analyses.get(key);
+    if (result) {
+      analyses.delete(key);
+    } else {
+      result = analyse(
+        w,
+        e,
+        m.cell,
+        parseFloat(a.header.timebase),
+        parseFloat(a.header.duration) ||
+          (times(a)[a.n - 1] || 0) / parseFloat(a.header.timebase),
+        pos,
+        opts,
+      );
+      if (analyses.size >= 200) analyses.delete(analyses.keys().next().value!);
+      evict(0);
     }
-    const key = `${s.key}|${s.revision}|${m.cell}|${pk}|${opts.binCm}|${opts.smooth}|${opts.acWindow}|${opts.dirBin}|${opts.speedBin}|${opts.speedMax}`;
-    const display = (result: any) =>
-      m.summary
-        ? { ...result, path: new Float32Array(), spikes: new Float32Array() }
-        : result;
-    if (analyses.has(key)) return display(analyses.get(key));
-    const result = analyse(
-      w,
-      e,
-      m.cell,
-      parseFloat(a.header.timebase),
-      parseFloat(a.header.duration) ||
-        (times(a)[a.n - 1] || 0) / parseFloat(a.header.timebase),
-      pos,
-      opts,
-    );
     analyses.set(key, result);
-    if (analyses.size > 100) analyses.delete(analyses.keys().next().value!);
-    evict(0);
-    return display(result);
+    const answer = { ...result, cell: m.cell, membership };
+    return m.summary ? { ...answer, spikes: new Float32Array() } : answer;
   }
   if (m.type === "export") return exportLabels(w, e, a.n, m.trial, m.format);
 
