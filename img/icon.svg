@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="b" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f7cff"/>
+      <stop offset="1" stop-color="#2346d8"/>
+    </linearGradient>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4fdc6e"/>
+      <stop offset="1" stop-color="#1fa846"/>
+    </linearGradient>
+    <linearGradient id="r" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff5a52"/>
+      <stop offset="1" stop-color="#d9261f"/>
+    </linearGradient>
+  </defs>
+  <g stroke="#fff" stroke-width="1.5">
+    <rect x="6" y="3" width="30" height="30" rx="5" fill="url(#b)"/>
+    <rect x="12" y="10" width="30" height="30" rx="5" fill="url(#g)"/>
+    <rect x="18" y="17" width="34" height="34" rx="5.5" fill="url(#r)"/>
+  </g>
+  <path d="M2 47.5C10 47.5 14 46 17 35C19.5 25 20.5 6 24 6C27.5 6 29 31 32 44C34 53 36 58 40.5 58C47 58 52 47.5 62 46.5"
+        fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M2 47.5C10 47.5 14 46 17 35C19.5 25 20.5 6 24 6C27.5 6 29 31 32 44C34 53 36 58 40.5 58C47 58 52 47.5 62 46.5"
+        fill="none" stroke="#18181b" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

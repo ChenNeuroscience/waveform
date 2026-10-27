@@ -1,5 +1,15 @@
 import { ready } from "./controls";
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+
+/** The clipboard's HTML and plain text. */
+async function readClipboard(page: Page) {
+  return page.evaluate(async () => {
+    const [item] = await navigator.clipboard.read();
+    const html = await (await item.getType("text/html")).text();
+    const text = await (await item.getType("text/plain")).text();
+    return { html, text, types: item.types };
+  });
+}
 
 test("Space closes windows; copied tiles have one title and frozen stats only on hover", async ({
   page,
@@ -91,4 +101,95 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
     await expect(page.getByRole("dialog")).toHaveCount(0);
   }
   expect(errors).toEqual([]);
+});
+
+test("Copying a cell puts its text and each plot separately on the clipboard", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/?demo=quick");
+  await page.getByText("Try it now with simulated data").click();
+  await ready(page);
+  await page.locator('.cell-tile[data-cell="1"] .tile-badge button').click();
+  await page.keyboard.press("ControlOrMeta+c");
+  await expect
+    .poll(async () => (await readClipboard(page).catch(() => ({ text: "" }))).text)
+    .toMatch(/cell 1 · /);
+  const clipboard = await readClipboard(page);
+  expect(clipboard.types).not.toContain("image/png");
+  expect(clipboard.text).toMatch(/T\d+ · cell 1 · [\d,]+ spikes/);
+  const alts = [...clipboard.html.matchAll(/<img[^>]*alt="([^"]+)"/g)].map((m) => m[1]);
+  expect(alts).toEqual([
+    "Waveforms",
+    "Spatial rate map",
+    "Head direction",
+    "Speed",
+    "Autocorrelation",
+  ]);
+});
+
+test("holding Cmd/Ctrl C opens copy mode, which keeps the clipboard in step", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/?demo=quick");
+  await page.getByText("Try it now with simulated data").click();
+  await ready(page);
+  const tile = (n: number) => page.locator(`.cell-tile[data-cell="${n}"]`);
+  // A read can race a write still landing; poll again.
+  const lines = async () =>
+    (await readClipboard(page).catch(() => ({ text: "" }))).text.split("\n");
+  await tile(2).hover();
+  await page.keyboard.down("ControlOrMeta");
+  await page.keyboard.down("c");
+  await page.waitForTimeout(1100);
+  await page.keyboard.down("c"); // A key repeat while held.
+  await page.keyboard.up("c");
+  await page.keyboard.up("ControlOrMeta");
+  const prompt = page.getByRole("region", { name: "Copy cells", exact: true });
+  await expect(prompt).toContainText("(1 cell on the clipboard)");
+  await expect(tile(2)).toHaveClass(/tile-marked/);
+  await expect(tile(3)).toHaveClass(/tile-muted/);
+  await expect.poll(lines).toEqual([expect.stringMatching(/cell 2 · /)]);
+  await tile(3).click();
+  await expect(prompt).toContainText("(2 cells on the clipboard)");
+  await expect
+    .poll(lines)
+    .toEqual([expect.stringMatching(/cell 2 · /), expect.stringMatching(/cell 3 · /)]);
+  await tile(2).click();
+  await expect.poll(lines).toEqual([expect.stringMatching(/cell 3 · /)]);
+  // Select all includes tiles scrolled out of view, each with its own plots.
+  await prompt.getByRole("button", { name: /Select all/ }).click();
+  await expect.poll(async () => (await lines()).length).toBeGreaterThan(3);
+  const { html, text } = await readClipboard(page);
+  const count = text.split("\n").length;
+  expect(html.match(/alt="Waveforms"/g)).toHaveLength(count);
+  expect(html.match(/alt="Autocorrelation"/g)).toHaveLength(count);
+  // Leaving the window ends copy mode and vignettes the window until it returns.
+  const app = page.locator(".desktop-app");
+  await expect(app).not.toHaveClass(/unfocused/);
+  await page.evaluate(() => dispatchEvent(new Event("blur")));
+  await expect(prompt).toHaveCount(0);
+  await expect(app).toHaveClass(/unfocused/);
+  await page.evaluate(() => dispatchEvent(new Event("focus")));
+  await expect(app).not.toHaveClass(/unfocused/);
+  await tile(2).hover();
+  await page.keyboard.down("ControlOrMeta");
+  await page.keyboard.down("c");
+  await page.waitForTimeout(1100);
+  await page.keyboard.down("c");
+  await page.keyboard.up("c");
+  await page.keyboard.up("ControlOrMeta");
+  await expect(prompt).toBeVisible();
+  // Escape ends copy mode first; then it hides and shows the toolbar.
+  await page.keyboard.press("Escape");
+  await expect(prompt).toHaveCount(0);
+  await expect(page.locator(".tile-muted")).toHaveCount(0);
+  await expect(page.locator(".desktop-toolbar")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".desktop-toolbar")).toHaveCount(0);
+  await page.getByRole("button", { name: "Show toolbar", exact: true }).click();
+  await expect(page.locator(".desktop-toolbar")).toBeVisible();
 });

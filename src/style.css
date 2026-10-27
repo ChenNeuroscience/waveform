@@ -85,6 +85,72 @@ small {
   flex-direction: column;
   background: white;
 }
+/* Without keyboard focus (shortcuts go to another window), vignette the window. */
+.desktop-app.unfocused::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 3px rgb(71 85 105 / 55%),
+    inset 0 0 140px 24px rgb(30 41 59 / 38%);
+}
+.toolbar-home {
+  display: flex;
+}
+.desktop-toolbar .home-button {
+  padding: 3px 4px;
+}
+.home-button img {
+  display: block;
+  transition: transform 0.15s;
+}
+.home-button:hover img {
+  transform: scale(1.08);
+}
+.home-confirm {
+  position: fixed;
+  z-index: 40;
+  top: 38px;
+  left: 6px;
+  width: 250px;
+  padding: 10px 12px;
+  white-space: normal;
+  background: white;
+  border: 1px solid #d3d6db;
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgb(15 23 42 / 18%);
+  font-size: 12px;
+}
+.home-confirm p {
+  margin: 0 0 9px;
+  line-height: 1.4;
+}
+.home-confirm button {
+  margin-right: 6px;
+  font-size: 12px;
+}
+.toolbar-show {
+  position: fixed;
+  z-index: 30;
+  top: 4px;
+  right: 18px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  color: #555;
+  background: #f6f7f9e6;
+  border: 1px solid #d3d6db;
+  border-radius: 5px;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
+}
+.toolbar-show:hover {
+  color: #111;
+  background: white;
+}
 .desktop-toolbar {
   display: flex;
   align-items: center;
@@ -519,7 +585,7 @@ small {
 .right-workspace {
   position: relative;
 }
-.swap-prompt {
+.tile-prompt {
   position: absolute;
   z-index: 20;
   top: 5px;
@@ -534,19 +600,23 @@ small {
   font-size: 12px;
   text-align: center;
 }
-.swap-instructions {
+.tile-prompt.passive {
+  pointer-events: none;
+}
+.tile-prompt-instructions:not(:last-child) {
   margin-bottom: 4px;
 }
-.swap-prompt input {
+.tile-prompt input {
   width: 60px;
   height: 23px;
   font-size: 12px;
 }
-.swap-prompt button {
+.tile-prompt button {
   font-size: 11px;
   margin: 4px 4px 0 0;
 }
-.tile-wall[data-swapping] .cell-tile {
+.tile-wall[data-swapping] .cell-tile,
+.tile-wall[data-copying] .cell-tile {
   cursor: crosshair;
 }
 .tile-edit-cover {
@@ -1472,7 +1542,7 @@ kbd {
   flex: none;
   width: 128px;
 }
-.cell-tile.split-muted:after {
+.cell-tile.tile-muted:after {
   content: "";
   position: absolute;
   inset: 0;
@@ -1480,7 +1550,7 @@ kbd {
   z-index: 10;
   pointer-events: none;
 }
-.cell-tile.split-pair {
+.cell-tile.tile-marked {
   outline: 1px solid #888;
   outline-offset: -1px;
 }
@@ -1494,20 +1564,6 @@ kbd {
 }
 .left-workspace {
   position: relative;
-}
-.splitting:after {
-  content: "split mode · right-drag either waveform to adjust · left click to finish · Esc to cancel";
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  z-index: 90;
-  padding: 4px 8px;
-  background: #fffbdc;
-  border: 1px solid #aaa;
-  font-size: 11px;
-  pointer-events: none;
-  white-space: nowrap;
 }
 .plot-copy {
   object-fit: contain;

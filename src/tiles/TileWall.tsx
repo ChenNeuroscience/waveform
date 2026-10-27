@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { WaveGPU } from "./wave-gpu";
-import { AnalysisPlot } from "../plots/AnalysisPlot";
-import { CellStats } from "./CellStats";
+import { AnalysisPlot, drawAnalysis } from "../plots/AnalysisPlot";
+import { CellStats, type CellStat } from "./CellStats";
 import { request } from "../worker/client";
 import { waveX, waveY, type WaveLayout } from "../plots/plot-geometry";
 import { useTileGestures, type DragComparison } from "./tile-gestures";
@@ -22,6 +22,37 @@ import {
 export type VisiblePlots = Record<PlotMode, boolean>;
 const ROW = 124;
 const STRIDE = ROW + 2;
+
+/** The analysis plots a tile can show, in tile order, with their regions. */
+const TILE_PLOTS = [
+  { mode: "spatial", selector: ".tile-spatial", name: "Spatial rate map" },
+  { mode: "direction", selector: ".tile-direction", name: "Head direction" },
+  { mode: "speed", selector: ".tile-speed", name: "Speed" },
+  { mode: "ac", selector: ".tile-ac", name: "Autocorrelation" },
+] as const;
+
+/** A cell's shown plots as separate images, with its hover stats. */
+export interface CellCapture {
+  cell: number;
+  stats: CellStat[];
+  plots: { name: string; canvas: HTMLCanvasElement }[];
+}
+export interface TileWallHandle {
+  /** Capture cells' plots, including cells scrolled out of view. */
+  capture: (cells: number[]) => Promise<CellCapture[]>;
+}
+
+/** The content size (CSS pixels) of a plot region on any rendered tile. */
+function regionSize(wall: HTMLElement, selector: string) {
+  const el = wall.querySelector<HTMLElement>(`.cell-tile ${selector}`);
+  if (!el) {
+    return null;
+  }
+  const style = getComputedStyle(el);
+  const width = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  const height = el.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  return width > 0 && height > 0 ? { width, height } : null;
+}
 
 /** Cells with tiles: populated cells, plus both halves of an open split. */
 function tileCells(counts: Uint32Array, splitPoint: SplitPoint | null) {
@@ -98,6 +129,8 @@ export interface TileActions {
   onWaveSplit: (n: number, ch: number, t: number, v: number) => void;
   onPopOut: (n: number, x: number, y: number) => void;
   onSwapGroup: (group: number) => void;
+  /** Add or remove a cell from the copy-mode selection. */
+  onCopyToggle: (cell: number) => void;
 }
 
 export function TileWall({
@@ -108,10 +141,21 @@ export function TileWall({
   shown,
   splitPoint,
   swap,
+  copying,
   feedback,
   grabMode,
   busy,
-  actions: { onSelect, onHover, onCompare, onMerge, onWaveSplit, onPopOut, onSwapGroup },
+  actions: {
+    onSelect,
+    onHover,
+    onCompare,
+    onMerge,
+    onWaveSplit,
+    onPopOut,
+    onSwapGroup,
+    onCopyToggle,
+  },
+  ref,
 }: {
   data: ViewData;
   settings: Settings;
@@ -121,10 +165,13 @@ export function TileWall({
   shown: VisiblePlots;
   splitPoint: SplitPoint | null;
   swap: SwapState | null;
+  /** The copy-mode selection, or null outside copy mode. */
+  copying: number[] | null;
   feedback: TileFeedback | null;
   grabMode: boolean;
   busy: boolean;
   actions: TileActions;
+  ref?: Ref<TileWallHandle>;
 }) {
   const pos = trial?.pos;
   const posKey = positionKey(trial);
@@ -190,7 +237,7 @@ export function TileWall({
   const gestures = useTileGestures({
     splitSource: splitPoint?.source,
     grab: grabMode,
-    busy: busy || !!swap,
+    busy: busy || !!swap || !!copying,
     scope: `${scope}|${tileStride}|${columns}`,
     onSelect,
     onCompare,
@@ -204,6 +251,42 @@ export function TileWall({
         transparentBadge: true,
       })?.toDataURL(),
   });
+  // Fetches missing analyses (unbatched, so the visible tiles' requests aren't
+  // superseded) and draws each plot off-screen at its tile size.
+  const capture = async (cells: number[]): Promise<CellCapture[]> => {
+    const missing = cells.filter((cell) => !analysisFor(cell));
+    const results = await Promise.all(
+      missing.map((cell) =>
+        request("analysis", { session: data.session, cell, pos, posKey, settings, summary: true }),
+      ),
+    );
+    for (const result of results) {
+      if (result.membership) {
+        cache.current.set(result.membership, result);
+      }
+    }
+    const wall = scroller.current!;
+    return cells.map((cell) => {
+      const a = analysisFor(cell);
+      const plots = [];
+      const waves = shown.waveforms ? gpu.current?.capture(cell) : null;
+      if (waves) {
+        plots.push({ name: "Waveforms", canvas: waves });
+      }
+      for (const { mode, selector, name } of TILE_PLOTS) {
+        const size = regionSize(wall, selector);
+        if (!shown[mode] || !a || (mode !== "ac" && !pos) || !size) {
+          continue;
+        }
+        const canvas = document.createElement("canvas");
+        const maxRate = mode === "spatial" ? settings.maxRate : 0;
+        drawAnalysis(canvas, size.width, size.height, { data: a, mode, maxRate, compact: true });
+        plots.push({ name, canvas });
+      }
+      return { cell, stats: cellStatEntries(a, !!pos, data.counts[cell]), plots };
+    });
+  };
+  useImperativeHandle(ref, () => ({ capture }));
   // The scroller clips ordinary shadows. Paint only the halo in the page layer,
   // above the toolbar, while leaving the shared waveform canvas unobstructed.
   useLayoutEffect(() => {
@@ -405,21 +488,25 @@ export function TileWall({
       y: waveFrameTop + waveY(point.threshold) * waveFrameHeight,
     };
   };
-  // While a swap is pending, tiles choose the swap partner instead of acting.
+  // While a swap is pending or in copy mode, a click picks the tile instead of acting.
   const pressTile = (e: React.PointerEvent<HTMLElement>, cell: number) => {
-    if (swap) {
+    if (swap || copying) {
       e.preventDefault();
       return;
     }
     gestures.begin(e, cell);
   };
   const clickTileCapture = (e: React.MouseEvent, cell: number) => {
-    if (!swap) {
+    if (!swap && !copying) {
       return;
     }
     e.preventDefault();
     e.stopPropagation();
-    onSwapGroup(cell);
+    if (copying) {
+      onCopyToggle(cell);
+    } else {
+      onSwapGroup(cell);
+    }
   };
   const enterTile = (cell: number) => {
     setHovered(cell);
@@ -439,6 +526,7 @@ export function TileWall({
       data-splitting={splitPoint ? splitPoint.source : undefined}
       data-dragging={gestures.dragging ?? undefined}
       data-swapping={swap?.source}
+      data-copying={copying ? "" : undefined}
       ref={scroller}
       onScroll={(e) => setScroll(e.currentTarget.scrollTop)}
       aria-label="Cell tile wall"
@@ -464,7 +552,8 @@ export function TileWall({
           )}
           {visible.map((cell, i) => {
             const a = analysisFor(cell);
-            const paired = isSplitTile(cell);
+            // The split pair or copy selection is marked; other tiles fade.
+            const marked = isSplitTile(cell) || !!copying?.includes(cell);
             const marker = splitMarker(cell);
             const dragOrigin = gestures.dragging === cell || gestures.settling?.source === cell;
             return (
@@ -474,8 +563,8 @@ export function TileWall({
                   selected: selected === cell,
                   "swap-source": swap?.source === cell,
                   "merge-target": gestures.target === cell,
-                  "split-muted": !!splitPoint && !paired,
-                  "split-pair": paired,
+                  "tile-muted": (!!splitPoint || !!copying) && !marked,
+                  "tile-marked": marked,
                   "drag-origin": dragOrigin,
                 })}
                 data-cell={cell}

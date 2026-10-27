@@ -9,9 +9,16 @@ import { Notice } from "./shell/Notice";
 import { FileInputs } from "./shell/FileInputs";
 import { Divider, usePaneLayout } from "./shell/panes";
 import { SwapPrompt } from "./tiles/SwapPrompt";
+import { TilePrompt } from "./tiles/TilePrompt";
 import type { DragComparison } from "./tiles/tile-gestures";
 import { FloatingWindow } from "./shell/FloatingWindow";
-import { TileWall, type TileActions, type VisiblePlots } from "./tiles/TileWall";
+import {
+  TileWall,
+  type TileActions,
+  type TileWallHandle,
+  type VisiblePlots,
+} from "./tiles/TileWall";
+import { PanelTopOpen } from "lucide-react";
 import { CutDownloads, cutDownloadKey, writeCutDrag } from "./app/cut-downloads";
 import { usePreference } from "./preferences";
 import { useRecordingHistory, type RecordingSelection } from "./app/navigation";
@@ -172,11 +179,15 @@ export default function App() {
     ac: true,
   });
 
-  // Tool windows (the focused one is `pane`) and floating plot copies.
+  // The toolbar (Esc hides and shows it), tool windows (the focused one is `pane`)
+  // and floating plot copies.
+  const [toolbar, setToolbar] = usePreference("toolbar", true);
   const [pane, setPane] = useState<Pane>(null);
   const [panels, setPanels] = useState<PanelName[]>([]);
   // Space held: clicking a plot copies it.
   const [grabMode, setGrabMode] = useState(false);
+  // Whether this window has keyboard focus (shortcuts only reach a focused window).
+  const [focused, setFocused] = useState(() => document.hasFocus());
 
   // Tile interactions: hover, drag-to-compare (with the target's analysis),
   // an open waveform split, a pending swap, and the jiggle after an edit.
@@ -210,6 +221,7 @@ export default function App() {
   const cutDownloads = useRef(new CutDownloads());
   // The tile under the pointer (for S to swap), without re-rendering on hover.
   const hoveredTile = useRef<number | null>(null);
+  const tileWall = useRef<TileWallHandle>(null);
 
   // Show only the chosen plot; with Shift, toggle it among the others.
   const showPlot = (mode: PlotMode, multiple: boolean) => {
@@ -272,6 +284,7 @@ export default function App() {
   };
   const applySelection = (next: RecordingSelection) => {
     setSwap(null);
+    copyMode.end();
     setTileFeedback(null);
     hoveredTile.current = null;
     const target = trials
@@ -389,12 +402,15 @@ export default function App() {
     popOut,
     popPlot,
     copyToClipboard,
+    copyMode,
     close: closeCopy,
+    closeAll: closeAllCopies,
   } = useCopies({
     trial,
     tetNum,
     cell,
     data,
+    tileWall,
     onNotice: setNotice,
   });
   useEffect(() => {
@@ -408,12 +424,18 @@ export default function App() {
         setGrabMode(false);
       }
     };
-    const blur = () => setGrabMode(false);
+    const blur = () => {
+      setGrabMode(false);
+      setFocused(false);
+    };
+    const focus = () => setFocused(true);
     addEventListener("keyup", up);
     addEventListener("blur", blur);
+    addEventListener("focus", focus);
     return () => {
       removeEventListener("keyup", up);
       removeEventListener("blur", blur);
+      removeEventListener("focus", focus);
     };
   }, []);
   const newCut = () => ({ id: crypto.randomUUID(), name: editedCutName(trial!, tet!) });
@@ -451,6 +473,7 @@ export default function App() {
       return;
     }
     setSwap(null);
+    copyMode.end();
     const generation = loadGen.current;
     setHoverCell(null);
     setBusy(true);
@@ -494,17 +517,58 @@ export default function App() {
     onFinishing: () => setHoverCell(null),
     status: { setBusy, setProgress, setMessage, setError },
   });
-  const pushSelection = useRecordingHistory(
+  // Close every file and return to the start screen.
+  const resetToStart = () => {
+    ++loadGen.current; // Ignore replies for the closed recording.
+    setTrials([]);
+    setTrialId("");
+    setTetNum(1);
+    setCutId("");
+    setData(null);
+    setBusy(false);
+    setSwap(null);
+    copyMode.end();
+    closeAllCopies();
+    setTileFeedback(null);
+    setDragComparison(null);
+    hoverTile(null);
+    setPanels([]);
+    setPane(null);
+    setError("");
+    setNotice("");
+    lastCuts.current.clear();
+    dirtySessions.current.clear();
+  };
+  const { push: pushSelection, pushHome } = useRecordingHistory(
     trial && tet?.file ? { trialId, tetNum, cutId } : null,
     async (next, current) => {
+      // Back to the start screen loses unexported edits, so ask first.
+      if (!next && dirtySessions.current.size) {
+        if (!confirm("Close these files? Unexported cut edits will be lost.")) {
+          history.forward();
+          return;
+        }
+      }
       if (splitPoint) {
         await finishSplit(true);
       }
-      if (current()) {
+      if (!current()) {
+        return;
+      }
+      if (next) {
         applySelection(next);
+      } else {
+        resetToStart();
       }
     },
   );
+  const goHome = async () => {
+    if (splitPoint) {
+      await finishSplit(true);
+    }
+    pushHome();
+    resetToStart();
+  };
   const selectSource = (group: number, toggle = false) => {
     setSources((current) => nextSources(current, group, toggle));
   };
@@ -585,7 +649,9 @@ export default function App() {
     dragging: !!dragComparison,
     swap,
     splitPoint,
+    copying: !!copyMode.cells,
     pane,
+    tool,
     hoverCell,
     hoveredTile,
     settings,
@@ -597,6 +663,13 @@ export default function App() {
     openFiles: () => fileInput.current?.click(),
     operation: (type) => operation(type),
     copyPlot: copyToClipboard,
+    startCopyMode: (hovered) => {
+      setGrabMode(false);
+      copyMode.start(hovered);
+    },
+    selectAllCopies: () => copyMode.selectAll(),
+    endCopyMode: () => copyMode.end(),
+    toggleToolbar: () => setToolbar(!toolbar),
     exportCut: () => exportCut(),
     cancelSwap: () => setSwap(null),
     startSwap: (n) => {
@@ -750,10 +823,11 @@ export default function App() {
     onWaveSplit: previewSplit,
     onPopOut: popOut,
     onSwapGroup: swapGroup,
+    onCopyToggle: copyMode.toggle,
   };
   return (
     <div
-      className={`app desktop-app ${grabMode ? "grab-mode" : ""} ${splitPoint ? "splitting" : ""}`}
+      className={`app desktop-app ${grabMode ? "grab-mode" : ""} ${splitPoint ? "splitting" : ""} ${focused ? "" : "unfocused"}`}
       data-ready={ready ? "true" : "false"}
       onDragOver={dragOver}
       onDragLeave={(e) => !e.relatedTarget && setDrag(false)}
@@ -762,20 +836,33 @@ export default function App() {
       <FileInputs fileInput={fileInput} folderInput={folderInput} onImport={importFiles} />
       {trials.length > 0 ? (
         <>
-          <Toolbar
-            {...{ data, ready, busy, progress, message, shown }}
-            onOpenFiles={openFiles}
-            onOpenFolder={openFolder}
-            onOperation={operation}
-            onPanel={setPane}
-            onToggle={showPlot}
-          >
-            <RenderingToggles
-              drift={settings.drift}
-              density={settings.density}
-              onToggle={(mode) => update(mode, !settings[mode])}
-            />
-          </Toolbar>
+          {toolbar ? (
+            <Toolbar
+              {...{ data, ready, busy, progress, message, shown }}
+              unexported={dirtySessions.current.size > 0}
+              onHome={goHome}
+              onOpenFiles={openFiles}
+              onOpenFolder={openFolder}
+              onOperation={operation}
+              onPanel={setPane}
+              onToggle={showPlot}
+            >
+              <RenderingToggles
+                drift={settings.drift}
+                density={settings.density}
+                onToggle={(mode) => update(mode, !settings[mode])}
+              />
+            </Toolbar>
+          ) : (
+            <button
+              className="toolbar-show"
+              title="Show toolbar [Esc]"
+              aria-label="Show toolbar"
+              onClick={() => setToolbar(true)}
+            >
+              <PanelTopOpen size={16} />
+            </button>
+          )}
           <div
             className="desktop-workspace"
             ref={panes.workspace}
@@ -821,8 +908,39 @@ export default function App() {
                   onCancel={() => setSwap(null)}
                 />
               )}
+              {splitPoint && (
+                <TilePrompt
+                  label="Split cell"
+                  instructions={`Split cell ${splitPoint.source}: right-drag either waveform to move the gate. Click elsewhere to finish, Esc to cancel.`}
+                />
+              )}
+              {dragComparison && (
+                <TilePrompt
+                  label="Merge cells"
+                  instructions={
+                    dragComparison.target === null
+                      ? `Merge cell ${dragComparison.source}: drop it on another tile. Esc to cancel.`
+                      : `Release to merge cells ${dragComparison.source} and ${dragComparison.target}. Esc to cancel.`
+                  }
+                />
+              )}
+              {copyMode.cells && (
+                <TilePrompt
+                  label="Copy cells"
+                  instructions={`Copy mode: click tiles to add or remove them (${copyMode.cells.length} ${copyMode.cells.length === 1 ? "cell" : "cells"} on the clipboard). Esc to finish.`}
+                >
+                  <button type="button" onClick={copyMode.selectAll}>
+                    Select all [⌘/Ctrl A]
+                  </button>
+                  <button type="button" onClick={copyMode.end}>
+                    Done [Esc]
+                  </button>
+                </TilePrompt>
+              )}
               {data ? (
                 <TileWall
+                  ref={tileWall}
+                  copying={copyMode.cells}
                   {...{ data, settings, trial, shown, splitPoint, swap, grabMode }}
                   selected={cell}
                   feedback={tileFeedback}
