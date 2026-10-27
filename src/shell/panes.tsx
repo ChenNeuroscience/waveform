@@ -31,7 +31,8 @@ export function usePaneLayout() {
         return;
       }
       const b = left.current!.getBoundingClientRect();
-      const change = part === "files" ? { files: ev.clientY - b.top } : { features: b.bottom - ev.clientY };
+      const change =
+        part === "files" ? { files: ev.clientY - b.top } : { features: b.bottom - ev.clientY };
       setLayout((old) => fitPaneLayout({ ...old, ...change }, width(), b.height));
     };
     const stop = () => {

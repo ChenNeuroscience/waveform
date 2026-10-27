@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Toolbar } from "./shell/Toolbar";
+import { RenderingToggles } from "./shell/RenderingToggles";
 import { FilesPane } from "./shell/FilesPane";
 import { PositionPane } from "./shell/PositionPane";
 import { FeaturePane, type Painting } from "./shell/FeaturePane";
@@ -766,7 +767,13 @@ export default function App() {
             onOperation={operation}
             onPanel={setPane}
             onToggle={showPlot}
-          />
+          >
+            <RenderingToggles
+              drift={settings.drift}
+              density={settings.density}
+              onToggle={(mode) => update(mode, !settings[mode])}
+            />
+          </Toolbar>
           <div
             className="desktop-workspace"
             ref={panes.workspace}

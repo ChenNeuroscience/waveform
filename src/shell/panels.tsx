@@ -155,16 +155,6 @@ export function SettingsPanel({
         onChange={(v) => update("pointSize", v)}
       />
       <Toggle label="Isolate selected cell" checked={isolate} onChange={onIsolate} />
-      <Toggle
-        label="Colour by recording time"
-        checked={settings.drift}
-        onChange={(v) => update("drift", v)}
-      />
-      <Toggle
-        label="Density rendering"
-        checked={settings.density}
-        onChange={(v) => update("density", v)}
-      />
       <h3>Spatial & temporal analysis</h3>
       <Slider
         label="Spatial bin width"

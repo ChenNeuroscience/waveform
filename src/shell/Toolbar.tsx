@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   FolderOpen,
   Folder,
@@ -27,6 +28,8 @@ export function Toolbar(p: {
   shown: VisiblePlots;
   onOpenFiles: () => void;
   onOpenFolder: () => void;
+  /** Extra controls after the plot toggles. */
+  children?: ReactNode;
 }) {
   const timing = experimentTiming(p.data?.headers || {}, p.data?.duration || 0);
   return (
@@ -120,6 +123,12 @@ export function Toolbar(p: {
           }
         </button>
       ))}
+      {p.children && (
+        <>
+          <span className="tool-separator" />
+          {p.children}
+        </>
+      )}
       <div className="toolbar-status" role="group" aria-label="Recording details">
         {p.data && (
           <span>

@@ -74,9 +74,9 @@ export async function exportCut(page: Page) {
 }
 
 export async function setDensity(page: Page, enabled: boolean) {
-  const panel = page.getByRole("dialog", { name: "Settings", exact: true });
-  const opened = !(await panel.isVisible());
-  if (opened) await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await panel.getByRole("checkbox", { name: "Density rendering", exact: true }).setChecked(enabled);
-  if (opened) await panel.getByRole("button", { name: "Close panel", exact: true }).click();
+  const toggle = page.getByRole("button", { name: "Density rendering", exact: true });
+  if ((await toggle.getAttribute("aria-pressed")) !== String(enabled)) {
+    await toggle.click();
+  }
+  await expect(toggle).toHaveAttribute("aria-pressed", String(enabled));
 }
