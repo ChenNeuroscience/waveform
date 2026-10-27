@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { History, Redo2, Search, Undo2, X } from "lucide-react";
+import { History, Redo2, Undo2 } from "lucide-react";
 import { DesktopShell } from "./DesktopShell";
 import type { DragComparison } from "./tile-gestures";
 import { FloatingWindow } from "./FloatingWindow";
@@ -29,15 +29,9 @@ import {
   type TileFeedback,
 } from "./types";
 import { Superseded, type EditRequest } from "./protocol";
+import { HeadersPanel, HelpPanel, SettingsPanel } from "./panels";
+import { useShortcuts } from "./shortcuts";
 const fmt = (n: number) => n.toLocaleString("en-GB");
-const compact = (n: number) =>
-  n >= 1e6
-    ? `${(n / 1e6).toFixed(2)}m`
-    : n >= 1000
-      ? `${(n / 1000).toFixed(1)}k`
-      : String(n);
-const time = (n: number) =>
-  `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, "0")}`;
 function readSettings(): Settings {
   try {
     const saved = JSON.parse(
@@ -132,8 +126,7 @@ export default function App() {
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
-    [drag, setDrag] = useState(false),
-    [demo, setDemo] = useState(false);
+    [drag, setDrag] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null),
     folderInput = useRef<HTMLInputElement>(null),
     // Bumped per recording load; async edits, loads and progress updates compare
@@ -774,120 +767,48 @@ export default function App() {
   };
   const update = <K extends keyof Settings>(k: K, v: Settings[K]) =>
     setSettings((s) => ({ ...s, [k]: v }));
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).matches("input,select,textarea")) return;
-      if (dragComparison) {
-        e.preventDefault();
-        return;
-      }
-      if (e.code === "Space" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        if (!swap) setGrabMode(true);
-        return;
-      }
-      if (splitPoint) {
-        e.preventDefault();
-        return;
-      }
-      const cmd = e.ctrlKey || e.metaKey;
-      if (cmd && e.key === "o") {
-        e.preventDefault();
-        fileInput.current?.click();
-        return;
-      }
-      if (cmd && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        operation(e.shiftKey ? "redo" : "undo");
-        return;
-      }
-      if (cmd && e.key === "y") {
-        e.preventDefault();
-        operation("redo");
-        return;
-      }
-      if (cmd && e.key === "c" && ready) {
-        e.preventDefault();
-        copyPlot();
-        return;
-      }
-      if (cmd && e.key === "s") {
-        e.preventDefault();
-        exportCut();
-        return;
-      }
-      // Browser commands (reload, close tab, back, etc.) must never fall
-      // through to the unmodified plot/navigation shortcuts.
-      if (cmd || e.altKey) return;
-      if (swap) {
-        e.preventDefault();
-        if (e.key === "Escape" || (e.key.toLowerCase() === "s" && !e.repeat))
-          setSwap(null);
-        return;
-      }
-      if (e.key === "s" && ready && !e.repeat && hoveredTile.current !== null) {
-        e.preventDefault();
-        setGrabMode(false);
-        setCell(hoveredTile.current);
-        setSwap({ source: hoveredTile.current });
-        return;
-      }
-      if (e.key === "Escape") {
-        if (pane) setPanels((ps) => ps.filter((p) => p !== pane));
-        setPane(null);
-        setTool("brush");
-        return;
-      }
-      if (e.key === "k" || e.key === "?")
-        setPane((p) => (p === "help" ? null : "help"));
-      if (e.key === "h") setPane((p) => (p === "headers" ? null : "headers"));
-      if (e.key === "z") setPane((p) => (p === "history" ? null : "history"));
-      if (e.key === "d") update("drift", !settings.drift);
-      if (e.key === "p") update("density", !settings.density);
-      if (
-        e.key.toLowerCase() === "e" &&
-        hoverCell !== null &&
-        ready &&
-        !e.repeat
-      )
-        selectDest(hoverCell);
-      if (
-        e.key.toLowerCase() === "f" &&
-        hoverCell !== null &&
-        ready &&
-        !e.repeat
-      )
-        selectSource(hoverCell, e.shiftKey);
-      if (e.key === "l") setTool("lasso");
-      if (e.key === "Enter" && ready) {
-        e.preventDefault();
-        newDestination();
-      }
-      if (/^[0-9]$/.test(e.key)) {
-        const n = Math.floor(tetNum / 10) * 10 + +e.key;
-        chooseTet(n);
-      }
-      if (e.key === "o") chooseTet(tetNum >= 10 ? tetNum - 10 : tetNum + 10);
-      const modes: Record<string, PlotMode> = {
-        w: "waveforms",
-        r: "spatial",
-        c: "direction",
-        v: "speed",
-        t: "ac",
-      };
-      const mode = modes[e.key.toLowerCase()];
-      if (mode) showPlot(mode, e.shiftKey);
-      if (trial && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
-        const i = trials.indexOf(trial) + (e.key === "ArrowLeft" ? -1 : 1);
-        if (trials[i]) chooseTrial(trials[i]);
-      }
-    };
-    addEventListener("keydown", key);
-    return () => removeEventListener("keydown", key);
+  // Actions are wrapped so they are looked up when a key is pressed (some are
+  // declared further down this component).
+  useShortcuts({
+    ready,
+    dragging: !!dragComparison,
+    swap,
+    splitPoint,
+    pane,
+    hoverCell,
+    hoveredTile,
+    settings,
+    tetNum,
+    trial,
+    trials,
+    setGrabMode,
+    openFiles: () => fileInput.current?.click(),
+    operation: (type) => operation(type),
+    copyPlot: () => copyPlot(),
+    exportCut: () => exportCut(),
+    cancelSwap: () => setSwap(null),
+    startSwap: (n) => {
+      setGrabMode(false);
+      setCell(n);
+      setSwap({ source: n });
+    },
+    closePane: () => {
+      if (pane) setPanels((ps) => ps.filter((p) => p !== pane));
+      setPane(null);
+      setTool("brush");
+    },
+    togglePane: (name) => setPane((p) => (p === name ? null : name)),
+    setTool,
+    update,
+    selectDest: (g) => selectDest(g),
+    selectSource: (g, toggle) => selectSource(g, toggle),
+    newDestination: () => newDestination(),
+    chooseTet: (n) => chooseTet(n),
+    chooseTrial: (t) => chooseTrial(t),
+    showPlot,
   });
   const startDemo = async () => {
     if (busy) return;
-    setDemo(true);
     setBusy(true);
     setMessage("Preparing simulated recordings…");
     try {
@@ -944,153 +865,6 @@ export default function App() {
     else files.push(...Array.from(e.dataTransfer.files));
     if (files.length) await importFiles(files);
   };
-  const renderSettings = () => (
-    <>
-      <h3>Rendering</h3>
-      <Slider
-        label="Point size"
-        value={settings.pointSize}
-        min={0.5}
-        max={4}
-        step={0.1}
-        unit="px"
-        onChange={(v) => update("pointSize", v)}
-      />
-      <Toggle
-        label="Isolate selected cell"
-        checked={isolate}
-        onChange={setIsolate}
-      />
-      <Toggle
-        label="Colour by recording time"
-        checked={settings.drift}
-        onChange={(v) => update("drift", v)}
-      />
-      <Toggle
-        label="Density rendering"
-        checked={settings.density}
-        onChange={(v) => update("density", v)}
-      />
-      <h3>Spatial & temporal analysis</h3>
-      <Slider
-        label="Spatial bin width"
-        value={settings.binCm}
-        min={0.5}
-        max={10}
-        step={0.5}
-        unit="cm"
-        onChange={(v) => update("binCm", v)}
-      />
-      <Slider
-        label="Boxcar radius"
-        value={settings.smooth}
-        min={0}
-        max={5}
-        step={1}
-        unit="bins"
-        onChange={(v) => update("smooth", v)}
-      />
-      <Slider
-        label="Rate-map colour maximum (0 = auto)"
-        value={settings.maxRate}
-        min={0}
-        max={50}
-        step={1}
-        unit="Hz"
-        onChange={(v) => update("maxRate", v)}
-      />
-      <Slider
-        label="Autocorrelation window"
-        value={settings.acWindow}
-        min={20}
-        max={1000}
-        step={20}
-        unit="ms"
-        onChange={(v) => update("acWindow", v)}
-      />
-      <Slider
-        label="Direction bin width"
-        value={settings.dirBin}
-        min={2}
-        max={30}
-        step={2}
-        unit="°"
-        onChange={(v) => update("dirBin", v)}
-      />
-      <Slider
-        label="Speed bin width"
-        value={settings.speedBin}
-        min={1}
-        max={10}
-        step={1}
-        unit="cm/s"
-        onChange={(v) => update("speedBin", v)}
-      />
-      <Slider
-        label="Maximum speed shown"
-        value={settings.speedMax}
-        min={10}
-        max={200}
-        step={5}
-        unit="cm/s"
-        onChange={(v) => update("speedMax", v)}
-      />
-      <h3>Position processing</h3>
-      <label className="field">
-        Tracked LEDs
-        <select
-          aria-label="Tracked LEDs"
-          value={settings.leds}
-          onChange={(e) => update("leds", +e.target.value)}
-        >
-          <option value="1">One · movement direction</option>
-          <option value="2">Two · LED direction</option>
-        </select>
-      </label>
-      <Slider
-        label="Jump filter (0 = off)"
-        value={settings.maxSpeed}
-        min={0}
-        max={10}
-        step={0.25}
-        unit="m/s"
-        onChange={(v) => update("maxSpeed", v)}
-      />
-      <Slider
-        label="Position smoothing"
-        value={settings.posSmooth}
-        min={0}
-        max={2}
-        step={0.1}
-        unit="s"
-        onChange={(v) => update("posSmooth", v)}
-      />
-      <button
-        className="secondary"
-        onClick={() => setSettings(defaultSettings)}
-      >
-        Reset settings
-      </button>
-      <h3>Cut labels</h3>
-      <button
-        className="secondary"
-        disabled={!ready}
-        onClick={() =>
-          operation("edit", {
-            action: "sort",
-            dest: 0,
-            description: "Renumber cells by spike count (preserve noise 0)",
-          })
-        }
-      >
-        Renumber cells by spike count
-      </button>
-      <p className="muted">
-        Largest cell becomes 1. Noise remains 0. This changes the cut and can be
-        undone.
-      </p>
-    </>
-  );
   return (
     <DesktopShell
       trials={trials}
@@ -1229,7 +1003,24 @@ export default function App() {
           }}
         >
           <div className="drawer-content">
-            {pane === "settings" && renderSettings()}
+            {pane === "settings" && (
+              <SettingsPanel
+                settings={settings}
+                update={update}
+                onReset={() => setSettings(defaultSettings)}
+                isolate={isolate}
+                onIsolate={setIsolate}
+                ready={ready}
+                onRenumber={() =>
+                  operation("edit", {
+                    action: "sort",
+                    dest: 0,
+                    description:
+                      "Renumber cells by spike count (preserve noise 0)",
+                  })
+                }
+              />
+            )}
             {pane === "history" && (
               <>
                 <p className="muted">
@@ -1287,87 +1078,10 @@ export default function App() {
                 </div>
               </>
             )}
-            {pane === "headers" && <Headers headers={data?.headers || {}} />}
-            {pane === "help" && (
-              <>
-                <p className="muted">
-                  Import a selection of LTX files or a folder to begin. Add cut
-                  files at any time.
-                </p>
-                <h3>Navigation</h3>
-                <Shortcut keys="0–9" text="Jump to tetrode (ones digit)" />
-                <Shortcut keys="O" text="Toggle tetrode tens digit" />
-                <Shortcut keys="← / →" text="Previous / next trial" />
-                <Shortcut keys="H" text="Inspect file headers" />
-                <Shortcut keys="K / ?" text="Keyboard shortcuts" />
-                <h3>Cut editing</h3>
-                <Shortcut
-                  keys="Drag tile"
-                  text="Merge higher cell number into lower"
-                />
-                <Shortcut
-                  keys="Right drag"
-                  text="Adjust a split preview from either waveform tile"
-                />
-                <Shortcut
-                  keys="L"
-                  text="Lasso source spikes into destination"
-                />
-                <Shortcut
-                  keys="E / F"
-                  text="Group under pointer as destination / source"
-                />
-                <Shortcut
-                  keys="Shift F"
-                  text="Toggle the group under the pointer in the source set"
-                />
-                <Shortcut
-                  keys="Left / right click chip"
-                  text="Choose destination / source; Shift-right toggles a source"
-                />
-                <Shortcut
-                  keys="Enter / +"
-                  text="First unused destination group"
-                />
-                <Shortcut
-                  keys="Click tile"
-                  text="Bring the group's feature points to the front"
-                />
-                <Shortcut
-                  keys="S"
-                  text="Hover a tile, then click or type the group to swap with; Escape cancels"
-                />
-                <Shortcut keys="⌘ / Ctrl Z" text="Undo" />
-                <Shortcut keys="⌘ / Ctrl ⇧ Z" text="Redo" />
-                <Shortcut keys="⌘ / Ctrl S" text="Export .cut" />
-                <Shortcut keys="⌘ / Ctrl C" text="Copy active cell plots" />
-                <h3>Views</h3>
-                <Shortcut
-                  keys="Hover tile"
-                  text="Show cell spikes on the position path"
-                />
-                <Shortcut
-                  keys="Hold Space"
-                  text="Click a plot to copy it; click a window to close it"
-                />
-                <Shortcut
-                  keys="W / R / C / V / T"
-                  text="Show only waves / spatial / direction / speed / autocorrelation; Shift adds or removes"
-                />
-                <Shortcut
-                  keys="D / P"
-                  text="Time colours (features and waveforms) / waveform density"
-                />
-                <Shortcut keys="Esc" text="Close panel, return to paint" />
-                <a
-                  href="https://github.com/ChenNeuroscience/waveform"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Original project & source ↗
-                </a>
-              </>
+            {pane === "headers" && (
+              <HeadersPanel headers={data?.headers || {}} />
             )}
+            {pane === "help" && <HelpPanel />}
           </div>
         </FloatingWindow>
       ))}
@@ -1417,107 +1131,5 @@ export default function App() {
         </FloatingWindow>
       ))}
     </DesktopShell>
-  );
-}
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  unit = "",
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  unit?: string;
-  onChange: (n: number) => void;
-}) {
-  return (
-    <label className="slider-field">
-      <span>
-        {label}
-        <b>
-          {Number(value.toFixed(2))} {unit}
-        </b>
-      </span>
-      <input
-        aria-label={label}
-        type="range"
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(+e.target.value)}
-      />
-    </label>
-  );
-}
-function Toggle({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="toggle-field">
-      <span>{label}</span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-    </label>
-  );
-}
-function Shortcut({ keys, text }: { keys: string; text: string }) {
-  return (
-    <div className="shortcut">
-      <span>{text}</span>
-      <kbd>{keys}</kbd>
-    </div>
-  );
-}
-function Headers({
-  headers,
-}: {
-  headers: Record<string, Record<string, string>>;
-}) {
-  const [filter, setFilter] = useState("");
-  return (
-    <>
-      <div className="cell-search">
-        <Search size={14} />
-        <input
-          aria-label="Filter headers"
-          placeholder="Filter headers…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-      </div>
-      {Object.entries(headers).map(([file, h]) => (
-        <div key={file}>
-          <h3>{file}</h3>
-          <dl className="headers-list">
-            {Object.entries(h)
-              .filter(([k, v]) =>
-                `${k} ${v}`.toLowerCase().includes(filter.toLowerCase()),
-              )
-              .map(([k, v]) => (
-                <div key={k}>
-                  <dt>{k}</dt>
-                  <dd>{v}</dd>
-                </div>
-              ))}
-          </dl>
-        </div>
-      ))}
-    </>
   );
 }

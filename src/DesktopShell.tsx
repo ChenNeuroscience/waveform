@@ -164,7 +164,6 @@ export function DesktopShell(p: Props) {
       [primary, secondary],
     );
   const ready = p.ready,
-    active = p.trial?.tetrodes.find((t) => t.number === p.tetNum),
     numbers = [
       ...new Set(p.trials.flatMap((t) => t.tetrodes.map((t) => t.number))),
     ].sort((a, b) => a - b);

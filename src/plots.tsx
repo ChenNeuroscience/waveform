@@ -10,7 +10,6 @@ import {
 } from "./plot-geometry";
 import { ClusterGPU, projections } from "./gpu";
 import {
-  color,
   type ViewData,
   type Settings,
   type AnalysisData,
