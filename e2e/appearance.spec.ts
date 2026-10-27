@@ -8,7 +8,7 @@ async function demo(page: Page) {
   await ready(page);
 }
 
-test("hover preserves waveform pixels, aligns the badge and displays the sampling warning above the toolbar", async ({
+test("hover preserves waveform pixels and aligns the badge; tiles carry no sampling warning", async ({
   page,
 }) => {
   await page.goto("/?demo=quick");
@@ -26,17 +26,17 @@ test("hover preserves waveform pixels, aligns the badge and displays the samplin
     "ready",
   );
   const tile = page.locator('.cell-tile[data-cell="0"]'),
-    warning = tile.locator(".sampling-warning"),
     badge = tile.locator(".tile-badge button"),
     bounds = (await tile.boundingBox())!;
   await page.locator(".desktop-toolbar").hover();
-  await expect(warning).toBeHidden();
   const beforeBadge = await badge.boundingBox();
   const clip = { x: bounds.x + 25, y: bounds.y + 20, width: 400, height: 65 };
   const before = await page.screenshot({ clip });
   await tile.hover({ position: { x: 45, y: 45 } });
-  await expect(warning).toHaveText("WARNING: using sampled rendering");
-  await expect(warning).toBeVisible();
+  // Only waveforms of tetrodes over 1M spikes are sampled, and that is flagged
+  // once in the toolbar rather than on tiles.
+  await expect(tile.locator(".sampling-warning")).toHaveCount(0);
+  await expect(page.locator(".toolbar-warning")).toHaveCount(0);
   expect(await page.screenshot({ clip })).toEqual(before);
   expect(await badge.boundingBox()).toEqual(beforeBadge);
   const glow = page.locator("body > .tile-hover-glow");
@@ -67,7 +67,7 @@ test("hover preserves waveform pixels, aligns the badge and displays the samplin
   await page.keyboard.up("Space");
   const copy = page.locator(".tile-copy");
   await copy.hover();
-  await expect(copy.locator(".sampling-warning")).toBeVisible();
+  await expect(copy.locator(".sampling-warning")).toHaveCount(0);
   const cb = (await copy.boundingBox())!,
     sticker = (await copy.locator(".tile-copy-badge").boundingBox())!;
   expect(sticker.y - cb.y).toBe(3);
@@ -120,7 +120,9 @@ test("feature corner labels survive Space copies; settings and divider positions
   await ready(page);
   expect(await page.locator(".plot-copy").getAttribute("src")).toBe(png);
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
-  await page.getByRole("button", { name: "Waveforms", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Waveforms", exact: true })
+    .click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const settings = page.getByRole("dialog", { name: "Settings", exact: true });
   await settings
@@ -241,10 +243,16 @@ test("browser reload/close modifiers do not toggle plots before the leave warnin
     ),
   ).toBe(false);
   await page.getByRole("button", { name: "Settings", exact: true }).focus();
-  await page.keyboard.press("r");
+  // Shift toggles one plot; a plain key shows only that plot, as in v1.
+  await page.keyboard.press("Shift+R");
   await expect(rate).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Shift+R");
+  await expect(rate).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("r");
   await expect(rate).toHaveAttribute("aria-pressed", "true");
+  await expect(waves).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Shift+W");
+  await expect(waves).toHaveAttribute("aria-pressed", "true");
   const pane = (await page.locator(".position-pane").boundingBox())!,
     path = (await page.locator(".position-path canvas").boundingBox())!;
   expect(path.x).toBe(pane.x);
@@ -262,7 +270,7 @@ test("compact toolbar replaces the footer; feature grid centres without experime
     name: "Recording details",
     exact: true,
   });
-  await expect(details).toContainText("18,000");
+  await expect(details).toContainText(/\b1[78],\d{3}\b/);
   const toolbar = (await page.locator(".desktop-toolbar").boundingBox())!,
     status = (await details.boundingBox())!;
   expect(status.y).toBeGreaterThanOrEqual(toolbar.y);

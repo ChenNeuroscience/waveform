@@ -84,7 +84,7 @@ export function analyse(
   const meta = new Float64Array(
     w.memory.buffer,
     w.engine_analysis_meta(engine),
-    9,
+    8,
   ).slice();
   const array = (name: string) =>
     copyF32(
@@ -94,14 +94,13 @@ export function analyse(
     );
   return {
     cell: meta[0],
-    arenaWidth: meta[7],
-    arenaHeight: meta[8],
+    arenaWidth: meta[6],
+    arenaHeight: meta[7],
     width: meta[1],
     height: meta[2],
     peak: meta[3],
     refractory: meta[4],
     rate: meta[5],
-    sampledPairs: !!meta[6],
     spatial: array("spatial"),
     path: array("path"),
     spikes: array("spikes"),

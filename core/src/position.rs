@@ -232,7 +232,7 @@ fn smooth(a: &mut [f32], k: usize) {
 }
 #[derive(Default)]
 pub(crate) struct Analysis {
-    meta: [f64; 9],
+    meta: [f64; 8],
     spatial: Vec<f32>,
     path: Vec<f32>,
     spikes: Vec<f32>,
@@ -292,21 +292,14 @@ fn analyse(
             violations += 1;
         }
     }
-    let stride = n.div_ceil(20000).max(1);
-    let mut sampled = stride > 1;
-    let mut pairs = 0;
-    'outer: for j in (0..n).step_by(stride) {
+    // Every spike pair within the window; the cost scales with those pairs only.
+    for j in 0..n {
         let t = e.times[ids[j] as usize];
         for k in j + 1..n {
             let dt = e.times[ids[k] as usize].saturating_sub(t) as f64 / tb * 1000.;
             if dt >= window {
                 break;
             }
-            if pairs > 2_000_000 {
-                sampled = true;
-                break 'outer;
-            }
-            pairs += 1;
             ac[((dt / window * 100.).floor() as usize).min(99)] += 1.;
         }
     }
@@ -369,14 +362,11 @@ fn analyse(
                 if let Some(b) = sb(i) {
                     os[b] += dt as f32;
                 }
-                if i % p.x.len().div_ceil(12000).max(1) == 0 {
-                    path.extend([p.x[i] / p.width, p.y[i] / p.height]);
-                }
+                path.extend([p.x[i] / p.width, p.y[i] / p.height]);
             }
         }
         let mut cursor = 0;
-        let step = n.div_ceil(15000).max(1);
-        for (j, &id) in ids.iter().enumerate() {
+        for &id in ids {
             let t = e.times[id as usize] as f64 / tb;
             while cursor + 1 < p.raw.time.len() && p.raw.time[cursor + 1] <= t {
                 cursor += 1;
@@ -395,9 +385,7 @@ fn analyse(
                 if let Some(b) = sb(cursor) {
                     hs[b] += 1.;
                 }
-                if j % step == 0 {
-                    spikes.extend([p.x[cursor] / p.width, p.y[cursor] / p.height]);
-                }
+                spikes.extend([p.x[cursor] / p.width, p.y[cursor] / p.height]);
             }
         }
     }
@@ -446,7 +434,6 @@ fn analyse(
             } else {
                 0.
             },
-            sampled as u8 as f64,
             pos.map(|p| p.width as f64).unwrap_or(0.),
             pos.map(|p| p.height as f64).unwrap_or(0.),
         ],

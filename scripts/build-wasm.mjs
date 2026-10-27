@@ -10,7 +10,11 @@ const r = spawnSync(
     "--target",
     "wasm32-unknown-unknown",
   ],
-  { stdio: "inherit" },
+  {
+    stdio: "inherit",
+    // Wasm SIMD lets LLVM vectorise per-record loops (amplitudes, record copies).
+    env: { ...process.env, RUSTFLAGS: "-C target-feature=+simd128" },
+  },
 );
 if (r.status !== 0) process.exit(r.status ?? 1);
 await mkdir("public/wasm", { recursive: true });

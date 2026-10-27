@@ -63,13 +63,11 @@ export function useTileGestures({
     [scope],
   );
   const begin = (event: ReactPointerEvent<HTMLElement>, cell: number) => {
-    if (
-      splitSource !== undefined &&
-      (event.button !== 2 || ![splitSource, splitSource + 1].includes(cell))
-    )
-      return;
+    // While splitting, either button on the two split tiles adjusts the gate.
+    const splitting = splitSource !== undefined;
+    if (splitting && ![splitSource, splitSource + 1].includes(cell)) return;
     if ((event.target as HTMLElement).closest("button,input,select")) return;
-    if (grab && event.button === 0) {
+    if (grab && !splitting && event.button === 0) {
       event.preventDefault();
       onPopOut(cell, event.clientX, event.clientY);
       return;
@@ -79,8 +77,8 @@ export function useTileGestures({
       rect = row.getBoundingClientRect(),
       wave = row.querySelector<HTMLElement>(".tile-waves")!,
       wr = wave.getBoundingClientRect();
-    const right = event.button === 2;
-    if (right && !(event.target as HTMLElement).closest(".tile-waves")) return;
+    const gating = splitting || event.button === 2;
+    if (gating && !(event.target as HTMLElement).closest(".tile-waves")) return;
     event.preventDefault();
     cancel.current();
     clearTimeout(settleTimer.current);
@@ -160,7 +158,7 @@ export function useTileGestures({
       if (e.pointerId !== pointerId) return;
       px = e.clientX;
       py = e.clientY;
-      if (right) {
+      if (gating) {
         setSplit(gate());
         return;
       }
@@ -221,7 +219,7 @@ export function useTileGestures({
       settleTimer.current = setTimeout(() => setSettling(null), 650);
     };
     const abort = () => {
-      const returning = moved && !right;
+      const returning = moved && !gating;
       stop();
       if (returning) restore();
     };
@@ -229,8 +227,8 @@ export function useTileGestures({
       if (e.pointerId !== pointerId || e.button !== button) return;
       px = e.clientX;
       py = e.clientY;
-      if (moved && !right) locate(); // Only the actual release target can merge.
-      const last = right ? gate() : null,
+      if (moved && !gating) locate(); // Only the actual release target can merge.
+      const last = gating ? gate() : null,
         merge = moved ? to : null;
       stop();
       if (last) onSplit(cell, last.channel, last.sample, last.threshold);
@@ -254,7 +252,7 @@ export function useTileGestures({
     window.addEventListener("blur", abort);
     window.addEventListener("keydown", escape);
     window.addEventListener("scroll", reposition, true);
-    if (right) setSplit(gate());
+    if (gating) setSplit(gate());
   };
   return { begin, ghost, settling, dragging, target, split };
 }

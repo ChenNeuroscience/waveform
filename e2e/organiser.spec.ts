@@ -195,7 +195,7 @@ test("original favicon and compact tile corners; extra filter, time controls and
     "Speed",
     "Autocorrelation",
   ])
-    await cut(page, name).click();
+    await cut(page, name).click({ modifiers: ["Shift"] });
   const frame = await tile.locator(".tile-waves").evaluate((el) => ({
     w: Number((el as HTMLElement).dataset.plotWidth),
     h: Number((el as HTMLElement).dataset.plotHeight),

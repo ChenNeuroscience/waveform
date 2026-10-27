@@ -84,6 +84,20 @@ export default function App() {
       speed: true,
       ac: true,
     });
+  // As in v1: show only the chosen plot; with Shift, toggle it among the others.
+  const showPlot = (mode: PlotMode, multiple: boolean) =>
+    setShown((s) =>
+      multiple
+        ? { ...s, [mode]: !s[mode] }
+        : {
+            waveforms: false,
+            spatial: false,
+            direction: false,
+            speed: false,
+            ac: false,
+            [mode]: true,
+          },
+    );
   const [pane, setPane] = useState<Pane>(null),
     [panels, setPanels] = useState<Panel[]>([]),
     [grabMode, setGrabMode] = useState(false),
@@ -103,7 +117,6 @@ export default function App() {
         image: string;
         cell?: number;
         stats?: CellStat[];
-        sampled?: boolean;
         x: number;
         y: number;
         width: number;
@@ -260,7 +273,6 @@ export default function App() {
         cutKey: cut?.id,
         set: trial?.set,
         pos: trial?.pos,
-        budget: settings.budget,
       },
       (p, m) => {
         if (gen === loadGen.current) {
@@ -275,7 +287,9 @@ export default function App() {
         const first = d.counts.findIndex((n, i) => n > 0 && i > 0),
           c = first < 0 ? 0 : first;
         setCell(c);
-        setSources([c]);
+        // Paint from the lowest populated group (usually noise, 0) into a new group.
+        const lowest = d.counts.findIndex((n) => n > 0);
+        setSources([lowest < 0 ? 0 : lowest]);
         const empty = d.counts.findIndex((n, i) => n === 0 && i > 0);
         setDest(empty < 0 ? 0 : empty);
         setBusy(false);
@@ -490,12 +504,7 @@ export default function App() {
       setData(d);
     } catch (error) {
       setError(String(error));
-      setData(
-        await request("budget", {
-          session: data!.session,
-          budget: settings.budget,
-        }),
-      );
+      setData(await request("view", { session: data!.session }));
       setSplitPoint(null);
     } finally {
       if (!finishingSplit.current) setBusy(false);
@@ -518,12 +527,7 @@ export default function App() {
         );
       } catch (error) {
         setError(String(error));
-        setData(
-          await request("budget", {
-            session: data!.session,
-            budget: settings.budget,
-          }),
-        );
+        setData(await request("view", { session: data!.session }));
       } finally {
         splitCompletion.current = null;
         setSplitPoint(null);
@@ -545,6 +549,17 @@ export default function App() {
     if (!splitPoint) return;
     const complete = (event: PointerEvent) => {
       if (event.button !== 0) return;
+      // Left presses on either split tile's waveforms adjust the split instead.
+      const tile = (event.target as Element | null)
+        ?.closest(".tile-waves")
+        ?.closest<HTMLElement>(".cell-tile");
+      if (
+        tile &&
+        [splitPoint.source, splitPoint.source + 1].includes(
+          Number(tile.dataset.cell),
+        )
+      )
+        return;
       event.preventDefault();
       event.stopImmediatePropagation();
       const swallow = (click: MouseEvent) => {
@@ -668,10 +683,6 @@ export default function App() {
         title: `${trial?.name} · T${tetNum} · cell ${n} (copy)`,
         cell: n,
         stats,
-        sampled:
-          document
-            .querySelector(`.cell-tile[data-cell="${n}"]`)
-            ?.getAttribute("data-sampled") === "true",
         image: canvas.toDataURL(),
         x: Math.max(0, Math.min(innerWidth - width - 8, x + 15)),
         y: Math.max(0, Math.min(innerHeight - height - 8, y + 15)),
@@ -823,8 +834,8 @@ export default function App() {
         v: "speed",
         t: "ac",
       };
-      if (modes[e.key])
-        setShown((s) => ({ ...s, [modes[e.key]]: !s[modes[e.key]] }));
+      const mode = modes[e.key.toLowerCase()];
+      if (mode) showPlot(mode, e.shiftKey);
       if (trial && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         const i = trials.indexOf(trial) + (e.key === "ArrowLeft" ? -1 : 1);
         if (trials[i]) chooseTrial(trials[i]);
@@ -904,24 +915,6 @@ export default function App() {
         unit="px"
         onChange={(v) => update("pointSize", v)}
       />
-      <label className="field">
-        Display budget
-        <select
-          aria-label="Display budget"
-          value={settings.budget}
-          onChange={async (e) => {
-            const v = +e.target.value;
-            update("budget", v);
-            if (ready) await operation("budget", { budget: v });
-          }}
-        >
-          {[50000, 100000, 250000, 500000, 1000000].map((n) => (
-            <option key={n} value={n}>
-              {fmt(n)} points / projection
-            </option>
-          ))}
-        </select>
-      </label>
       <Toggle
         label="Isolate selected cell"
         checked={isolate}
@@ -1153,7 +1146,7 @@ export default function App() {
       onDest={selectDest}
       onNewGroup={newDestination}
       onTool={setTool}
-      onToggle={(m) => setShown((s) => ({ ...s, [m]: !s[m] }))}
+      onToggle={showPlot}
       onPanel={setPane}
       onOperation={operation}
       onPolygon={polygon}
@@ -1317,19 +1310,13 @@ export default function App() {
                 />
                 <Shortcut
                   keys="W / R / C / V / T"
-                  text="Waves / spatial / direction / speed / autocorrelation"
+                  text="Show only waves / spatial / direction / speed / autocorrelation; Shift adds or removes"
                 />
-                <Shortcut keys="D / P" text="Time colours / waveform density" />
+                <Shortcut
+                  keys="D / P"
+                  text="Time colours (features and waveforms) / waveform density"
+                />
                 <Shortcut keys="Esc" text="Close panel, return to paint" />
-                <h3>Reading the plots</h3>
-                <p className="muted">
-                  Feature space uses a bounded, evenly spaced display sample.
-                  Lasso cuts use all spikes from the chosen source cells, across
-                  the entire recording; the time sliders affect display only.
-                  Waveform traces use a stratified sample. Rate maps use
-                  occupancy-normalised rates. Autocorrelation omits the
-                  self-spike and uses sampled reference spikes for large groups.
-                </p>
                 <a
                   href="https://github.com/ChenNeuroscience/waveform"
                   target="_blank"
@@ -1371,11 +1358,6 @@ export default function App() {
               >
                 {c.cell}
               </span>
-              {c.sampled && (
-                <span className="sampling-warning">
-                  WARNING: using sampled rendering
-                </span>
-              )}
               <CellStats
                 entries={c.stats || []}
                 className="tile-copy-stats"

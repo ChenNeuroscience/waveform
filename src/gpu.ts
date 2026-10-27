@@ -1,29 +1,37 @@
 import { groupPalette } from "./palette";
-import { cellRgb, type Settings, type ViewData } from "./types";
+import type { Settings, ViewData } from "./types";
 import {
   projectionFrame,
   featurePlotOrigin,
   FEATURE_PLOT,
-  type WaveLayout,
 } from "./plot-geometry";
 const vertex = `#version 300 es
 precision highp float;
 layout(location=0) in vec4 amplitudes;
-layout(location=1) in float time;
+layout(location=1) in uint ticks;
 layout(location=2) in uint cell;
-uniform int ax;uniform int ay;uniform float size;uniform int selected;uniform bool isolate;uniform bool drift;uniform float opacity;uniform vec2 range;
-out vec4 shade;
+uniform int ax;uniform int ay;uniform float size;uniform int selected;uniform bool isolate;uniform float opacity;uniform vec2 range;uniform float timeScale;
+out vec4 shade;out float time;
 float axis(int a){return a==4?time:amplitudes[a];}
 const vec3 groupColors[31]=vec3[31](${groupPalette.map((c) => `vec3(${c.map((v) => `${v}.`).join(",")})`).join(",")});
 vec3 palette(float c){int i=int(c);return i<31?groupColors[i]/255.:vec3(0.);}
 void main(){
+ time=float(ticks)*timeScale;
  float x=axis(ax),y=axis(ay);gl_Position=vec4(x*1.86-.93,y*1.86-.93,int(cell)==selected?-.5:0.,1.);gl_PointSize=size;
  bool hide=(isolate&&int(cell)!=selected)||time<range.x||time>range.y;
- vec3 rgb=palette(float(cell));if(drift)rgb=vec3(1.-time,time,0.);
- shade=vec4(rgb,hide?0.:opacity);
+ shade=vec4(palette(float(cell)),hide?0.:opacity);
 }`;
 const fragment = `#version 300 es
-precision highp float;in vec4 shade;out vec4 outColor;void main(){if(shade.a==0.||distance(gl_PointCoord,vec2(.5))>.5)discard;outColor=shade;}`;
+precision highp float;in vec4 shade;in float time;out vec4 outColor;void main(){if(shade.a==0.||distance(gl_PointCoord,vec2(.5))>.5)discard;outColor=shade;}`;
+// Drift: accumulate (count, summed time) per pixel, then colour each pixel by its
+// mean spike time, red at the start of the recording to green at the end.
+const accumulate = `#version 300 es
+precision highp float;in vec4 shade;in float time;out vec4 sums;void main(){if(shade.a==0.||distance(gl_PointCoord,vec2(.5))>.5)discard;sums=vec4(1.,time,0.,0.);}`;
+const resolveVertex = `#version 300 es
+void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0.,1.);}`;
+const resolveFragment = `#version 300 es
+precision highp float;uniform sampler2D sums;out vec4 c;
+void main(){vec2 s=texelFetch(sums,ivec2(gl_FragCoord.xy),0).rg;if(s.r<.5)discard;float t=s.g/s.r;c=vec4(1.-t,t,0.,1.);}`;
 function shader(gl: WebGL2RenderingContext, type: number, source: string) {
   const s = gl.createShader(type)!;
   gl.shaderSource(s, source);
@@ -56,6 +64,15 @@ export const projections = [
 export class ClusterGPU {
   gl: WebGL2RenderingContext;
   p: WebGLProgram;
+  sums: WebGLProgram | null = null;
+  resolve: WebGLProgram | null = null;
+  target: {
+    texture: WebGLTexture;
+    fbo: WebGLFramebuffer;
+    w: number;
+    h: number;
+  } | null = null;
+  empty: WebGLVertexArrayObject;
   cache = new Map<
     string,
     {
@@ -63,6 +80,7 @@ export class ClusterGPU {
       buffers: WebGLBuffer[];
       n: number;
       labels: Uint16Array;
+      timeScale: number;
     }
   >();
   constructor(public canvas: HTMLCanvasElement) {
@@ -78,6 +96,16 @@ export class ClusterGPU {
       );
     this.gl = gl;
     this.p = program(gl, vertex, fragment);
+    this.empty = gl.createVertexArray()!;
+    // Mean-time drift needs additive blending into a float target; where that is
+    // unsupported, drift is not drawn and points keep their cell colours.
+    if (
+      gl.getExtension("EXT_color_buffer_float") &&
+      gl.getExtension("EXT_float_blend")
+    ) {
+      this.sums = program(gl, vertex, accumulate);
+      this.resolve = program(gl, resolveVertex, resolveFragment);
+    }
   }
   draw(
     data: ViewData,
@@ -96,7 +124,7 @@ export class ClusterGPU {
       this.canvas.width = w;
       this.canvas.height = h;
     }
-    const key = `${data.key}|${data.features.length}`;
+    const key = data.key;
     let cached = this.cache.get(key);
     if (!cached) {
       const vao = gl.createVertexArray()!,
@@ -109,12 +137,18 @@ export class ClusterGPU {
       gl.bindBuffer(gl.ARRAY_BUFFER, buffers[1]);
       gl.bufferData(gl.ARRAY_BUFFER, data.times, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(1);
-      gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
+      gl.vertexAttribIPointer(1, 1, gl.UNSIGNED_INT, 0, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, buffers[2]);
       gl.bufferData(gl.ARRAY_BUFFER, data.labels, gl.DYNAMIC_DRAW);
       gl.enableVertexAttribArray(2);
       gl.vertexAttribIPointer(2, 1, gl.UNSIGNED_SHORT, 0, 0);
-      cached = { vao, buffers, n: data.labels.length, labels: data.labels };
+      cached = {
+        vao,
+        buffers,
+        n: data.labels.length,
+        labels: data.labels,
+        timeScale: 1 / Math.max(1, data.times[data.times.length - 1] || 0),
+      };
       this.cache.set(key, cached);
       if (this.cache.size > 4) {
         const first = this.cache.keys().next().value!;
@@ -132,25 +166,37 @@ export class ClusterGPU {
         cached.labels = data.labels;
       }
     }
-    gl.useProgram(this.p);
+    const mean = s.drift && this.sums && this.resolve,
+      p = mean ? this.sums! : this.p;
+    gl.useProgram(p);
     gl.bindVertexArray(cached.vao);
-    gl.clearColor(1, 1, 1, 1);
-    // Keep the focused group's points in front without sorting or uploading
-    // the population buffers again. Equal-depth groups retain their draw order.
-    gl.enable(gl.DEPTH_TEST);
-    gl.depthFunc(gl.LEQUAL);
-    gl.depthMask(true);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if (mean) {
+      this.bindTarget(w, h);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+    } else {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.clearColor(1, 1, 1, 1);
+      // Keep the focused group's points in front without sorting or uploading
+      // the population buffers again. Equal-depth groups retain their draw order.
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(true);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
     gl.enable(gl.SCISSOR_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    const u = (n: string) => gl.getUniformLocation(this.p, n);
+    const u = (n: string) => gl.getUniformLocation(p, n);
     gl.uniform1f(u("size"), s.pointSize * dpr);
     gl.uniform1f(u("opacity"), 1);
     gl.uniform1i(u("selected"), selected);
     gl.uniform1i(u("isolate"), isolate ? 1 : 0);
-    gl.uniform1i(u("drift"), s.drift ? 1 : 0);
     gl.uniform2f(u("range"), range[0], range[1]);
+    gl.uniform1f(u("timeScale"), cached.timeScale);
     axes.forEach(([ax, ay], i) => {
       const origin = featurePlotOrigin(i, columns),
         x = Math.round(origin.x * dpr),
@@ -174,6 +220,45 @@ export class ClusterGPU {
       gl.drawArrays(gl.POINTS, 0, cached!.n);
     });
     gl.disable(gl.SCISSOR_TEST);
+    if (mean) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, w, h);
+      gl.clearColor(1, 1, 1, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.disable(gl.BLEND);
+      gl.useProgram(this.resolve);
+      gl.bindVertexArray(this.empty);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.target!.texture);
+      gl.uniform1i(gl.getUniformLocation(this.resolve!, "sums"), 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+  }
+  /** The (count, summed time) float target for drift, matching the canvas size. */
+  private bindTarget(w: number, h: number) {
+    const gl = this.gl;
+    if (!this.target || this.target.w !== w || this.target.h !== h) {
+      if (this.target) {
+        gl.deleteTexture(this.target.texture);
+        gl.deleteFramebuffer(this.target.fbo);
+      }
+      const texture = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RG32F, w, h);
+      const fbo = gl.createFramebuffer()!;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        texture,
+        0,
+      );
+      this.target = { texture, fbo, w, h };
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.target.fbo);
   }
   dispose() {
     const g = this.gl;
@@ -181,162 +266,13 @@ export class ClusterGPU {
       c.buffers.forEach((b) => g.deleteBuffer(b));
       g.deleteVertexArray(c.vao);
     }
-    g.deleteProgram(this.p);
-  }
-}
-const waveVertex = `#version 300 es
-precision highp float;precision highp isampler2D;
-uniform isampler2D waves;uniform int width;uniform int channel;uniform int baseWave;uniform vec3 rgb;out vec4 shade;
-void main(){int i=(gl_InstanceID+baseWave)*200+channel*50+gl_VertexID;float v=float(texelFetch(waves,ivec2(i%width,i/width),0).r)/128.;float x=(float(channel)+(float(gl_VertexID)/49.)*.84+.08)/4.;gl_Position=vec4(x*2.-1.,v*.78,0.,1.);shade=vec4(rgb,1.);}`;
-const waveFragment = `#version 300 es
-precision highp float;in vec4 shade;out vec4 c;void main(){c=shade;}`;
-export function drawWaves(
-  canvas: HTMLCanvasElement,
-  data: ViewData,
-  cell: number,
-) {
-  const gl = canvas.getContext("webgl2", {
-    alpha: false,
-    antialias: true,
-    preserveDrawingBuffer: true,
-  });
-  if (!gl) return () => {};
-  canvas.width = Math.round(
-    canvas.clientWidth * Math.min(2, devicePixelRatio || 1),
-  );
-  canvas.height = Math.round(
-    canvas.clientHeight * Math.min(2, devicePixelRatio || 1),
-  );
-  const ids: number[] = [];
-  for (let i = 0; i < data.waveLabels.length; i++)
-    if (data.waveLabels[i] === cell) ids.push(i);
-  const bytes = new Int8Array(
-    Math.max(4096, Math.ceil((ids.length * 200) / 4096) * 4096),
-  );
-  ids.forEach((j, i) =>
-    bytes.set(data.waves.subarray(j * 200, j * 200 + 200), i * 200),
-  );
-  const p = program(gl, waveVertex, waveFragment),
-    texture = gl.createTexture()!,
-    vao = gl.createVertexArray()!;
-  gl.useProgram(p);
-  gl.bindVertexArray(vao);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    gl.R8I,
-    4096,
-    bytes.length / 4096,
-    0,
-    gl.RED_INTEGER,
-    gl.BYTE,
-    bytes,
-  );
-  gl.uniform1i(gl.getUniformLocation(p, "width"), 4096);
-  gl.uniform1i(gl.getUniformLocation(p, "waves"), 0);
-  gl.uniform3fv(gl.getUniformLocation(p, "rgb"), cellRgb(cell));
-  gl.viewport(0, 0, canvas.width, canvas.height);
-  gl.clearColor(1, 1, 1, 1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  for (let c = 0; c < 4; c++) {
-    gl.uniform1i(gl.getUniformLocation(p, "channel"), c);
-    gl.drawArraysInstanced(gl.LINE_STRIP, 0, 50, ids.length);
-  }
-  return () => {
-    gl.deleteTexture(texture);
-    gl.deleteProgram(p);
-    gl.deleteVertexArray(vao);
-  };
-}
-export function drawWaveOverview(
-  canvas: HTMLCanvasElement,
-  data: ViewData,
-  cells: number[],
-  columns: number,
-  layout?: WaveLayout,
-) {
-  const gl = canvas.getContext("webgl2", {
-    alpha: false,
-    antialias: false,
-    preserveDrawingBuffer: true,
-  });
-  if (!gl) return () => {};
-  const dpr = Math.min(2, devicePixelRatio || 1),
-    rows = Math.ceil(cells.length / columns);
-  canvas.width = canvas.clientWidth * dpr;
-  canvas.height = rows * (layout?.rowStride || 120) * dpr;
-  const records: number[] = [],
-    ranges: { start: number; n: number }[] = [];
-  for (const c of cells) {
-    const start = records.length;
-    for (let i = 0; i < data.waveLabels.length; i++)
-      if (data.waveLabels[i] === c && records.length - start < 256)
-        records.push(i);
-    ranges.push({ start, n: records.length - start });
-  }
-  const bytes = new Int8Array(
-    Math.max(4096, Math.ceil((records.length * 200) / 4096) * 4096),
-  );
-  records.forEach((id, i) =>
-    bytes.set(data.waves.subarray(id * 200, id * 200 + 200), i * 200),
-  );
-  const p = program(gl, waveVertex, waveFragment),
-    texture = gl.createTexture()!,
-    vao = gl.createVertexArray()!;
-  gl.useProgram(p);
-  gl.bindVertexArray(vao);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    gl.R8I,
-    4096,
-    bytes.length / 4096,
-    0,
-    gl.RED_INTEGER,
-    gl.BYTE,
-    bytes,
-  );
-  gl.uniform1i(gl.getUniformLocation(p, "width"), 4096);
-  gl.uniform1i(gl.getUniformLocation(p, "waves"), 0);
-  gl.clearColor(1, 1, 1, 1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  cells.forEach((cell, i) => {
-    const col = i % columns,
-      row = Math.floor(i / columns),
-      stride = (layout?.tileStride || canvas.clientWidth / columns) * dpr,
-      w = (layout?.waveWidth || canvas.clientWidth / columns) * dpr,
-      h = (layout?.waveHeight || 120) * dpr,
-      rowStride = (layout?.rowStride || 120) * dpr;
-    gl.viewport(
-      col * stride + (layout?.inset || 0) * dpr,
-      canvas.height - row * rowStride - h - (layout?.top || 0) * dpr,
-      w,
-      h,
-    );
-    gl.uniform1i(gl.getUniformLocation(p, "baseWave"), ranges[i].start);
-    gl.uniform3fv(gl.getUniformLocation(p, "rgb"), cellRgb(cell));
-    for (let c = 0; c < 4; c++) {
-      gl.uniform1i(gl.getUniformLocation(p, "channel"), c);
-      gl.drawArraysInstanced(gl.LINE_STRIP, 0, 50, ranges[i].n);
+    if (this.target) {
+      g.deleteTexture(this.target.texture);
+      g.deleteFramebuffer(this.target.fbo);
     }
-  });
-  return () => {
-    gl.deleteTexture(texture);
-    gl.deleteProgram(p);
-    gl.deleteVertexArray(vao);
-  };
+    g.deleteProgram(this.p);
+    if (this.sums) g.deleteProgram(this.sums);
+    if (this.resolve) g.deleteProgram(this.resolve);
+    g.deleteVertexArray(this.empty);
+  }
 }

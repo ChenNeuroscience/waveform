@@ -1,4 +1,10 @@
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   FolderOpen,
   Folder,
@@ -93,7 +99,7 @@ interface Props {
   onDest: (n: number) => void;
   onNewGroup: () => void;
   onTool: (s: string) => void;
-  onToggle: (m: PlotMode) => void;
+  onToggle: (m: PlotMode, multiple: boolean) => void;
   onPanel: (p: "settings" | "history" | "headers" | "help") => void;
   onOperation: (type: string, p?: Record<string, unknown>) => void;
   onPolygon: (p: number[], a: number, b: number) => void;
@@ -142,9 +148,19 @@ export function DesktopShell(p: Props) {
       p.comparisonAnalysis?.cell === p.dragComparison.target
         ? p.comparisonAnalysis
         : null,
-    pathLayers = [primary, secondary]
-      .filter((a): a is AnalysisData => !!a)
-      .map((a) => ({ cell: a.cell, spikes: a.spikes, color: color(a.cell) }));
+    // Stable unless the overlaid analyses change, so unrelated renders (hover,
+    // progress, selection) do not repaint the full-resolution trajectory.
+    pathLayers = useMemo(
+      () =>
+        [primary, secondary]
+          .filter((a): a is AnalysisData => !!a)
+          .map((a) => ({
+            cell: a.cell,
+            spikes: a.spikes,
+            color: color(a.cell),
+          })),
+      [primary, secondary],
+    );
   const ready = p.ready,
     active = p.trial?.tetrodes.find((t) => t.number === p.tetNum),
     numbers = [
@@ -327,9 +343,9 @@ export function DesktopShell(p: Props) {
                     direction: "Head direction [C]",
                     speed: "Speed tuning [V]",
                     ac: "Autocorrelation [T]",
-                  }[m]
+                  }[m] + " · Shift-click to show several"
                 }
-                onClick={() => p.onToggle(m)}
+                onClick={(e) => p.onToggle(m, e.shiftKey)}
               >
                 {
                   {
@@ -346,16 +362,20 @@ export function DesktopShell(p: Props) {
               className="toolbar-status"
               role="group"
               aria-label="Recording details"
-              title={
-                p.data
-                  ? `Feature display: ${Math.min(p.data.n, p.settings.budget).toLocaleString()} of ${p.data.n.toLocaleString()} spikes; edits use all spikes.`
-                  : undefined
-              }
             >
               {p.data && (
                 <span>
                   Spikes: <b>{p.data.n.toLocaleString()}</b> ·{" "}
                   {timing.durationText}
+                  {p.data.waveSlots < p.data.n && (
+                    <strong
+                      className="toolbar-warning"
+                      title={`Waveform tiles draw ${p.data.waveSlots.toLocaleString()} evenly spaced spikes of ${p.data.n.toLocaleString()}. Counts, edits and exports use every spike.`}
+                    >
+                      {" "}
+                      · WARNING: waveforms sampled
+                    </strong>
+                  )}
                 </span>
               )}
               <span>
@@ -506,11 +526,11 @@ export function DesktopShell(p: Props) {
               </section>
               <div
                 className="pane-splitter"
+                role="separator"
+                aria-orientation="horizontal"
                 title="Resize file and position panes"
                 onPointerDown={(e) => dragSplit(e, "files")}
-              >
-                •••
-              </div>
+              />
               <section className="position-pane">
                 <div className="position-content">
                   {p.analysis && p.trial?.pos ? (
@@ -578,11 +598,11 @@ export function DesktopShell(p: Props) {
               </section>
               <div
                 className="pane-splitter"
+                role="separator"
+                aria-orientation="horizontal"
                 title="Resize position and feature panes"
                 onPointerDown={(e) => dragSplit(e, "position")}
-              >
-                •••
-              </div>
+              />
               <section className="feature-pane">
                 <GroupSelector
                   counts={p.data?.counts}
@@ -643,11 +663,11 @@ export function DesktopShell(p: Props) {
             </div>
             <div
               className="desktop-splitter"
+              role="separator"
+              aria-orientation="vertical"
               title="Resize left panes and cell tile wall"
               onPointerDown={(e) => dragSplit(e, "horizontal")}
-            >
-              ⋮
-            </div>
+            />
             <section className="right-workspace">
               {p.swap && p.data && (
                 <SwapPrompt

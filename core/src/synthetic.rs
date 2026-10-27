@@ -4,12 +4,65 @@ use std::{
     collections::HashMap,
     rc::{Rc, Weak},
     slice,
+    sync::OnceLock,
 };
 thread_local! {
     // Shared source data in the existing Wasm instance; this starts no threads.
-    static TRAJECTORIES: RefCell<HashMap<(u32, usize), Weak<Vec<[u16; 4]>>>> = RefCell::new(HashMap::new());
+    static TRAJECTORIES: RefCell<HashMap<(u32, usize), Weak<Vec<[u16; 5]>>>> = RefCell::new(HashMap::new());
 }
 const VARIANTS: usize = 16;
+/// Position ticks are 20 ms (1,920 timestamp units at 96 kHz).
+const DT: f64 = 0.02;
+const TICK: u32 = 1920;
+const GRID: usize = 32;
+/// Shared theta rhythm phase (radians) at time `t` seconds: about 7.3 Hz, with the
+/// frequency wandering ±0.4 Hz over a 37 s cycle.
+fn theta(t: f64) -> f64 {
+    let tau = std::f64::consts::TAU;
+    tau * (7.3 * t - 0.4 * 37. / tau * (tau * t / 37.).cos())
+}
+const NOISE: usize = 1 << 16;
+/// Template samples per channel: 50 plus one edge copy at each end, so sub-sample
+/// jitter interpolation reads contiguous slices without clamping.
+const PADDED: usize = 52;
+const TEMPLATE: usize = 4 * PADDED;
+/// Unit-RMS background noise shared by every recording: Gaussian white noise through
+/// the acquisition band-pass (two 6 kHz low-pass poles, one 300 Hz high-pass pole at
+/// 48 kHz), so it is smooth over a few samples like real filtered tetrode noise.
+/// Spikes read random windows of it, keeping generation one lookup per sample.
+fn noise_table() -> &'static [f32] {
+    static TABLE: OnceLock<Vec<f32>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let tau = std::f64::consts::TAU;
+        let (low, high) = (
+            1. - (-tau * 6000. / 48000.).exp(),
+            1. - (-tau * 300. / 48000.).exp(),
+        );
+        let (mut a, mut b, mut slow) = (0., 0., 0.);
+        let mut out: Vec<f64> = (0..NOISE + 4096)
+            .map(|i| {
+                let u1 = (hash(i as u32 * 2 + 1) as f64 + 1.) / 4294967297.;
+                let u2 = hash(i as u32 * 2 + 2) as f64 / 4294967296.;
+                let white = (-2. * u1.ln()).sqrt() * (tau * u2).cos();
+                a += (white - a) * low;
+                b += (a - b) * low;
+                slow += (b - slow) * high;
+                b - slow
+            })
+            .skip(4096) // Discard the filters' start-up transient.
+            .collect();
+        let rms = (out.iter().map(|v| v * v).sum::<f64>() / NOISE as f64).sqrt();
+        out.iter_mut().for_each(|v| *v /= rms);
+        out.into_iter().map(|v| v as f32).collect()
+    })
+}
+fn unit(x: u32) -> f32 {
+    x as f32 / 4294967296.
+}
+/// Approximately standard normal (Irwin-Hall over the hash's four bytes).
+fn normal(x: u32) -> f32 {
+    (x.to_le_bytes().iter().map(|&b| b as f32).sum::<f32>() / 255. - 2.) * 3f32.sqrt()
+}
 fn hash(mut x: u32) -> u32 {
     x ^= x >> 16;
     x = x.wrapping_mul(0x7feb352d);
@@ -17,7 +70,8 @@ fn hash(mut x: u32) -> u32 {
     x = x.wrapping_mul(0x846ca68b);
     x ^ (x >> 16)
 }
-fn trajectory(seed: u32, duration: usize) -> Vec<[u16; 4]> {
+/// LED positions (x1, y1, x2, y2 in 300 px/m) plus the true heading (0..65536 = 0..360°).
+fn trajectory(seed: u32, duration: usize) -> Vec<[u16; 5]> {
     // A 50 Hz correlated walk. Low-occupancy 10 cm squares attract exploration,
     // while angular inertia, noise, speed changes and pauses keep motion varied.
     let mut state = seed;
@@ -93,19 +147,86 @@ fn trajectory(seed: u32, duration: usize) -> Vec<[u16; 4]> {
             ((y + jitter_y) * 300.).round() as u16,
             ((x + heading.cos() * 0.02 + jitter_x) * 300.).round() as u16,
             ((y + heading.sin() * 0.02 + jitter_y) * 300.).round() as u16,
+            (heading / std::f64::consts::TAU * 65536.) as u16,
         ]);
     }
     positions
 }
 
+/// A cell's firing rate (Hz) as a function of position or heading, as a lookup table.
+enum Tuning {
+    /// Gaussian place field over a GRID x GRID map of the 1 m arena.
+    Place(Vec<f32>),
+    /// Gaussian head-direction tuning over 360 one-degree bins.
+    Direction(Vec<f32>),
+    Flat(f32),
+}
 pub struct Synthetic {
     seed: u32,
     cells: usize,
     total: usize,
-    ticks: u64,
-    positions: Rc<Vec<[u16; 4]>>,
+    positions: Rc<Vec<[u16; 5]>>,
+    tunings: Vec<Tuning>,
+    /// Per-cell theta modulation: depth m and m·cos/m·sin of the preferred phase, so
+    /// rate × (1 + m·cos(theta − phase)) needs one sin/cos per tick, not per cell.
+    modulation: Vec<[f32; 4]>,
+    /// Spikes before each position tick; tick t holds starts[t]..starts[t + 1].
+    starts: Vec<u32>,
     waves: Vec<i8>,
-    noise: [i8; 256],
+    drift: Vec<f32>,
+    /// Per-channel fractional amplitude change over the whole session. Non-zero for
+    /// one or two cells per tetrode, as when the electrode moves relative to a cell;
+    /// unequal channels move the cluster across the feature projections.
+    trend: Vec<[f32; 4]>,
+}
+fn tuning(seed: u32, cell: usize) -> Tuning {
+    let r = |k: u32| {
+        unit(hash(
+            seed ^ 0x7a11 ^ (cell as u32).wrapping_mul(977) ^ k << 24,
+        ))
+    };
+    match hash(seed ^ 0x3c6e ^ cell as u32) % 4 {
+        0 | 1 => {
+            let (cx, cy) = (0.1 + 0.8 * r(1), 0.1 + 0.8 * r(2));
+            let sigma = 0.07 + 0.08 * r(3);
+            let (peak, base) = (4. + 16. * r(4), 0.05 + 0.25 * r(5));
+            Tuning::Place(
+                (0..GRID * GRID)
+                    .map(|i| {
+                        let x = ((i % GRID) as f32 + 0.5) / GRID as f32 - cx;
+                        let y = ((i / GRID) as f32 + 0.5) / GRID as f32 - cy;
+                        base + peak * (-(x * x + y * y) / (2. * sigma * sigma)).exp()
+                    })
+                    .collect(),
+            )
+        }
+        2 => {
+            // Tuning width (full width at half maximum) between 30 and 180 degrees.
+            let (preferred, width) = (360. * r(1), 30. + 150. * r(2));
+            let sigma = width / 2.355;
+            let (peak, base) = (3. + 12. * r(3), 0.1 + 0.4 * r(4));
+            Tuning::Direction(
+                (0..360)
+                    .map(|d| {
+                        let delta = (d as f32 + 0.5 - preferred + 540.).rem_euclid(360.) - 180.;
+                        base + peak * (-delta * delta / (2. * sigma * sigma)).exp()
+                    })
+                    .collect(),
+            )
+        }
+        _ => Tuning::Flat(0.3 + 5.7 * r(1)),
+    }
+}
+/// Poisson count by inversion; `u` is uniform on [0, 1).
+fn poisson(mean: f64, u: f64) -> u32 {
+    let (mut k, mut p) = (0, (-mean).exp());
+    let mut cdf = p;
+    while u > cdf && k < 1000 {
+        k += 1;
+        p *= mean / k as f64;
+        cdf += p;
+    }
+    k
 }
 impl Synthetic {
     fn new(seed: u32, cells: usize, total: usize, duration: usize, tetrode: u32) -> Self {
@@ -120,82 +241,229 @@ impl Synthetic {
             positions
         });
         let seed = hash(seed ^ tetrode.wrapping_mul(131));
-        let mut waves = vec![0; (cells + 1) * VARIANTS * 200];
+        let mut waves = vec![0; (cells + 1) * VARIANTS * TEMPLATE];
         for cell in 0..=cells {
             let polarity = if hash(seed ^ cell as u32) & 1 == 0 {
                 1.
             } else {
                 -1.
             };
+            // Later variants are attenuated, slightly wider and later, like spikes
+            // late in a complex-spike burst.
             for variation in 0..VARIANTS {
+                let v = variation as f64;
                 for channel in 0..4 {
                     let h = hash(
                         seed ^ (cell as u32).wrapping_mul(701)
                             ^ (channel as u32).wrapping_mul(31337),
                     );
                     let amplitude = if cell == 0 { 6. } else { 18. + (h % 85) as f64 };
-                    let peak = 13. + ((h >> 12) % 4) as f64 * 0.5;
-                    let width = 2.4 + ((h >> 16) % 8) as f64 * 0.12;
-                    for sample in 0..50 {
-                        let t = sample as f64;
+                    let peak = 13. + ((h >> 12) % 4) as f64 * 0.5 + v * 0.04;
+                    let width = (2.4 + ((h >> 16) % 8) as f64 * 0.12) * (1. + v * 0.02);
+                    for k in 0..PADDED {
+                        let t = k.clamp(1, 50) as f64 - 1.;
                         let shape = (-((t - peak) / width).powi(2)).exp()
                             - 0.35 * (-((t - peak - 8.) / 5.5).powi(2)).exp();
-                        waves[(cell * VARIANTS + variation) * 200 + channel * 50 + sample] =
-                            (polarity * amplitude * (0.92 + variation as f64 * 0.01) * shape)
-                                .round() as i8;
+                        waves[(cell * VARIANTS + variation) * TEMPLATE + channel * PADDED + k] =
+                            (polarity * amplitude * (1. - v * 0.025) * shape).round() as i8;
                     }
                 }
             }
         }
-        let mut noise = [0; 256];
-        for (i, n) in noise.iter_mut().enumerate() {
-            *n = (hash(seed ^ i as u32) % 33) as i8 - 16;
+        let drift = (0..=cells)
+            .map(|cell| unit(hash(seed ^ 0xd1f7 ^ cell as u32)) * std::f32::consts::TAU)
+            .collect();
+        let mut trend = vec![[0f32; 4]; cells + 1];
+        for k in 0..1 + (hash(seed ^ 0xd21f) & 1) {
+            let cell = 1 + hash(seed ^ 0xd220 ^ k) as usize % cells;
+            for (channel, t) in trend[cell].iter_mut().enumerate() {
+                *t = (unit(hash(seed ^ 0xd230 ^ (k * 4 + channel as u32))) - 0.5) * 0.5;
+            }
+            // One channel changes strongly (±35-55%), so the drift is easy to see.
+            let strong = hash(seed ^ 0xd240 ^ k) as usize % 4;
+            let size = 0.35 + 0.2 * unit(hash(seed ^ 0xd250 ^ k));
+            trend[cell][strong] = if hash(seed ^ 0xd260 ^ k) & 1 == 0 {
+                size
+            } else {
+                -size
+            };
         }
-        Self {
+        noise_table();
+        let mut synthetic = Self {
             seed,
             cells,
             total,
-            ticks: duration as u64 * 96000,
             positions,
+            tunings: (0..=cells).map(|cell| tuning(seed, cell)).collect(),
+            modulation: (0..=cells)
+                .map(|cell| {
+                    let r = |k: u32| {
+                        unit(hash(
+                            seed ^ 0x7e7a ^ (cell as u32).wrapping_mul(613) ^ k << 24,
+                        ))
+                    };
+                    // Mostly weak, sometimes strong; noise events are unmodulated.
+                    let depth = if cell == 0 { 0. } else { 0.9 * r(1).powf(1.6) };
+                    let phase = r(2) * std::f32::consts::TAU;
+                    [depth, depth * phase.cos(), depth * phase.sin(), phase]
+                })
+                .collect(),
+            starts: vec![],
             waves,
-            noise,
-        }
+            drift,
+            trend,
+        };
+        synthetic.spike_counts();
+        synthetic
     }
-    fn cell(&self, index: usize) -> usize {
-        let h = hash(self.seed ^ index as u32);
-        if h % 23 == 0 {
-            return 0;
+    /// Firing rates at a position tick, as a running sum over cells (for sampling
+    /// which cell fired); returns the total rate.
+    fn rates(&self, tick: usize, cumulative: &mut Vec<f32>) -> f32 {
+        let p = self.positions[tick];
+        let bin = (p[0] as usize * GRID / 300).min(GRID - 1)
+            + (p[1] as usize * GRID / 300).min(GRID - 1) * GRID;
+        let degree = p[4] as usize * 360 >> 16;
+        let (sin, cos) = (theta((tick as f64 + 0.5) * DT) as f32).sin_cos();
+        cumulative.clear();
+        let mut sum = 0.;
+        for (t, [_, a, b, _]) in self.tunings.iter().zip(&self.modulation) {
+            sum += match t {
+                Tuning::Place(map) => map[bin],
+                Tuning::Direction(curve) => curve[degree],
+                Tuning::Flat(rate) => *rate,
+            } * (1. + a * cos + b * sin);
+            cumulative.push(sum);
         }
-        if h % 4 == 0 {
-            return 1 + (h as usize >> 8) % self.cells;
+        sum
+    }
+    /// Inhomogeneous Poisson spike counts per tick, with rates scaled so the
+    /// expected total is the requested `total`. The actual total varies around it.
+    fn spike_counts(&mut self) {
+        let ticks = self.positions.len();
+        let mut cumulative = Vec::with_capacity(self.cells + 1);
+        // Noise events (cell 0) are about 5% of all spikes.
+        self.tunings[0] = Tuning::Flat(0.);
+        let mut expected: Vec<f64> = (0..ticks)
+            .map(|t| self.rates(t, &mut cumulative) as f64)
+            .collect();
+        let noise = expected.iter().sum::<f64>() / ticks.max(1) as f64 * 0.05 / 0.95;
+        self.tunings[0] = Tuning::Flat(noise as f32);
+        expected.iter_mut().for_each(|r| *r = (*r + noise) * DT);
+        let scale = self.total as f64 / expected.iter().sum::<f64>();
+        self.starts = std::iter::once(0)
+            .chain(expected.iter().enumerate().scan(0u32, |sum, (t, &e)| {
+                let u = unit(hash(self.seed ^ hash(t as u32 ^ 0x9015))) as f64;
+                *sum += poisson(e * scale, u);
+                Some(*sum)
+            }))
+            .collect();
+        self.total = *self.starts.last().unwrap() as usize;
+    }
+    /// Visit spikes first..first+n in time order as (index, cell, timestamp). Each
+    /// spike in a tick picks a cell by rate share, then an offset within the tick by
+    /// rejection against that cell's theta modulation.
+    fn each_spike(&self, first: usize, n: usize, mut f: impl FnMut(usize, usize, u32)) {
+        let end = first + n;
+        let mut tick = self.starts.partition_point(|&s| s as usize <= first) - 1;
+        let mut cumulative = Vec::with_capacity(self.cells + 1);
+        let mut spikes: Vec<(u32, usize)> = vec![];
+        let mut index = first;
+        while index < end {
+            let (a, b) = (self.starts[tick] as usize, self.starts[tick + 1] as usize);
+            if b > index {
+                let sum = self.rates(tick, &mut cumulative);
+                spikes.clear();
+                for j in 0..b - a {
+                    let mut h =
+                        hash(self.seed ^ hash(tick as u32) ^ (j as u32).wrapping_mul(0x2545f491));
+                    let u = unit(hash(h)) * sum;
+                    let cell = cumulative.partition_point(|&c| c <= u).min(self.cells);
+                    let [depth, .., phase] = self.modulation[cell];
+                    let mut offset = unit(h);
+                    for _ in 0..16 {
+                        let t = (tick as f64 + offset as f64) * DT;
+                        let accept = (1. + depth * (theta(t) as f32 - phase).cos()) / (1. + depth);
+                        if unit(hash(h ^ 0xacce)) < accept {
+                            break;
+                        }
+                        h = hash(h);
+                        offset = unit(h);
+                    }
+                    spikes.push(((offset * TICK as f32) as u32, cell));
+                }
+                spikes.sort_unstable();
+                for (j, &(offset, cell)) in spikes.iter().enumerate().take(end - a).skip(index - a)
+                {
+                    f(a + j, cell, tick as u32 * TICK + offset);
+                }
+                index = b.min(end);
+            }
+            tick += 1;
         }
-        let pos = self.positions
-            [(index as u64 * self.positions.len() as u64 / self.total as u64) as usize];
-        let cols = (self.cells as f64).sqrt().ceil() as usize;
-        let rows = self.cells.div_ceil(cols);
-        let field = (pos[0] as usize * cols / 300).min(cols - 1)
-            + (pos[1] as usize * rows / 300).min(rows - 1) * cols;
-        1 + (field as isize + ((h >> 20) % 3) as isize - 1).clamp(0, self.cells as isize - 1)
-            as usize
     }
     fn records(&self, first: usize, output: &mut [u8]) {
-        for (j, record) in output.chunks_exact_mut(216).enumerate() {
-            let index = first + j;
+        let table = noise_table();
+        let window = |x: u32| &table[x as usize % (NOISE - 50)..][..50];
+        let mut overlay = [0f32; 50];
+        self.each_spike(first, output.len() / 216, |index, cell, ticks| {
+            let record = &mut output[(index - first) * 216..][..216];
             let h = hash(self.seed.wrapping_add(index as u32).wrapping_add(0x12345));
-            let cell = self.cell(index);
-            let template = (cell * VARIANTS + (h as usize & 15)) * 200;
-            let ticks = ((index as u64 * self.ticks) / self.total as u64) as u32;
+            let r = |k: u32| hash(h ^ k.wrapping_mul(0x9e3779b9));
+            // About one spike in six falls late in a burst.
+            let variant = if r(1) % 6 == 0 {
+                6 + r(2) as usize % 10
+            } else {
+                r(2) as usize % 4
+            };
+            let template = &self.waves[(cell * VARIANTS + variant) * TEMPLATE..][..TEMPLATE];
+            // Slow per-cell drift over the session and small per-spike gain jitter.
+            let phase = index as f32 / self.total as f32;
+            let gain = (1. + 0.08 * (std::f32::consts::TAU * 1.5 * phase + self.drift[cell]).sin())
+                * (1. + 0.05 * normal(r(3)));
+            // Sub-sample trigger jitter (±0.45 samples) puts most spread on the flanks.
+            let jitter = (unit(r(4)) - 0.5) * 0.9;
+            let (start, frac) = ((jitter.floor() + 1.) as usize, jitter - jitter.floor());
+            // Log-normal noise level gives heavy tails; noise events are noisier.
+            let level = 5.5 * (0.35 * normal(r(5))).exp() * if cell == 0 { 2. } else { 1. };
+            let common: &[f32; 50] = window(r(6)).try_into().unwrap();
+            // Occasional overlapping spike from another unit at a random offset.
+            let overlap = (r(11) % if cell == 0 { 6 } else { 25 } == 0).then(|| {
+                let other = r(12) as usize % (self.cells + 1);
+                (
+                    &self.waves[other * VARIANTS * TEMPLATE..][..TEMPLATE],
+                    (r(13) % 60) as isize - 20,
+                    0.2 + 0.4 * unit(r(14)),
+                )
+            });
             for channel in 0..4 {
                 let p = channel * 54;
                 record[p..p + 4].copy_from_slice(&ticks.to_be_bytes());
+                let wave = &template[channel * PADDED..][..PADDED];
+                let gain = gain * (1. + self.trend[cell][channel] * (phase - 0.5));
+                overlay.fill(0.);
+                if let Some((other, offset, amp)) = overlap {
+                    for (t, o) in overlay.iter_mut().enumerate() {
+                        let u = t as isize - offset;
+                        if (0..50).contains(&u) {
+                            *o = amp * other[channel * PADDED + 1 + u as usize] as f32;
+                        }
+                    }
+                }
+                let out: &mut [u8; 50] = (&mut record[p + 4..p + 54]).try_into().unwrap();
+                let own: &[f32; 50] = window(r(7 + channel as u32)).try_into().unwrap();
+                let lo: &[i8; 50] = wave[start..start + 50].try_into().unwrap();
+                let hi: &[i8; 50] = wave[start + 1..start + 51].try_into().unwrap();
                 for t in 0..50 {
-                    let noise = self.noise[(h as usize + channel * 53 + t) & 255] as i16
-                        * if cell == 0 { 2 } else { 1 };
-                    record[p + 4 + t] = (self.waves[template + channel * 50 + t] as i16 + noise)
-                        .clamp(-128, 127) as i8 as u8;
+                    let (l, u) = (lo[t] as f32, hi[t] as f32);
+                    let v = gain * (l + (u - l) * frac)
+                        + level * (0.45 * common[t] + 0.9 * own[t])
+                        + overlay[t];
+                    // `round_ties_even` is one Wasm instruction (`round` is a libm call); the
+                    // saturating float-to-int cast also clips like the ADC.
+                    out[t] = v.round_ties_even() as i8 as u8;
                 }
             }
-        }
+        });
     }
 }
 #[no_mangle]
@@ -213,6 +481,11 @@ pub extern "C" fn synthetic_new(
         seed, cells, total, duration, tetrode,
     )))
 }
+/// The simulated spike count (Poisson, so close to but not exactly the requested total).
+#[no_mangle]
+pub unsafe extern "C" fn synthetic_spikes(s: *const Synthetic) -> usize {
+    (*s).total
+}
 #[no_mangle]
 pub unsafe extern "C" fn synthetic_free(s: *mut Synthetic) {
     drop(Box::from_raw(s));
@@ -228,20 +501,28 @@ pub unsafe extern "C" fn synthetic_records(
     assert!(first <= s.total && n <= s.total - first);
     s.records(first, slice::from_raw_parts_mut(out, n * 216));
 }
+/// Cut labels for a range. With `keep` > 0 only cells 1..=keep are sorted and all
+/// other spikes stay in noise group 0, like a partially cut tetrode.
 #[no_mangle]
-pub unsafe extern "C" fn synthetic_cut(s: *const Synthetic, first: usize, n: usize, out: *mut u8) {
+pub unsafe extern "C" fn synthetic_cut(
+    s: *const Synthetic,
+    first: usize,
+    n: usize,
+    out: *mut u8,
+    keep: usize,
+) {
     let s = &*s;
     assert!(first <= s.total && n <= s.total - first);
     let output = slice::from_raw_parts_mut(out, n * 4);
-    for (j, record) in output.chunks_exact_mut(4).enumerate() {
-        let cell = s.cell(first + j);
-        record.copy_from_slice(&[
+    s.each_spike(first, n, |index, cell, _| {
+        let cell = if keep == 0 || cell <= keep { cell } else { 0 };
+        output[(index - first) * 4..][..4].copy_from_slice(&[
             b'0' + (cell / 100) as u8,
             b'0' + (cell / 10 % 10) as u8,
             b'0' + (cell % 10) as u8,
             b' ',
         ]);
-    }
+    });
 }
 #[no_mangle]
 pub unsafe extern "C" fn synthetic_position(s: *const Synthetic, out: *mut u8) {
@@ -261,34 +542,183 @@ pub unsafe extern "C" fn synthetic_position(s: *const Synthetic, out: *mut u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn spikes(s: &Synthetic) -> Vec<(usize, u32)> {
+        let mut out = vec![];
+        s.each_spike(0, s.total, |_, cell, t| out.push((cell, t)));
+        out
+    }
     #[test]
     fn records_are_seeded_random_access_and_match_cut_membership() {
         let s = Synthetic::new(4271, 100, 1025, 60, 0);
-        let mut whole = vec![0; 1025 * 216];
+        let n = s.total;
+        assert!(
+            (800..1250).contains(&n),
+            "Poisson total near the target: {n}"
+        );
+        let mut whole = vec![0; n * 216];
         s.records(0, &mut whole);
         let mut piece = vec![0; 19 * 216];
-        s.records(995, &mut piece);
-        assert_eq!(piece, whole[995 * 216..1014 * 216]);
-        let mut other = vec![0; 1025 * 216];
-        Synthetic::new(4272, 100, 1025, 60, 0).records(0, &mut other);
-        assert_ne!(whole, other);
-        let mut e = crate::Engine::new(1025);
+        s.records(n - 30, &mut piece);
+        assert_eq!(piece, whole[(n - 30) * 216..(n - 11) * 216]);
+        let other = Synthetic::new(4272, 100, 1025, 60, 0);
+        let mut raw = vec![0; other.total * 216];
+        other.records(0, &mut raw);
+        assert_ne!(whole[..216 * 100], raw[..216 * 100]);
+        let mut e = crate::Engine::new(n);
         e.push(&whole);
-        assert_eq!(e.times.len(), 1025);
+        assert_eq!(e.times.len(), n);
+        assert!(e.times.windows(2).all(|w| w[0] <= w[1]));
         assert!(e.amplitudes.iter().any(|&a| a > 50));
-        let mut cut = vec![0; 1025 * 4];
-        unsafe {
-            synthetic_cut(&s, 0, 1025, cut.as_mut_ptr());
+        for keep in [0, 2] {
+            let mut cut = vec![0; n * 4];
+            unsafe {
+                synthetic_cut(&s, 0, n, cut.as_mut_ptr(), keep);
+            }
+            let labels: Vec<usize> = std::str::from_utf8(&cut)
+                .unwrap()
+                .split_whitespace()
+                .map(|v| v.parse().unwrap())
+                .collect();
+            for (label, (cell, _)) in labels.iter().zip(spikes(&s)) {
+                let want = if keep == 0 || cell <= keep { cell } else { 0 };
+                assert_eq!(*label, want);
+            }
         }
-        let labels: Vec<usize> = std::str::from_utf8(&cut)
-            .unwrap()
-            .split_whitespace()
-            .map(|v| v.parse().unwrap())
+    }
+    #[test]
+    fn cells_are_place_direction_or_untuned_with_varied_theta_modulation() {
+        let s = Synthetic::new(9, 48, 50000, 1200, 1);
+        let kinds = |f: fn(&Tuning) -> bool| s.tunings[1..].iter().filter(|t| f(t)).count();
+        assert!(kinds(|t| matches!(t, Tuning::Place(_))) > 10);
+        assert!(kinds(|t| matches!(t, Tuning::Direction(_))) > 4);
+        assert!(kinds(|t| matches!(t, Tuning::Flat(_))) > 4);
+        let all = spikes(&s);
+        let noise = all.iter().filter(|(c, _)| *c == 0).count() as f64 / all.len() as f64;
+        assert!((0.03..0.08).contains(&noise), "noise fraction {noise}");
+        // The most theta-modulated cell has more spike pairs one theta cycle apart
+        // (~137 ms) than half a cycle apart (~68 ms).
+        let cell = (1..=48)
+            .max_by(|&a, &b| s.modulation[a][0].total_cmp(&s.modulation[b][0]))
+            .unwrap();
+        let times: Vec<u32> = all
+            .iter()
+            .filter(|(c, _)| *c == cell)
+            .map(|&(_, t)| t)
             .collect();
-        assert!(labels.iter().all(|&v| v <= 100));
-        for (i, &cell) in labels.iter().enumerate() {
-            assert_eq!(cell, s.cell(i));
+        let mut lags = [0usize; 40];
+        for (i, &a) in times.iter().enumerate() {
+            for &b in &times[i + 1..] {
+                let ms = (b - a) as usize / 96;
+                if ms >= 200 {
+                    break;
+                }
+                lags[ms / 5] += 1;
+            }
         }
+        let (half, full) = (lags[12] + lags[13], lags[26] + lags[27]);
+        assert!(
+            full > half * 3 / 2,
+            "theta rhythmicity: {half} at ~68 ms, {full} at ~137 ms"
+        );
+        // A place cell fires most near its field centre; a head-direction cell most
+        // near its preferred heading.
+        let mut best = (0., 0.);
+        for (c, t) in s.tunings.iter().enumerate().skip(1) {
+            let ticks: Vec<usize> = all
+                .iter()
+                .filter(|(x, _)| *x == c)
+                .map(|&(_, t)| (t / TICK) as usize)
+                .collect();
+            let peak = |f: &dyn Fn(&[u16; 5]) -> bool| {
+                let occupied = s.positions.iter().filter(|p| f(p)).count().max(1);
+                ticks.iter().filter(|&&k| f(&s.positions[k])).count() as f64
+                    / occupied as f64
+                    / (ticks.len() as f64 / s.positions.len() as f64)
+            };
+            match t {
+                Tuning::Place(map) => {
+                    let i = (0..map.len())
+                        .max_by(|&a, &b| map[a].total_cmp(&map[b]))
+                        .unwrap();
+                    let (x, y) = (i % GRID * 300 / GRID, i / GRID * 300 / GRID);
+                    let r = peak(&|p| {
+                        (p[0] as usize).abs_diff(x) < 25 && (p[1] as usize).abs_diff(y) < 25
+                    });
+                    best.0 = f64::max(best.0, r);
+                }
+                Tuning::Direction(curve) => {
+                    let d = (0..360)
+                        .max_by(|&a, &b| curve[a].total_cmp(&curve[b]))
+                        .unwrap();
+                    let r = peak(&|p| {
+                        ((p[4] as usize * 360 >> 16) + 360 - d) % 360 < 15
+                            || (d + 360 - (p[4] as usize * 360 >> 16)) % 360 < 15
+                    });
+                    best.1 = f64::max(best.1, r);
+                }
+                Tuning::Flat(_) => {}
+            }
+        }
+        assert!(best.0 > 3. && best.1 > 2., "in-field rate ratios {best:?}");
+    }
+    #[test]
+    fn one_or_two_cells_drift_in_amplitude_across_the_session() {
+        let s = Synthetic::new(31, 24, 50000, 1200, 3);
+        let drifting: Vec<usize> = (1..=24).filter(|&c| s.trend[c] != [0.; 4]).collect();
+        assert!((1..=2).contains(&drifting.len()), "{drifting:?}");
+        let cell = drifting[0];
+        let channel = (0..4)
+            .max_by(|&a, &b| s.trend[cell][a].abs().total_cmp(&s.trend[cell][b].abs()))
+            .unwrap();
+        let mut raw = vec![0u8; s.total * 216];
+        s.records(0, &mut raw);
+        let cells = spikes(&s);
+        // Mean peak-to-peak amplitude on the strongly drifting channel, first vs last
+        // tenth of the session.
+        let amplitude = |range: std::ops::Range<usize>| {
+            let values: Vec<f32> = range
+                .filter(|&i| cells[i].0 == cell)
+                .map(|i| {
+                    let w = &raw[i * 216 + channel * 54 + 4..][..50];
+                    let (lo, hi) = w.iter().fold((127i8, -128i8), |(lo, hi), &b| {
+                        (lo.min(b as i8), hi.max(b as i8))
+                    });
+                    (hi as f32 - lo as f32).max(0.)
+                })
+                .collect();
+            values.iter().sum::<f32>() / values.len().max(1) as f32
+        };
+        let (early, late) = (
+            amplitude(0..s.total / 10),
+            amplitude(s.total * 9 / 10..s.total),
+        );
+        let change = late / early - 1.;
+        assert!(
+            change.abs() > 0.15 && change.signum() == s.trend[cell][channel].signum(),
+            "amplitude {early} -> {late}, trend {:?}",
+            s.trend[cell]
+        );
+    }
+    #[test]
+    fn noise_is_band_limited_and_its_level_varies_between_spikes() {
+        let table = noise_table();
+        let lag1 = table.windows(2).map(|w| w[0] * w[1]).sum::<f32>() / table.len() as f32;
+        assert!(lag1 > 0.5, "neighbouring samples should correlate: {lag1}");
+        let s = Synthetic::new(17, 10, 20000, 60, 0);
+        let mut raw = vec![0u8; s.total * 216];
+        s.records(0, &mut raw);
+        // Per-spike spread on the flat pre-spike samples of one cell.
+        let cells = spikes(&s);
+        let cell = cells.iter().map(|&(c, _)| c).find(|&c| c > 0).unwrap();
+        let rms: Vec<f32> = (0..s.total)
+            .filter(|&i| cells[i].0 == cell)
+            .map(|i| &raw[i * 216 + 4..i * 216 + 4 + 8])
+            .map(|w| (w.iter().map(|&b| (b as i8 as f32).powi(2)).sum::<f32>() / 8.).sqrt())
+            .collect();
+        let (lo, hi) = rms
+            .iter()
+            .fold((f32::MAX, 0f32), |(a, b), &v| (a.min(v), b.max(v)));
+        assert!(hi > 3. * lo.max(0.5), "noise level should vary: {lo}..{hi}");
     }
     #[test]
     fn position_clock_and_arena_are_consistent() {

@@ -23,7 +23,6 @@ export interface Trial {
 }
 export interface Settings {
   pointSize: number;
-  budget: number;
   drift: boolean;
   density: boolean;
   binCm: number;
@@ -39,7 +38,6 @@ export interface Settings {
 }
 export const defaultSettings: Settings = {
   pointSize: 1,
-  budget: 250_000,
   drift: false,
   density: true,
   binCm: 3,
@@ -84,13 +82,17 @@ export interface ViewData {
   duration: number;
   timebase: number;
   counts: Uint32Array;
+  /** Every spike: four peak-to-peak amplitudes, raw acquisition-tick time, label. */
   features: Uint8Array;
-  times: Float32Array;
+  times: Uint32Array;
   labels: Uint16Array;
-  indices: Uint32Array;
-  waves: Int8Array;
-  waveLabels: Uint16Array;
-  waveIndices: Uint32Array;
+  /** Resident (GPU) waveform records: all spikes up to 1M, else evenly sampled. */
+  waveSlots: number;
+  /** Resident slots grouped by cell; cell c occupies waveStarts[c]..waveStarts[c+1]. */
+  waveOrder: Uint32Array;
+  waveStarts: Uint32Array;
+  /** Two u32 halves per cell of a hash of its resident slot set. */
+  waveHashes: Uint32Array;
   headers: Record<string, Header>;
   undo: HistoryEntry[];
   redo: HistoryEntry[];
@@ -99,6 +101,9 @@ export interface ViewData {
   residentBytes: number;
   loadMs: number;
 }
+/** A worker view: features/times are sent only when the recording changes. */
+export type ViewMessage = Omit<ViewData, "features" | "times"> &
+  Partial<Pick<ViewData, "features" | "times">>;
 export interface AnalysisData {
   arenaWidth: number;
   arenaHeight: number;
@@ -115,7 +120,6 @@ export interface AnalysisData {
   ac: Float32Array;
   refractory: number;
   rate: number;
-  sampledPairs: boolean;
 }
 export const fileId = (f: File) =>
   `${f.webkitRelativePath || f.name}:${f.size}:${f.lastModified}`;

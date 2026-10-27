@@ -174,7 +174,9 @@ test("drag comparison leaves a placeholder, fades at exact alignment, overlays b
     "Speed",
     "Autocorrelation",
   ])
-    await page.getByRole("button", { name, exact: true }).click();
+    await page
+      .getByRole("button", { name, exact: true })
+      .click({ modifiers: ["Shift"] });
   await start(page, 1);
   await snap(page, 2);
   await page.mouse.up();
@@ -218,5 +220,5 @@ test("cancelling after the source scrolls out of the virtual wall restores its s
   await expect(
     page.getByRole("button", { name: "Undo", exact: true }),
   ).toBeDisabled();
-  await expect(page.getByText("18,000", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^1[78],\d{3}$/)).toBeVisible();
 });

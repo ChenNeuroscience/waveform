@@ -5,10 +5,14 @@
 //! and labels must be validated to 0..MAX_CELLS before recounting. This module is called
 //! only by the trusted worker wrapper; raw ABI functions are not a public input API.
 use std::slice;
-mod density;
+macro_rules! getter{($ptr:ident,$len:ident,[$($field:ident).+],$typ:ty)=>{
+ #[no_mangle]pub unsafe extern "C" fn $ptr(e:*mut Engine)->*const $typ{let e=&*e;e.$($field).+.as_ptr()}
+ #[no_mangle]pub unsafe extern "C" fn $len(e:*mut Engine)->usize{let e=&*e;e.$($field).+.len()}
+};}
 mod position;
 mod processing;
 mod synthetic;
+mod waves;
 pub const RECORD: usize = 216;
 pub const MAX_CELLS: usize = 1024;
 #[derive(Default)]
@@ -17,8 +21,7 @@ pub struct Engine {
     amplitudes: Vec<u8>,
     labels: Vec<u16>,
     counts: Vec<u32>,
-    samples: processing::Samples,
-    display: processing::Display,
+    waves: waves::Waves,
     gates: Vec<processing::Gate>,
     edit: processing::EditState,
     cut: Option<processing::CutParser>,
@@ -26,9 +29,6 @@ pub struct Engine {
     output: Vec<u8>,
     groups: Vec<Vec<u32>>,
     groups_dirty: bool,
-    density: std::collections::HashMap<u16, Vec<u16>>,
-    density_atlas: Vec<u16>,
-    density_sizes: Vec<u32>,
 }
 impl Engine {
     pub fn new(n: usize) -> Self {
@@ -37,8 +37,7 @@ impl Engine {
             amplitudes: Vec::with_capacity(n * 4),
             labels: vec![0; n],
             counts: vec![0; MAX_CELLS],
-            samples: Default::default(),
-            display: Default::default(),
+            waves: Default::default(),
             gates: vec![],
             edit: Default::default(),
             cut: None,
@@ -46,14 +45,10 @@ impl Engine {
             output: vec![],
             groups: vec![],
             groups_dirty: true,
-            density: Default::default(),
-            density_atlas: vec![],
-            density_sizes: vec![],
         }
     }
     pub fn push(&mut self, data: &[u8]) {
         for spike in data.chunks_exact(RECORD) {
-            let index = self.times.len();
             self.times
                 .push(u32::from_be_bytes(spike[..4].try_into().unwrap()));
             for ch in 0..4 {
@@ -66,12 +61,10 @@ impl Engine {
                 }
                 self.amplitudes.push((hi - lo) as u8);
             }
-            self.samples.push(index as u32, self.labels[index], spike);
         }
     }
     pub fn recount(&mut self) {
         self.groups_dirty = true;
-        self.density.clear();
         self.counts.fill(0);
         for &c in &self.labels {
             self.counts[c as usize] += 1;

@@ -91,36 +91,74 @@ small {
   gap: 2px;
   min-height: 35px;
   padding: 3px 6px;
-  background: #f0f0f0;
-  border-bottom: 1px solid #b8b8b8;
+  background: linear-gradient(#fdfdfe, #f1f2f4);
+  border-bottom: 1px solid #d3d6db;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 5%);
   flex-shrink: 0;
   white-space: nowrap;
   overflow-x: auto;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    Arial,
+    sans-serif;
+  color: #3b4048;
 }
 .desktop-toolbar > button {
   height: 27px;
   padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+.desktop-toolbar > button:hover:not(:disabled) {
+  background: rgb(15 23 42 / 6%);
+  border-color: transparent;
+}
+.desktop-toolbar > button:active:not(:disabled) {
+  background: rgb(15 23 42 / 11%);
 }
 .desktop-toolbar > button:disabled svg {
-  opacity: 0.4;
+  opacity: 0.35;
 }
 .tool-separator {
-  height: 23px;
+  height: 18px;
   width: 1px;
-  background: #c8c8c8;
-  margin: 0 4px;
+  background: #d9dce1;
+  margin: 0 5px;
 }
-.plot-toggle {
+/* Plot toggles: rounded pills; the original red marks plots that are shown. */
+.desktop-toolbar > .plot-toggle {
   font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   min-width: 36px;
-  border: 1px solid #ccc !important;
-  background: #fafafa;
-  color: #777;
+  height: 23px;
+  margin: 0 1px;
+  border: 1px solid #d6d9de;
+  border-radius: 999px;
+  background: white;
+  color: #7a808a;
 }
-.plot-toggle.checked {
-  border-color: #fa8c8c !important;
-  background: #fffdd4;
-  color: #e24a4a;
+.desktop-toolbar > .plot-toggle:hover:not(:disabled) {
+  border-color: #b4b9c1;
+  background: #f6f7f9;
+  color: #4b515a;
+}
+.desktop-toolbar > .plot-toggle.checked {
+  border-color: #f2a3a3;
+  background: #fff1f0;
+  color: #d23c3c;
+}
+.desktop-toolbar > .plot-toggle.checked:hover:not(:disabled) {
+  border-color: #e98585;
+  background: #ffe6e4;
+  color: #c02f2f;
 }
 
 .desktop-workspace {
@@ -257,31 +295,52 @@ small {
   color: #8e4a00;
   margin-left: 5px;
 }
-.pane-splitter {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-top: 1px solid #c5c5c5;
-  border-bottom: 1px solid #c5c5c5;
-  background: #eee;
-  color: #555;
-  font-size: 8px;
-  line-height: 4px;
-  letter-spacing: 1px;
-  cursor: row-resize;
-  touch-action: none;
-}
+.pane-splitter,
 .desktop-splitter {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-left: 1px solid #c5c5c5;
-  border-right: 1px solid #c5c5c5;
-  background: #eee;
-  font-size: 15px;
-  color: #555;
-  cursor: col-resize;
+  background: #f1f2f4;
   touch-action: none;
+  transition: background-color 0.12s ease;
+}
+.pane-splitter {
+  border-top: 1px solid #dcdfe3;
+  border-bottom: 1px solid #dcdfe3;
+  cursor: row-resize;
+}
+.desktop-splitter {
+  border-left: 1px solid #dcdfe3;
+  border-right: 1px solid #dcdfe3;
+  cursor: col-resize;
+}
+/* A small rounded grip replaces the old text glyphs. */
+.pane-splitter::before,
+.desktop-splitter::before {
+  content: "";
+  border-radius: 1px;
+  background: #b3b8c0;
+  transition: background-color 0.12s ease;
+}
+.pane-splitter::before {
+  width: 24px;
+  height: 2px;
+}
+.desktop-splitter::before {
+  width: 2px;
+  height: 24px;
+}
+.pane-splitter:hover,
+.desktop-splitter:hover {
+  background: #e3ebf6;
+}
+.pane-splitter:hover::before,
+.desktop-splitter:hover::before {
+  background: #4a7fd6;
+}
+.pane-splitter:active,
+.desktop-splitter:active {
+  background: #d3e1f4;
 }
 .position-pane {
   min-height: 0;
@@ -1464,24 +1523,43 @@ kbd {
   min-width: 5px;
 }
 .tetrode-file-block > button {
-  font-size: 0;
-  width: 5px;
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  justify-content: flex-start;
+  max-width: 5px;
   min-width: 5px;
   height: 17px;
   min-height: 17px;
   padding: 0;
   border: 1px solid #888;
   background: #eee;
+  /* Collapsed slivers keep their label, hidden, so selecting a tetrode can
+     animate them open: max-width animates where width: auto cannot. */
+  transition:
+    max-width 0.22s ease,
+    min-width 0.22s ease,
+    padding 0.22s ease,
+    color 0.18s ease,
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+/* Scoped to .trial-tetrodes to outrank the later cut text colours. */
+.trial-tetrodes .tetrode-file-block:not(.expanded) > button {
+  color: transparent;
 }
 .tetrode-file-block > button.cut-file {
   background: #e4ddd0;
 }
 .tetrode-file-block.expanded > button {
-  font-size: 9px;
-  width: auto;
+  max-width: 160px;
   min-width: 25px;
-  white-space: nowrap;
   padding: 0 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tetrode-file-block > button {
+    transition: none;
+  }
 }
 .tetrode-file-block > button.active {
   background: #6e2020;
@@ -1886,6 +1964,35 @@ kbd {
 .tetrode-file-block > button.local-cut:active {
   cursor: grabbing;
 }
+/* A raw tetrode selected without a cut is neutral, unlike a selected cut. */
+.tetrode-file-block > button.active:not(.cut-file) {
+  background: #444;
+  border-color: #222;
+  color: white;
+}
+/* Hover deepens each button's own colour (the generic blue hover would hide
+   which kind of file it is); selected buttons lighten slightly instead. */
+.tetrode-file-block > button:hover:not(:disabled) {
+  background: #d6d6d6;
+  border-color: #333;
+}
+.tetrode-file-block > button.cut-file:hover:not(:disabled) {
+  background: #f99;
+  border-color: #300;
+}
+.tetrode-file-block > button.local-cut:hover:not(:disabled) {
+  background: #99e;
+  border-color: #003;
+}
+.tetrode-file-block > button.active:not(.cut-file):hover {
+  background: #5a5a5a;
+}
+.tetrode-file-block > button.cut-file.active:hover {
+  background: #722;
+}
+.tetrode-file-block > button.local-cut.active:hover {
+  background: #227;
+}
 
 .tetrode-file-block.expanded {
   flex-wrap: wrap;
@@ -2081,27 +2188,6 @@ kbd {
   z-index: 90;
   box-shadow: 0 0 5px 3px #fc0;
 }
-.sampling-warning {
-  position: absolute;
-  left: 4px;
-  bottom: 4px;
-  max-width: calc(100% - 72px);
-  padding: 3px 5px;
-  font: bold 12px/16px Arial;
-  color: #a00;
-  background: #fff5b8f0;
-  pointer-events: none;
-  visibility: hidden;
-  z-index: 5;
-}
-.cell-tile:hover > .sampling-warning,
-.tile-copy:hover > .sampling-warning,
-.clusters:hover > .sampling-warning {
-  visibility: visible;
-}
-.tile-wall[data-dragging] .sampling-warning {
-  visibility: hidden;
-}
 
 .other-files {
   display: inline-flex;
@@ -2120,8 +2206,10 @@ kbd {
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
-  font: 9px/11px Arial;
-  color: #555;
+  font-size: 10px;
+  line-height: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #6b717b;
 }
 .toolbar-status > span {
   max-width: 300px;
@@ -2129,7 +2217,11 @@ kbd {
   text-overflow: ellipsis;
 }
 .toolbar-status b {
-  font-weight: normal;
+  font-weight: 600;
+  color: #3b4048;
+}
+.toolbar-warning {
+  color: #b42318;
 }
 .toolbar-status progress {
   width: 55px;

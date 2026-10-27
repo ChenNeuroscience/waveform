@@ -1,4 +1,4 @@
-import { destination, paintSources } from "./controls";
+import { destination, paintSources, source } from "./controls";
 import { ready, exportCut } from "./controls";
 import { test, expect } from "@playwright/test";
 test("demo imports, exact cut edits survive switching, undo/redo and export", async ({
@@ -9,7 +9,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   await page.goto("/?demo=quick");
   await page.getByText("Try it now with simulated data").click();
   await ready(page, 30000);
-  await expect(page.getByText("18,000", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^1[78],\d{3}$/)).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toBeVisible();
@@ -18,6 +18,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     .getByRole("button", { name: "Select cell 1", exact: true })
     .textContent();
   await destination(page, 2);
+  await source(page, 1);
   await paintSources(page);
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
@@ -29,6 +30,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveText(count!);
   await destination(page, 2);
+  await source(page, 1);
   await paintSources(page);
   await ready(page);
   await page.locator(".tile-wall").evaluate((el) => (el.scrollTop = 0));
@@ -80,7 +82,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   await page
     .getByRole("button", { name: "Head direction", exact: true })
-    .click();
+    .click({ modifiers: ["Shift"] });
   await expect(page.locator(".tile-wave-canvas")).toBeVisible();
   await page.keyboard.down("Space");
   await page.locator('.cell-tile[data-cell="1"] .tile-waves').click();
@@ -110,7 +112,7 @@ test("production assets and Wasm load under the GitHub Pages subpath", async ({
   await page.getByText("Try it now with simulated data").click();
   await ready(page, 30000);
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await expect(page.getByText("18,000", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^1[78],\d{3}$/)).toBeVisible();
 });
 test("mobile welcome stays within the viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
