@@ -29,12 +29,7 @@ export function SwapPrompt({
       onSubmit={(event) => {
         event.preventDefault();
         const target = Number(value);
-        if (
-          !value.trim() ||
-          !Number.isInteger(target) ||
-          target < 0 ||
-          target >= counts.length
-        )
+        if (!value.trim() || !Number.isInteger(target) || target < 0 || target >= counts.length)
           setError(`Enter a group number from 0 to ${counts.length - 1}.`);
         else if (target === source) setError("Choose a different group.");
         else onGroup(target);

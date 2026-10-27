@@ -39,24 +39,18 @@ export class SyntheticRecording extends File {
           return;
         }
         const end = Math.min(this.size, offset + CHUNK * 216);
-        controller.enqueue(
-          new Uint8Array(await this.slice(offset, end).arrayBuffer()),
-        );
+        controller.enqueue(new Uint8Array(await this.slice(offset, end).arrayBuffer()));
         offset = end;
       },
     });
   }
   override slice(start = 0, end = this.size, contentType = ""): Blob {
-    start = Math.max(
-      0,
-      Math.min(this.size, start < 0 ? this.size + start : start),
-    );
+    start = Math.max(0, Math.min(this.size, start < 0 ? this.size + start : start));
     end = Math.max(start, Math.min(this.size, end < 0 ? this.size + end : end));
     const { header, spikes, context } = this.spec,
       rawEnd = header.length + spikes * 216;
     const parts: BlobPart[] = [];
-    if (start < header.length)
-      parts.push(header.slice(start, Math.min(end, header.length)));
+    if (start < header.length) parts.push(header.slice(start, Math.min(end, header.length)));
     const rawStart = Math.max(start, header.length),
       rawStop = Math.min(end, rawEnd);
     if (rawStop > rawStart) {
@@ -76,8 +70,7 @@ export class SyntheticRecording extends File {
         this.wasm.free_bytes(p, bytes);
       }
     }
-    if (end > rawEnd)
-      parts.push(tail.slice(Math.max(0, start - rawEnd), end - rawEnd));
+    if (end > rawEnd) parts.push(tail.slice(Math.max(0, start - rawEnd), end - rawEnd));
     return new Blob(parts, { type: contentType });
   }
 }
@@ -123,11 +116,7 @@ export async function demoFiles(
       ),
     );
     for (let tet = 1; tet <= 8; tet++) {
-      const cells = options.quick
-          ? 12
-          : options.stress
-            ? 100
-            : [24, 36, 48][(tet - 1) % 3],
+      const cells = options.quick ? 12 : options.stress ? 100 : [24, 36, 48][(tet - 1) % 3],
         context = w.synthetic_new(
           (options.seed + trial * 173) >>> 0,
           cells,
@@ -141,8 +130,7 @@ export async function demoFiles(
           `duration ${duration}\nnum_spikes ${spikes}\nnum_chans 4\nsamples_per_spike 50\nbytes_per_sample 1\nbytes_per_timestamp 4\ntimebase 96000 hz\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start`,
         ),
         file = new File([header], `${name}.${tet}`, { lastModified: modified });
-      if (!context)
-        throw new Error("Invalid simulated recording configuration.");
+      if (!context) throw new Error("Invalid simulated recording configuration.");
       sources.set(fileId(file), { context, spikes, header, file });
       files.push(file);
       if (tet === 1) {
@@ -193,9 +181,7 @@ export async function demoFiles(
       } finally {
         w.free_bytes(p, CHUNK * 4);
       }
-      files.push(
-        new File(parts, `${name}_${tet}.cut`, { lastModified: modified }),
-      );
+      files.push(new File(parts, `${name}_${tet}.cut`, { lastModified: modified }));
     }
   }
   return files;

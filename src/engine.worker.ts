@@ -3,31 +3,12 @@
 // every loop over spike, label, waveform and position records.
 import { demoFiles, recordingSource } from "./demo";
 import { parseHeader, textHeader, readCut } from "./files";
-import type {
-  Settings,
-  Header,
-  HistoryEntry,
-  ViewMessage,
-  AnalysisData,
-} from "./types";
+import type { Settings, Header, HistoryEntry, ViewMessage, AnalysisData } from "./types";
 import { parsePosition, analyse, trajectory, type Position } from "./position";
 import { openStore, put, get } from "./history";
-import {
-  streamFile,
-  copyU8,
-  copyU16,
-  copyU32,
-  withU16,
-  withF32,
-  type Core,
-} from "./wasm";
+import { streamFile, copyU8, copyU16, copyU32, withU16, withF32, type Core } from "./wasm";
 import { Superseded } from "./protocol";
-import type {
-  PositionRequest,
-  RequestType,
-  WorkerMessage,
-  WorkerResult,
-} from "./protocol";
+import type { PositionRequest, RequestType, WorkerMessage, WorkerResult } from "./protocol";
 interface Asset {
   key: string;
   wasm: Core;
@@ -59,41 +40,25 @@ let wasmPromise: Promise<Core>,
   activeAsset: Asset | undefined;
 const dbPromise = openStore();
 let latestAnalysisBatch = "";
-let splitState:
-  | { source: number; channel: number; sample: number; threshold: number }
-  | undefined;
+let splitState: { source: number; channel: number; sample: number; threshold: number } | undefined;
 let currentHeaders: Record<string, Header> = {},
   // Amplitudes and timestamps never change for a recording, so they are sent only
   // when the recording changes; client.ts reattaches them to later views.
   populationSent = "";
-const labels = (a: Asset) =>
-  new Uint16Array(a.wasm.memory.buffer, a.wasm.engine_labels(a.e), a.n);
-const times = (a: Asset) =>
-  new Uint32Array(a.wasm.memory.buffer, a.wasm.engine_times(a.e), a.n);
-const counts = (a: Asset) =>
-  new Uint32Array(a.wasm.memory.buffer, a.wasm.engine_counts(a.e), 1024);
+const labels = (a: Asset) => new Uint16Array(a.wasm.memory.buffer, a.wasm.engine_labels(a.e), a.n);
+const times = (a: Asset) => new Uint32Array(a.wasm.memory.buffer, a.wasm.engine_times(a.e), a.n);
+const counts = (a: Asset) => new Uint32Array(a.wasm.memory.buffer, a.wasm.engine_counts(a.e), 1024);
 const resident = () =>
-  [...assets.values()].reduce(
-    (n, a) => n + a.wasm.engine_resident_bytes(a.e),
-    0,
-  );
+  [...assets.values()].reduce((n, a) => n + a.wasm.engine_resident_bytes(a.e), 0);
 function progress(id: number, value: number, message: string) {
   self.postMessage({ id, progress: value, message });
 }
 async function saveActive() {
   if (active && activeAsset)
-    await put(
-      await dbPromise,
-      `labels:${active.key}`,
-      labels(activeAsset).slice(),
-    );
+    await put(await dbPromise, `labels:${active.key}`, labels(activeAsset).slice());
 }
 function forkSession(s: Session, descriptor: any): Session {
-  if (
-    !descriptor ||
-    typeof descriptor.id !== "string" ||
-    typeof descriptor.name !== "string"
-  )
+  if (!descriptor || typeof descriptor.id !== "string" || typeof descriptor.name !== "string")
     return s;
   const key = `${s.asset}|${descriptor.id}`;
   if (sessions.has(key)) throw new Error("Cut identity already exists.");
@@ -108,21 +73,12 @@ function forkSession(s: Session, descriptor: any): Session {
 function acceptSession(s: Session) {
   sessions.set(s.key, s);
   active = s;
-  if (s.localCut)
-    currentHeaders.cut = { file: s.localCut.name, source: "Modified cut" };
+  if (s.localCut) currentHeaders.cut = { file: s.localCut.name, source: "Modified cut" };
 }
-function exportLabels(
-  w: Core,
-  e: number,
-  n: number,
-  trial: string,
-  format: string,
-): Blob {
-  const max = new Uint32Array(
-      w.memory.buffer,
-      w.engine_counts(e),
-      1024,
-    ).findLastIndex((c) => c > 0),
+function exportLabels(w: Core, e: number, n: number, trial: string, format: string): Blob {
+  const max = new Uint32Array(w.memory.buffer, w.engine_counts(e), 1024).findLastIndex(
+      (c) => c > 0,
+    ),
     parts: BlobPart[] = [];
   parts.push(
     format === "clu"
@@ -168,11 +124,7 @@ async function loadAsset(
     throw new Error(
       "Supported tetrodes have 4 channels, 50 signed 8-bit samples, and 32-bit timestamps.",
     );
-  if (
-    new TextDecoder()
-      .decode(head.subarray(offset, offset + 10))
-      .startsWith("\r\ndata_end")
-  )
+  if (new TextDecoder().decode(head.subarray(offset, offset + 10)).startsWith("\r\ndata_end"))
     n = 0;
   if (
     !Number.isSafeInteger(n) ||
@@ -205,8 +157,7 @@ async function loadAsset(
       n * 216,
       32768 * 216,
       (p, bytes) => {
-        if (id !== latestLoad)
-          throw new Superseded("Superseded by another recording.");
+        if (id !== latestLoad) throw new Superseded("Superseded by another recording.");
         wasm.engine_push(e, p, bytes);
       },
       (fraction) =>
@@ -245,25 +196,16 @@ function view(a: Asset, s: Session, cached: boolean): ViewMessage {
     name: a.file.name,
     n: a.n,
     duration:
-      parseFloat(a.header.duration) ||
-      (times(a)[a.n - 1] || 0) / parseFloat(a.header.timebase),
+      parseFloat(a.header.duration) || (times(a)[a.n - 1] || 0) / parseFloat(a.header.timebase),
     timebase: parseFloat(a.header.timebase),
     counts: counts(a).slice(),
     ...population,
     labels: copyU16(w, w.engine_labels(e), a.n),
     waveSlots: w.engine_wave_slots(e),
     waveOrder: copyU32(w, w.engine_wave_order(e), w.engine_wave_order_len(e)),
-    waveStarts: copyU32(
-      w,
-      w.engine_wave_starts(e),
-      w.engine_wave_starts_len(e),
-    ),
+    waveStarts: copyU32(w, w.engine_wave_starts(e), w.engine_wave_starts_len(e)),
     cellHashes: copyU32(w, w.engine_cell_hashes(e), 2048),
-    waveHashes: copyU32(
-      w,
-      w.engine_wave_hashes(e),
-      w.engine_wave_hashes_len(e),
-    ),
+    waveHashes: copyU32(w, w.engine_wave_hashes(e), w.engine_wave_hashes_len(e)),
     headers: currentHeaders,
     undo: s.undo,
     redo: s.redo,
@@ -293,29 +235,17 @@ async function waveBatch(a: Asset, first: number, count: number) {
     r1 = w.engine_wave_record(e, first + count - 1) + 1,
     start = a.offset + r0 * 216;
   if (slots === a.n) {
-    const bytes = new Uint8Array(
-      await a.file.slice(start, start + count * 216).arrayBuffer(),
-    );
+    const bytes = new Uint8Array(await a.file.slice(start, start + count * 216).arrayBuffer());
     if (bytes.length !== count * 216) throw new Error("Truncated file read.");
     return bytes;
   }
   w.engine_wave_begin(e, first, count);
-  await streamFile(
-    w,
-    a.file,
-    start,
-    (r1 - r0) * 216,
-    32768 * 216,
-    (p, bytes, at) => w.engine_wave_feed(e, r0 + at / 216, p, bytes),
+  await streamFile(w, a.file, start, (r1 - r0) * 216, 32768 * 216, (p, bytes, at) =>
+    w.engine_wave_feed(e, r0 + at / 216, p, bytes),
   );
   return copyU8(w, w.engine_wave_batch(e), w.engine_wave_batch_len(e));
 }
-async function waveformColumn(
-  a: Asset,
-  channel: number,
-  sample: number,
-  id: number,
-) {
+async function waveformColumn(a: Asset, channel: number, sample: number, id: number) {
   const w = a.wasm,
     e = a.e,
     cached = w.engine_gate_begin(e, channel, sample);
@@ -337,9 +267,7 @@ async function waveformColumn(
   );
 }
 const positionKey = (m: PositionRequest) =>
-  m.pos
-    ? `${m.posKey}|${m.settings.leds}|${m.settings.maxSpeed}|${m.settings.posSmooth}`
-    : "";
+  m.pos ? `${m.posKey}|${m.settings.leds}|${m.settings.maxSpeed}|${m.settings.posSmooth}` : "";
 /** The processed position for a request, parsed once per file and LED/speed settings. */
 async function positionFor(m: PositionRequest, w: Core) {
   const pk = positionKey(m);
@@ -357,17 +285,10 @@ async function positionFor(m: PositionRequest, w: Core) {
   return pos;
 }
 async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
-  if (
-    splitState &&
-    !["split", "analysis", "trajectory", "wave_batch"].includes(m.type)
-  )
-    throw new Error(
-      "Finish the waveform split with a left click, or press Escape to cancel.",
-    );
+  if (splitState && !["split", "analysis", "trajectory", "wave_batch"].includes(m.type))
+    throw new Error("Finish the waveform split with a left click, or press Escape to cancel.");
   if (m.type === "demo") {
-    return demoFiles(await wasmPromise, m.options, (n, message) =>
-      progress(m.id, n, message),
-    );
+    return demoFiles(await wasmPromise, m.options, (n, message) => progress(m.id, n, message));
   }
   if (m.type === "load") {
     await saveActive();
@@ -398,13 +319,9 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         else a.wasm.engine_unsorted(a.e);
       }
     } else {
-      const stored = await get<Uint16Array>(
-        await dbPromise,
-        `labels:${sessionKey}`,
-      );
+      const stored = await get<Uint16Array>(await dbPromise, `labels:${sessionKey}`);
       if (stored) labels(a).set(stored);
-      else if (s.localCut)
-        throw new Error("Modified cut state is unavailable.");
+      else if (s.localCut) throw new Error("Modified cut state is unavailable.");
       else if (m.cut) await readCut(m.cut, a.n, a.wasm, a.e);
       else a.wasm.engine_unsorted(a.e);
     }
@@ -412,8 +329,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     active = s;
     activeAsset = a;
     currentHeaders = { tetrode: a.header };
-    if (s.localCut)
-      currentHeaders.cut = { file: s.localCut.name, source: "Modified cut" };
+    if (s.localCut) currentHeaders.cut = { file: s.localCut.name, source: "Modified cut" };
     else if (m.cut) {
       const file = m.cut as File;
       const text = await file.slice(0, 65536).text();
@@ -438,19 +354,9 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     if (m.revision !== undefined && target.revision !== m.revision)
       throw new Superseded("Superseded cut export.");
     if (active?.key === target.key && activeAsset)
-      return exportLabels(
-        activeAsset.wasm,
-        activeAsset.e,
-        activeAsset.n,
-        m.trial,
-        "cut",
-      );
-    const saved = await get<Uint16Array>(
-      await dbPromise,
-      `labels:${target.key}`,
-    );
-    if (!saved || saved.length !== target.n)
-      throw new Error("Cut labels are unavailable.");
+      return exportLabels(activeAsset.wasm, activeAsset.e, activeAsset.n, m.trial, "cut");
+    const saved = await get<Uint16Array>(await dbPromise, `labels:${target.key}`);
+    if (!saved || saved.length !== target.n) throw new Error("Cut labels are unavailable.");
     const w = await wasmPromise,
       e = w.engine_new_cut(target.n);
     try {
@@ -472,12 +378,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     try {
       if (m.phase === "preview") {
         if (!splitState) {
-          if (
-            !Number.isInteger(m.source) ||
-            m.source < 0 ||
-            m.source >= 1023 ||
-            counts(a)[1023]
-          )
+          if (!Number.isInteger(m.source) || m.source < 0 || m.source >= 1023 || counts(a)[1023])
             throw new Error("No room to insert another cell.");
           if (!s.localCut) await saveActive();
           w.engine_edit_begin(e);
@@ -502,15 +403,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
           await waveformColumn(a, m.channel, m.sample, m.id);
           w.engine_split_cache_finish(e);
         }
-        if (
-          w.engine_split_gate(
-            e,
-            splitState.source,
-            m.channel,
-            m.sample,
-            m.threshold,
-          ) < 0
-        )
+        if (w.engine_split_gate(e, splitState.source, m.channel, m.sample, m.threshold) < 0)
           throw new Error("No room to insert another cell.");
         splitState = {
           ...splitState,
@@ -581,9 +474,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         try {
           await put(await dbPromise, `patch:${entry.id}`, patch);
         } catch (error) {
-          throw new Error(
-            `Edit rolled back: undo storage is unavailable (${String(error)}).`,
-          );
+          throw new Error(`Edit rolled back: undo storage is unavailable (${String(error)}).`);
         }
         s = forkSession(s, m.newCut);
         s.undo.push(entry);
@@ -610,14 +501,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
       const p = w.alloc_bytes(patch.byteLength);
       try {
         new Uint8Array(w.memory.buffer, p, patch.byteLength).set(patch);
-        if (
-          w.engine_patch_apply(
-            e,
-            p,
-            patch.byteLength,
-            m.type === "redo" ? 1 : 0,
-          )
-        )
+        if (w.engine_patch_apply(e, p, patch.byteLength, m.type === "redo" ? 1 : 0))
           throw new Error("Invalid undo data.");
       } finally {
         w.free_bytes(p, patch.byteLength);
@@ -654,8 +538,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         e,
         m.cell,
         parseFloat(a.header.timebase),
-        parseFloat(a.header.duration) ||
-          (times(a)[a.n - 1] || 0) / parseFloat(a.header.timebase),
+        parseFloat(a.header.duration) || (times(a)[a.n - 1] || 0) / parseFloat(a.header.timebase),
         pos,
         opts,
       );
@@ -677,12 +560,8 @@ self.onmessage = (event: MessageEvent) => {
   if (m.type === "init") {
     wasmPromise = fetch(m.url)
       .then(async (r) => {
-        if (!r.ok)
-          throw new Error("Rust/Wasm module missing; run npm run build:wasm.");
-        return WebAssembly.instantiate(
-          await WebAssembly.compile(await r.arrayBuffer()),
-          {},
-        );
+        if (!r.ok) throw new Error("Rust/Wasm module missing; run npm run build:wasm.");
+        return WebAssembly.instantiate(await WebAssembly.compile(await r.arrayBuffer()), {});
       })
       .then((x) => x.exports as Core);
     return;
@@ -699,8 +578,7 @@ self.onmessage = (event: MessageEvent) => {
         transfer: Transferable[] = [];
       if (data && m.type !== "analysis")
         for (const value of Object.values(data))
-          if (ArrayBuffer.isView(value))
-            transfer.push(value.buffer as ArrayBuffer);
+          if (ArrayBuffer.isView(value)) transfer.push(value.buffer as ArrayBuffer);
       self.postMessage({ id: m.id, data }, transfer);
     } catch (error) {
       self.postMessage({

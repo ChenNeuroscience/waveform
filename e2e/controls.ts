@@ -1,11 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 
 export async function ready(page: Page, timeout = 30000) {
-  await expect(page.locator(".desktop-app")).toHaveAttribute(
-    "data-ready",
-    "true",
-    { timeout },
-  );
+  await expect(page.locator(".desktop-app")).toHaveAttribute("data-ready", "true", { timeout });
 }
 
 export async function destination(page: Page, group: number) {
@@ -14,10 +10,7 @@ export async function destination(page: Page, group: number) {
   if ((await active.getAttribute("data-group")) === String(group)) return;
   const chip = page.locator(`.group-selector button[data-group="${group}"]`);
   if (await chip.count()) await chip.click();
-  else
-    await page
-      .getByRole("button", { name: "New destination group", exact: true })
-      .click();
+  else await page.getByRole("button", { name: "New destination group", exact: true }).click();
   await expect(active).toHaveAttribute("data-group", String(group));
 }
 
@@ -28,9 +21,10 @@ export async function source(page: Page, group: number) {
     .locator(`.group-selector button[data-group="${group}"]`)
     .first()
     .click({ button: "right" });
-  await expect(
-    page.locator(".painting-sources button[data-group]"),
-  ).toHaveAttribute("data-group", String(group));
+  await expect(page.locator(".painting-sources button[data-group]")).toHaveAttribute(
+    "data-group",
+    String(group),
+  );
 }
 
 // Paint the entire projection to exercise the same multi-source transfer path
@@ -52,9 +46,7 @@ export async function paintSources(page: Page) {
     await page.mouse.move(box.x + x, box.y + y, { steps: 2 });
   await page.mouse.up();
   await ready(page);
-  await page
-    .getByRole("button", { name: "Paint source spikes", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Paint source spikes", exact: true }).click();
 }
 
 export async function adjacentSwap(page: Page, source: number, delta: number) {
@@ -77,26 +69,14 @@ export async function exportCut(page: Page) {
   // A real click supplies browser activation for repeated downloads; the
   // application export remains the ordinary Ctrl/Cmd-S keyboard command.
   await page.getByRole("button", { name: "Edit history", exact: true }).click();
-  await Promise.all([
-    page.waitForEvent("download"),
-    page.keyboard.press("ControlOrMeta+s"),
-  ]);
-  if (opened)
-    await panel
-      .getByRole("button", { name: "Close panel", exact: true })
-      .click();
+  await Promise.all([page.waitForEvent("download"), page.keyboard.press("ControlOrMeta+s")]);
+  if (opened) await panel.getByRole("button", { name: "Close panel", exact: true }).click();
 }
 
 export async function setDensity(page: Page, enabled: boolean) {
   const panel = page.getByRole("dialog", { name: "Settings", exact: true });
   const opened = !(await panel.isVisible());
-  if (opened)
-    await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await panel
-    .getByRole("checkbox", { name: "Density rendering", exact: true })
-    .setChecked(enabled);
-  if (opened)
-    await panel
-      .getByRole("button", { name: "Close panel", exact: true })
-      .click();
+  if (opened) await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await panel.getByRole("checkbox", { name: "Density rendering", exact: true }).setChecked(enabled);
+  if (opened) await panel.getByRole("button", { name: "Close panel", exact: true }).click();
 }

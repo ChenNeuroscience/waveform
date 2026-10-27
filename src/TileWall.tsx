@@ -69,9 +69,7 @@ export function TileWall({
     [scroll, setScroll] = useState(0),
     [hovered, setHovered] = useState<number | null>(null),
     [glows, setGlows] = useState<{ cell: number; rect: DOMRect }[]>([]),
-    [jiggles, setJiggles] = useState<
-      { cell: number; image: string; rect: DOMRect }[]
-    >([]),
+    [jiggles, setJiggles] = useState<{ cell: number; image: string; rect: DOMRect }[]>([]),
     playedFeedback = useRef(""),
     [height, setHeight] = useState(800),
     [width, setWidth] = useState(800),
@@ -80,17 +78,12 @@ export function TileWall({
     [wavesDone, setWavesDone] = useState("");
   const all = Array.from(data.counts, (n, i) => ({ n, i }))
     .filter(
-      (c) =>
-        c.n > 0 ||
-        (splitPoint &&
-          [splitPoint.source, splitPoint.source + 1].includes(c.i)),
+      (c) => c.n > 0 || (splitPoint && [splitPoint.source, splitPoint.source + 1].includes(c.i)),
     )
     .sort((a, b) => a.i - b.i)
     .map((c) => c.i);
   const wavePixels = shown.waveforms ? ROW * 4 : 0,
-    tuningWidth = shown.ac
-      ? 128
-      : (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0),
+    tuningWidth = shown.ac ? 128 : (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0),
     numericWidth = (shown.spatial ? 128 : 0) + tuningWidth,
     tileWidth = wavePixels + numericWidth + 3,
     waveFrameWidth = numericWidth ? wavePixels : Math.max(0, wavePixels - 24),
@@ -99,15 +92,9 @@ export function TileWall({
     tileStride = tileWidth + 2,
     columns = Math.max(1, Math.floor((width - 4) / tileStride)),
     totalRows = Math.ceil(all.length / columns),
-    startRow = Math.max(
-      0,
-      Math.min(totalRows - 1, Math.floor(scroll / STRIDE) - 1),
-    ),
+    startRow = Math.max(0, Math.min(totalRows - 1, Math.floor(scroll / STRIDE) - 1)),
     start = startRow * columns,
-    visible = all.slice(
-      start,
-      start + (Math.ceil(height / STRIDE) + 3) * columns,
-    ),
+    visible = all.slice(start, start + (Math.ceil(height / STRIDE) + 3) * columns),
     visibleRows = Math.ceil(visible.length / columns),
     layout: WaveLayout = {
       columns,
@@ -125,8 +112,7 @@ export function TileWall({
     analysisKey = `${data.key}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}|${settings.speedMax}`,
     // Cancels in-flight tile gestures whenever the cut or analyses change.
     scope = `${data.session}|${data.revision}|${analysisKey}`,
-    analysisFor = (cell: number) =>
-      cache.current.get(membershipKey(data, cell));
+    analysisFor = (cell: number) => cache.current.get(membershipKey(data, cell));
   const gestures = useTileGestures({
     splitSource: splitPoint?.source,
     grab: grabMode,
@@ -154,9 +140,7 @@ export function TileWall({
     setGlows(
       [...highlighted].flatMap((cell) => {
         if (cell == null) return [];
-        const row = scroller.current?.querySelector<HTMLElement>(
-          `.cell-tile[data-cell="${cell}"]`,
-        );
+        const row = scroller.current?.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`);
         return row ? [{ cell, rect: row.getBoundingClientRect() }] : [];
       }),
     );
@@ -185,8 +169,7 @@ export function TileWall({
       el = scroller.current!;
     if (
       index >= 0 &&
-      (row * STRIDE < el.scrollTop ||
-        (row + 1) * STRIDE > el.scrollTop + el.clientHeight)
+      (row * STRIDE < el.scrollTop || (row + 1) * STRIDE > el.scrollTop + el.clientHeight)
     )
       el.scrollTop = row * STRIDE;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll only when the selection, cut or column count changes, not as cells are added
@@ -219,8 +202,7 @@ export function TileWall({
         // differ from this render's data if an edit was processed first.
         for (const result of results)
           if (result.membership) cache.current.set(result.membership, result);
-        while (cache.current.size > 512)
-          cache.current.delete(cache.current.keys().next().value!);
+        while (cache.current.size > 512) cache.current.delete(cache.current.keys().next().value!);
         setAnalysisVersion((v) => v + 1);
       })
       .catch(() => {});
@@ -277,17 +259,10 @@ export function TileWall({
     const focused = scroller.current?.querySelector<HTMLElement>(
       `.cell-tile[data-cell="${selected}"]`,
     );
-    if (
-      !focused ||
-      feedback.cells.some(
-        (cell) => visible.includes(cell) && !analysisFor(cell),
-      )
-    )
+    if (!focused || feedback.cells.some((cell) => visible.includes(cell) && !analysisFor(cell)))
       return;
     const tiles = feedback.cells.flatMap((cell) => {
-      const row = scroller.current?.querySelector<HTMLElement>(
-          `.cell-tile[data-cell="${cell}"]`,
-        ),
+      const row = scroller.current?.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`),
         image =
           row &&
           captureTile(cell, "", {
@@ -331,10 +306,7 @@ export function TileWall({
       onScroll={(e) => setScroll(e.currentTarget.scrollTop)}
       aria-label="Cell tile wall"
     >
-      <div
-        className="tile-spacer"
-        style={{ height: totalRows * STRIDE, minWidth: tileWidth + 4 }}
-      >
+      <div className="tile-spacer" style={{ height: totalRows * STRIDE, minWidth: tileWidth + 4 }}>
         <div
           className="tile-window"
           style={{
@@ -345,9 +317,7 @@ export function TileWall({
         >
           {shown.waveforms && (
             <canvas
-              data-density={
-                settings.density && wavesReady ? "ready" : "pending"
-              }
+              data-density={settings.density && wavesReady ? "ready" : "pending"}
               data-waves={wavesReady ? "ready" : "pending"}
               ref={waveCanvas}
               className="tile-wave-canvas"
@@ -357,9 +327,7 @@ export function TileWall({
           )}
           {visible.map((cell, i) => {
             const a = analysisFor(cell),
-              paired =
-                !!splitPoint &&
-                [splitPoint.source, splitPoint.source + 1].includes(cell),
+              paired = !!splitPoint && [splitPoint.source, splitPoint.source + 1].includes(cell),
               point = paired
                 ? gestures.split || {
                     channel: splitPoint!.channel,
@@ -400,16 +368,11 @@ export function TileWall({
                   onSwapGroup(cell);
                 }}
                 onContextMenu={(e) => {
-                  if ((e.target as HTMLElement).closest(".tile-waves"))
-                    e.preventDefault();
+                  if ((e.target as HTMLElement).closest(".tile-waves")) e.preventDefault();
                 }}
                 onPointerEnter={() => {
                   setHovered(cell);
-                  if (
-                    gestures.dragging === null &&
-                    !grabMode &&
-                    (!splitPoint || paired)
-                  )
+                  if (gestures.dragging === null && !grabMode && (!splitPoint || paired))
                     onHover(cell);
                 }}
                 onPointerLeave={() => {
@@ -439,10 +402,7 @@ export function TileWall({
                     </>
                   )}
                 </div>
-                <div
-                  className="tile-numeric-plots"
-                  style={{ width: numericWidth }}
-                >
+                <div className="tile-numeric-plots" style={{ width: numericWidth }}>
                   {shown.spatial && (
                     <div
                       className="tile-spatial"
@@ -450,16 +410,9 @@ export function TileWall({
                       title={`Spatial peak: ${a?.peak.toFixed(2) || "—"} Hz`}
                     >
                       {a && pos ? (
-                        <AnalysisPlot
-                          data={a}
-                          mode="spatial"
-                          maxRate={settings.maxRate}
-                          compact
-                        />
+                        <AnalysisPlot data={a} mode="spatial" maxRate={settings.maxRate} compact />
                       ) : (
-                        <span className="plot-unavailable">
-                          {pos ? "…" : "No .pos"}
-                        </span>
+                        <span className="plot-unavailable">{pos ? "…" : "No .pos"}</span>
                       )}
                     </div>
                   )}
@@ -472,38 +425,19 @@ export function TileWall({
                             style={{ paddingRight: shown.speed ? 0 : 24 }}
                           >
                             {a && pos && (
-                              <AnalysisPlot
-                                data={a}
-                                mode="direction"
-                                maxRate={0}
-                                compact
-                              />
+                              <AnalysisPlot data={a} mode="direction" maxRate={0} compact />
                             )}
                           </div>
                         )}
                         {shown.speed && (
                           <div className="tile-speed">
-                            {a && pos && (
-                              <AnalysisPlot
-                                data={a}
-                                mode="speed"
-                                maxRate={0}
-                                compact
-                              />
-                            )}
+                            {a && pos && <AnalysisPlot data={a} mode="speed" maxRate={0} compact />}
                           </div>
                         )}
                       </div>
                       {shown.ac && (
                         <div className="tile-ac">
-                          {a && (
-                            <AnalysisPlot
-                              data={a}
-                              mode="ac"
-                              maxRate={0}
-                              compact
-                            />
-                          )}
+                          {a && <AnalysisPlot data={a} mode="ac" maxRate={0} compact />}
                         </div>
                       )}
                     </div>
@@ -525,8 +459,7 @@ export function TileWall({
                     {cell}
                   </button>
                 </div>
-                {(gestures.dragging === cell ||
-                  gestures.settling?.source === cell) && (
+                {(gestures.dragging === cell || gestures.settling?.source === cell) && (
                   <div
                     className="tile-drag-placeholder"
                     aria-label={`Original location of cell ${cell}`}
@@ -534,9 +467,7 @@ export function TileWall({
                     {gestures.dragging === cell ? `[group ${cell}]` : ""}
                   </div>
                 )}
-                {jiggles.some((tile) => tile.cell === cell) && (
-                  <div className="tile-edit-cover" />
-                )}
+                {jiggles.some((tile) => tile.cell === cell) && <div className="tile-edit-cover" />}
                 <CellStats
                   entries={[
                     ...(a && pos && a.peak > 0
@@ -587,9 +518,7 @@ export function TileWall({
             data-cell={tile.cell}
             aria-hidden="true"
             onAnimationEnd={() =>
-              setJiggles((current) =>
-                current.filter((t) => t.cell !== tile.cell),
-              )
+              setJiggles((current) => current.filter((t) => t.cell !== tile.cell))
             }
             style={{
               left: tile.rect.x,
@@ -621,9 +550,7 @@ export function TileWall({
               key={i}
               className={`tile-drag-ghost ${tile.snapped ? "snapped" : ""} ${i === 1 ? "returning" : ""}`}
               aria-label={
-                i === 1
-                  ? `Returning cell ${tile.source}`
-                  : `Dragging cell ${tile.source}`
+                i === 1 ? `Returning cell ${tile.source}` : `Dragging cell ${tile.source}`
               }
               data-source={tile.source}
               data-target={tile.snapped ? gestures.target : undefined}
@@ -634,12 +561,7 @@ export function TileWall({
                 height: tile.height,
               }}
             >
-              <img
-                className="tile-drag-image"
-                alt=""
-                src={tile.image}
-                draggable={false}
-              />
+              <img className="tile-drag-image" alt="" src={tile.image} draggable={false} />
               <span
                 className="tile-drag-badge"
                 style={{
@@ -664,9 +586,7 @@ export function captureTile(
     transparentBadge?: boolean;
   } = {},
 ): HTMLCanvasElement | undefined {
-  const row = document.querySelector<HTMLElement>(
-      `.cell-tile[data-cell="${cell}"]`,
-    ),
+  const row = document.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`),
     waves = document.querySelector<HTMLCanvasElement>(".tile-wave-canvas");
   if (!row) return;
   const rect = row.getBoundingClientRect(),
@@ -678,12 +598,7 @@ export function captureTile(
   const ctx = canvas.getContext("2d")!;
   ctx.scale(dpr, dpr);
   ctx.fillStyle = "white";
-  ctx.fillRect(
-    0,
-    0,
-    rect.width - (options.transparentBadge ? 24 : 0),
-    rect.height + heading,
-  );
+  ctx.fillRect(0, 0, rect.width - (options.transparentBadge ? 24 : 0), rect.height + heading);
   ctx.fillStyle = "black";
   ctx.font = "11px Arial";
   if (heading) ctx.fillText(title, 6, 17);
@@ -707,28 +622,13 @@ export function captureTile(
   }
   for (const c of row.querySelectorAll<HTMLCanvasElement>("canvas")) {
     const b = c.getBoundingClientRect();
-    ctx.drawImage(
-      c,
-      b.left - rect.left,
-      b.top - rect.top + heading,
-      b.width,
-      b.height,
-    );
+    ctx.drawImage(c, b.left - rect.left, b.top - rect.top + heading, b.width, b.height);
   }
   const caption = row.querySelector<HTMLElement>(".tile-caption");
-  if (
-    options.details !== false &&
-    caption &&
-    getComputedStyle(caption).visibility !== "hidden"
-  ) {
+  if (options.details !== false && caption && getComputedStyle(caption).visibility !== "hidden") {
     const info = caption.getBoundingClientRect();
     ctx.fillStyle = "#ffffffe8";
-    ctx.fillRect(
-      info.left - rect.left,
-      info.top - rect.top + heading,
-      info.width,
-      info.height,
-    );
+    ctx.fillRect(info.left - rect.left, info.top - rect.top + heading, info.width, info.height);
     ctx.font = "14px Arial";
     ctx.fillStyle = "#222";
     for (const [i, line] of [...caption.querySelectorAll("span")].entries())

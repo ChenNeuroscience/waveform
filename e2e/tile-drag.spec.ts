@@ -18,51 +18,40 @@ async function fixture(page: Page) {
     pos.writeUInt16BE(12, i * 20 + 12);
   }
   await page.goto("/?demo=quick");
-  await page
-    .getByLabel("Import recording files", { exact: true })
-    .setInputFiles([
-      {
-        name: "compare.1",
-        mimeType: "application/octet-stream",
-        buffer: Buffer.concat([
-          Buffer.from(
-            "num_spikes 6\nnum_chans 4\nsamples_per_spike 50\ntimebase 96000 hz\nduration 10\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start",
-          ),
-          spikes,
-        ]),
-      },
-      {
-        name: "compare_1.cut",
-        mimeType: "text/plain",
-        buffer: Buffer.from("Exact_cut_for: compare spikes: 6\n1 1 2 2 3 3\n"),
-      },
-      {
-        name: "compare.pos",
-        mimeType: "application/octet-stream",
-        buffer: Buffer.concat([
-          Buffer.from(
-            "pos_format t,x1,y1,x2,y2,numpix1,numpix2\nnum_pos_samples 10\npixels_per_metre 100\nsample_rate 1 hz\ntimestamp_timebase 96000 hz\nwindow_max_x 100\nwindow_max_y 100\ndata_start",
-          ),
-          pos,
-        ]),
-      },
-    ]);
+  await page.getByLabel("Import recording files", { exact: true }).setInputFiles([
+    {
+      name: "compare.1",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.concat([
+        Buffer.from(
+          "num_spikes 6\nnum_chans 4\nsamples_per_spike 50\ntimebase 96000 hz\nduration 10\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start",
+        ),
+        spikes,
+      ]),
+    },
+    {
+      name: "compare_1.cut",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Exact_cut_for: compare spikes: 6\n1 1 2 2 3 3\n"),
+    },
+    {
+      name: "compare.pos",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.concat([
+        Buffer.from(
+          "pos_format t,x1,y1,x2,y2,numpix1,numpix2\nnum_pos_samples 10\npixels_per_metre 100\nsample_rate 1 hz\ntimestamp_timebase 96000 hz\nwindow_max_x 100\nwindow_max_y 100\ndata_start",
+        ),
+        pos,
+      ]),
+    },
+  ]);
   await ready(page);
 }
 async function assignments(page: Page) {
-  const [d] = await Promise.all([
-    page.waitForEvent("download"),
-    exportCut(page),
-  ]);
-  return [
-    ...(await decodeCut(
-      new File([await readFile((await d.path())!)], "compare_1.cut"),
-      6,
-    )),
-  ];
+  const [d] = await Promise.all([page.waitForEvent("download"), exportCut(page)]);
+  return [...(await decodeCut(new File([await readFile((await d.path())!)], "compare_1.cut"), 6))];
 }
-const tile = (page: Page, cell: number) =>
-  page.locator(`.cell-tile[data-cell="${cell}"]`);
+const tile = (page: Page, cell: number) => page.locator(`.cell-tile[data-cell="${cell}"]`);
 async function start(page: Page, cell: number) {
   const b = (await tile(page, cell).locator(".tile-waves").boundingBox())!;
   await page.mouse.move(b.x + 65, b.y + 45);
@@ -79,9 +68,7 @@ async function snap(page: Page, cell: number) {
   expect(g.y).toBe(b.y);
   expect(g.width).toBe(b.width);
   expect(g.height).toBe(b.height);
-  const primary = (await tile(page, cell)
-      .locator(".tile-badge button")
-      .boundingBox())!,
+  const primary = (await tile(page, cell).locator(".tile-badge button").boundingBox())!,
     secondary = (await ghost.locator(".tile-drag-badge").boundingBox())!;
   expect(secondary.y).toBe(primary.y);
   expect(secondary.width).toBe(primary.width);
@@ -94,9 +81,9 @@ async function snap(page: Page, cell: number) {
   }
   const halo = page.locator("body > .tile-hover-glow");
   expect(await halo.boundingBox()).toEqual(b);
-  expect(
-    await halo.evaluate((el) => +getComputedStyle(el).zIndex),
-  ).toBeGreaterThan(await ghost.evaluate((el) => +getComputedStyle(el).zIndex));
+  expect(await halo.evaluate((el) => +getComputedStyle(el).zIndex)).toBeGreaterThan(
+    await ghost.evaluate((el) => +getComputedStyle(el).zIndex),
+  );
   return ghost;
 }
 
@@ -108,9 +95,7 @@ test("drag comparison leaves a placeholder, fades at exact alignment, overlays b
   await fixture(page);
   const original = (await tile(page, 1).boundingBox())!;
   await start(page, 1);
-  await expect(
-    tile(page, 1).getByLabel("Original location of cell 1"),
-  ).toHaveText("[group 1]");
+  await expect(tile(page, 1).getByLabel("Original location of cell 1")).toHaveText("[group 1]");
   expect((await tile(page, 1).boundingBox())!.y).toBe(original.y);
   const ghost = await snap(page, 2);
   await expect(tile(page, 1).locator(".tile-caption")).toBeHidden();
@@ -120,9 +105,7 @@ test("drag comparison leaves a placeholder, fades at exact alignment, overlays b
   await expect(path).toHaveAttribute("data-source-spikes", "2");
   await expect(path).toHaveAttribute("data-target-spikes", "2");
   await expect(path).toHaveAttribute("data-spikes", "4");
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   const image = ghost.locator(".tile-drag-image");
   expect(
     await image.evaluate((el) => {
@@ -158,46 +141,29 @@ test("drag comparison leaves a placeholder, fades at exact alignment, overlays b
   await page.mouse.up();
   const returning = page.getByLabel("Returning cell 1", { exact: true });
   await expect(returning).toBeVisible();
-  expect(
-    await returning.evaluate((el) => getComputedStyle(el).animationName),
-  ).toBe("tile-settle");
+  expect(await returning.evaluate((el) => getComputedStyle(el).animationName)).toBe("tile-settle");
   await expect(returning).toHaveCount(0);
   await expect(page.locator(".tile-drag-placeholder")).toHaveCount(0);
   expect(await assignments(page)).toEqual([1, 1, 2, 2, 3, 3]);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   // Wrap into two columns and compare/merge across columns on the shared canvas.
-  for (const name of [
-    "Spatial rate",
-    "Head direction",
-    "Speed",
-    "Autocorrelation",
-  ])
-    await page
-      .getByRole("button", { name, exact: true })
-      .click({ modifiers: ["Shift"] });
+  for (const name of ["Spatial rate", "Head direction", "Speed", "Autocorrelation"])
+    await page.getByRole("button", { name, exact: true }).click({ modifiers: ["Shift"] });
   await start(page, 1);
   await snap(page, 2);
   await page.mouse.up();
-  await expect(
-    page.getByRole("button", { name: "Select cell 2", exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Select cell 2", exact: true })).toHaveCount(0);
   expect(await assignments(page)).toEqual([1, 1, 1, 1, 3, 3]);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   expect(await assignments(page)).toEqual([1, 1, 2, 2, 3, 3]);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   await start(page, 1);
   await snap(page, 2);
   await page.keyboard.press("Escape");
   await page.mouse.up();
   await expect(page.locator(".tile-drag-ghost.snapped")).toHaveCount(0);
   expect(await assignments(page)).toEqual([1, 1, 2, 2, 3, 3]);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   expect(errors).toEqual([]);
 });
 
@@ -208,17 +174,13 @@ test("cancelling after the source scrolls out of the virtual wall restores its s
   await page.getByText("Try it now with simulated data").click();
   await ready(page);
   await start(page, 1);
-  await page
-    .locator(".tile-wall")
-    .evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await page.locator(".tile-wall").evaluate((el) => (el.scrollTop = el.scrollHeight));
   await expect(tile(page, 1)).toHaveCount(0);
   await page.mouse.move(20, 20, { steps: 3 });
   await page.mouse.up();
   await expect(tile(page, 1)).toBeVisible();
   await expect(page.locator(".tile-drag-placeholder")).toHaveCount(0);
   await expect(page.locator(".tile-drag-ghost")).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   await expect(page.getByText(/^1[78],\d{3}$/)).toBeVisible();
 });

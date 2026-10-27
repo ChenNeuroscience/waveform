@@ -33,9 +33,7 @@ import { useShortcuts } from "./shortcuts";
 const fmt = (n: number) => n.toLocaleString("en-GB");
 function readSettings(): Settings {
   try {
-    const saved = JSON.parse(
-      localStorage.getItem("waveform-desktop-settings") || "{}",
-    );
+    const saved = JSON.parse(localStorage.getItem("waveform-desktop-settings") || "{}");
     return Object.fromEntries(
       Object.entries(defaultSettings).map(([key, value]) => [
         key,
@@ -166,9 +164,7 @@ export default function App() {
   }, [data?.dirty, data?.session]);
   const importFiles = async (files: File[]) => {
     if (splitPoint) {
-      setNotice(
-        "Finish the split with a left click, or press Escape before importing files.",
-      );
+      setNotice("Finish the split with a left click, or press Escape before importing files.");
       return;
     }
     try {
@@ -200,17 +196,8 @@ export default function App() {
     const target = trials
       .find((t) => t.id === next.trialId)
       ?.tetrodes.find((e) => e.number === next.tetNum && e.file);
-    if (
-      !target ||
-      (next.cutId && !target.cuts.some((c) => c.id === next.cutId))
-    )
-      return;
-    if (
-      trialId === next.trialId &&
-      tetNum === next.tetNum &&
-      cutId === next.cutId
-    )
-      return;
+    if (!target || (next.cutId && !target.cuts.some((c) => c.id === next.cutId))) return;
+    if (trialId === next.trialId && tetNum === next.tetNum && cutId === next.cutId) return;
     if (tet) lastCuts.current.set(tet.id, cutId);
     ++loadGen.current; // Invalidate replies before the next load effect runs.
     setTrialId(next.trialId);
@@ -218,17 +205,14 @@ export default function App() {
     setCutId(next.cutId);
   };
   const rememberedCut = (target: Tetrode) =>
-    target.id === tet?.id
-      ? cutId
-      : (lastCuts.current.get(target.id) ?? target.cuts[0]?.id ?? "");
+    target.id === tet?.id ? cutId : (lastCuts.current.get(target.id) ?? target.cuts[0]?.id ?? "");
   const navigateTo = (next: RecordingSelection) => {
     pushSelection(next);
     applySelection(next);
   };
   const chooseTrial = (t: Trial) => {
     const e =
-      t.tetrodes.find((e) => e.number === tetNum && e.file) ||
-      t.tetrodes.find((e) => e.file);
+      t.tetrodes.find((e) => e.number === tetNum && e.file) || t.tetrodes.find((e) => e.file);
     if (e)
       navigateTo({
         trialId: t.id,
@@ -247,10 +231,7 @@ export default function App() {
   };
   useEffect(() => {
     if (!tet?.file) return;
-    if (
-      data?.session === `${tet.id}|${fileId(tet.file)}|${cutId || "unsorted"}`
-    )
-      return;
+    if (data?.session === `${tet.id}|${fileId(tet.file)}|${cutId || "unsorted"}`) return;
     const gen = ++loadGen.current;
     setBusy(true);
     setProgress(0);
@@ -319,14 +300,7 @@ export default function App() {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the position-processing settings change the trajectory
-  }, [
-    data?.key,
-    trial?.id,
-    trial?.pos,
-    settings.leds,
-    settings.maxSpeed,
-    settings.posSmooth,
-  ]);
+  }, [data?.key, trial?.id, trial?.pos, settings.leds, settings.maxSpeed, settings.posSmooth]);
   const displayCell = dragComparison?.source ?? hoverCell ?? cell;
   const comparisonKey = `${data?.session}|${data?.revision}|${trial?.id}|${trial?.pos ? fileId(trial.pos) : ""}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${dragComparison?.target}`;
   useEffect(() => {
@@ -469,10 +443,7 @@ export default function App() {
   }, [cut?.id, cut?.revision, busy, splitPoint]);
   // Edits and undo/redo of the active cut; the first edit of an original also
   // names the new local cut.
-  const operation = async (
-    type: "edit" | "undo" | "redo",
-    payload: Partial<EditRequest> = {},
-  ) => {
+  const operation = async (type: "edit" | "undo" | "redo", payload: Partial<EditRequest> = {}) => {
     if (!ready) return;
     setSwap(null);
     const generation = loadGen.current;
@@ -584,12 +555,7 @@ export default function App() {
       const tile = (event.target as Element | null)
         ?.closest(".tile-waves")
         ?.closest<HTMLElement>(".cell-tile");
-      if (
-        tile &&
-        [splitPoint.source, splitPoint.source + 1].includes(
-          Number(tile.dataset.cell),
-        )
-      )
+      if (tile && [splitPoint.source, splitPoint.source + 1].includes(Number(tile.dataset.cell)))
         return;
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -644,8 +610,7 @@ export default function App() {
       description: `Swap groups ${source} and ${group}`,
     });
     if (result) {
-      const remap = (n: number) =>
-        n === source ? group : n === group ? source : n;
+      const remap = (n: number) => (n === source ? group : n === group ? source : n);
       setCell(remap);
       setSources((current) => current.map(remap));
       setDest(remap);
@@ -700,14 +665,12 @@ export default function App() {
     const ratio = Math.min(2, devicePixelRatio || 1),
       width = Math.min(innerWidth - 20, Math.max(280, canvas.width / ratio)),
       height = ((width - 2) * canvas.height) / canvas.width + 27,
-      stats = [
-        ...document.querySelectorAll(
-          `.cell-tile[data-cell="${n}"] .caption-inner`,
-        ),
-      ].map((el) => ({
-        label: el.querySelector(".stat-label")?.textContent || "",
-        value: el.querySelector(".stat-value")?.textContent || "",
-      }));
+      stats = [...document.querySelectorAll(`.cell-tile[data-cell="${n}"] .caption-inner`)].map(
+        (el) => ({
+          label: el.querySelector(".stat-label")?.textContent || "",
+          value: el.querySelector(".stat-value")?.textContent || "",
+        }),
+      );
     setCopies((cs) => [
       ...cs,
       {
@@ -730,8 +693,7 @@ export default function App() {
         : document.querySelector<HTMLCanvasElement>(".position-path canvas");
     if (!source) return;
     const ratio = Math.min(2, devicePixelRatio || 1),
-      sourceWidth =
-        kind === "features" ? source.width / ratio : source.clientWidth,
+      sourceWidth = kind === "features" ? source.width / ratio : source.clientWidth,
       width = Math.max(240, Math.min(700, sourceWidth)),
       height = ((width - 2) * source.height) / source.width + 27;
     setCopies((cs) => [
@@ -753,9 +715,7 @@ export default function App() {
     c.toBlob(async (b) => {
       if (!b) return;
       try {
-        await navigator.clipboard.write([
-          new ClipboardItem({ "image/png": b }),
-        ]);
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]);
         setNotice("Cell plot copied to clipboard.");
       } catch {
         download(b, `cell-${cell}.png`);
@@ -810,10 +770,8 @@ export default function App() {
     setBusy(true);
     setMessage("Preparing simulated recordings…");
     try {
-      const quick =
-        new URLSearchParams(location.search).get("demo") === "quick";
-      const stress =
-        new URLSearchParams(location.search).get("demo") === "stress";
+      const quick = new URLSearchParams(location.search).get("demo") === "quick";
+      const stress = new URLSearchParams(location.search).get("demo") === "stress";
       const seed = quick ? 4271 : crypto.getRandomValues(new Uint32Array(1))[0];
       const files = await request(
         "demo",
@@ -840,9 +798,7 @@ export default function App() {
     const files: File[] = [];
     const walk = async (entry: any, prefix = ""): Promise<void> => {
       if (entry.isFile) {
-        const file: File = await new Promise((resolve, reject) =>
-          entry.file(resolve, reject),
-        );
+        const file: File = await new Promise((resolve, reject) => entry.file(resolve, reject));
         Object.defineProperty(file, "webkitRelativePath", {
           value: prefix + file.name,
         });
@@ -854,8 +810,7 @@ export default function App() {
             reader.readEntries(resolve, reject),
           );
           if (!batch.length) break;
-          for (const child of batch)
-            await walk(child, `${prefix}${entry.name}/`);
+          for (const child of batch) await walk(child, `${prefix}${entry.name}/`);
         }
       }
     };
@@ -899,9 +854,7 @@ export default function App() {
       grabMode={grabMode}
       hoverCell={hoverCell}
       dragComparison={dragComparison}
-      comparisonAnalysis={
-        compareAnalysis?.key === comparisonKey ? compareAnalysis.data : null
-      }
+      comparisonAnalysis={compareAnalysis?.key === comparisonKey ? compareAnalysis.data : null}
       onCompare={setDragComparison}
       onHover={setHoverCell}
       onTileHover={(group) => {
@@ -1023,12 +976,7 @@ export default function App() {
         >
           {c.cell !== undefined ? (
             <div className="tile-copy">
-              <img
-                className="plot-copy"
-                src={c.image}
-                alt="Copied cell plots"
-                draggable={false}
-              />
+              <img className="plot-copy" src={c.image} alt="Copied cell plots" draggable={false} />
               <span
                 className="tile-copy-badge"
                 style={{
@@ -1045,12 +993,7 @@ export default function App() {
               />
             </div>
           ) : (
-            <img
-              className="plot-copy"
-              src={c.image}
-              alt="Copied plot"
-              draggable={false}
-            />
+            <img className="plot-copy" src={c.image} alt="Copied plot" draggable={false} />
           )}
         </FloatingWindow>
       ))}

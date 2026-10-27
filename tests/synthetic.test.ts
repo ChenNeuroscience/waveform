@@ -14,12 +14,8 @@ it("generated files share an acquisition clock and support exact random-access b
   expect(Math.abs(n - 18000)).toBeLessThan(800);
   expect(source.size).toBe(offset + n * 216 + 10);
   expect(marker.size).toBeLessThan(1024); // No multi-GB fake waveform Blob is retained.
-  const a = new Uint8Array(
-    await source.slice(offset + 43, offset + 216 * 7 + 17).arrayBuffer(),
-  );
-  const b = new Uint8Array(
-    await source.slice(offset, offset + 216 * 9).arrayBuffer(),
-  );
+  const a = new Uint8Array(await source.slice(offset + 43, offset + 216 * 7 + 17).arrayBuffer());
+  const b = new Uint8Array(await source.slice(offset, offset + 216 * 9).arrayBuffer());
   expect(a).toEqual(b.subarray(43, 216 * 7 + 17));
   expect(await source.slice(-10).text()).toBe("\r\ndata_end");
   const cut = files.find((f) => f.name === "demo_box-a_1.cut")!;
@@ -46,9 +42,7 @@ it("generated files share an acquisition clock and support exact random-access b
   try {
     new Uint8Array(w.memory.buffer, p, b.length).set(b);
     w.engine_push(engine, p, b.length);
-    const times = [
-      ...new Uint32Array(w.memory.buffer, w.engine_times(engine), 9),
-    ];
+    const times = [...new Uint32Array(w.memory.buffer, w.engine_times(engine), 9)];
     // Poisson spike times on the 96 kHz clock, starting in the first seconds.
     expect(times).toEqual([...times].sort((x, y) => x - y));
     expect(times[8]).toBeLessThan(96000 * 5);

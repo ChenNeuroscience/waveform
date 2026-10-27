@@ -1,8 +1,6 @@
 import { readFile, open } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
-const module = await WebAssembly.compile(
-  await readFile("public/wasm/waveform_core.wasm"),
-);
+const module = await WebAssembly.compile(await readFile("public/wasm/waveform_core.wasm"));
 const w = (await WebAssembly.instantiate(module, {})).exports;
 const file = process.argv[2];
 let n = 9_000_000,
@@ -31,17 +29,11 @@ for (let first = 0; first < n; first += chunk) {
   const count = Math.min(chunk, n - first),
     len = count * 216;
   if (handle) {
-    const { bytesRead } = await handle.read(
-      bytes,
-      0,
-      len,
-      offset + first * 216,
-    );
+    const { bytesRead } = await handle.read(bytes, 0, len, offset + first * 216);
     if (bytesRead !== len) throw new Error("Short read");
   } else
     for (let i = 0; i < count; i++)
-      for (let c = 0; c < 4; c++)
-        bytes.writeUInt32BE((first + i) * 16, i * 216 + c * 54);
+      for (let c = 0; c < 4; c++) bytes.writeUInt32BE((first + i) * 16, i * 216 + c * 54);
   new Uint8Array(w.memory.buffer, ptr, len).set(bytes.subarray(0, len));
   w.engine_push(e, ptr, len);
 }

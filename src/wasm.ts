@@ -89,9 +89,7 @@ type Args<N extends number, A extends number[] = []> = A["length"] extends N
   ? A
   : Args<N, [...A, number]>;
 export type Core = { memory: WebAssembly.Memory } & {
-  readonly [K in keyof typeof EXPORTS]: (
-    ...args: Args<(typeof EXPORTS)[K]>
-  ) => number;
+  readonly [K in keyof typeof EXPORTS]: (...args: Args<(typeof EXPORTS)[K]>) => number;
 };
 export function copyU8(w: Core, p: number, n: number) {
   return new Uint8Array(w.memory.buffer, p, n).slice();
@@ -105,11 +103,7 @@ export function copyU32(w: Core, p: number, n: number) {
 export function copyF32(w: Core, p: number, n: number) {
   return new Float32Array(w.memory.buffer, p, n).slice();
 }
-export function withU16<T>(
-  w: Core,
-  values: number[],
-  f: (p: number, n: number) => T,
-): T {
+export function withU16<T>(w: Core, values: number[], f: (p: number, n: number) => T): T {
   const a = new Uint16Array(values),
     p = w.alloc_bytes(a.byteLength);
   try {
@@ -119,11 +113,7 @@ export function withU16<T>(
     w.free_bytes(p, a.byteLength);
   }
 }
-export function withF32<T>(
-  w: Core,
-  values: number[],
-  f: (p: number, n: number) => T,
-): T {
+export function withF32<T>(w: Core, values: number[], f: (p: number, n: number) => T): T {
   const a = new Float32Array(values),
     p = w.alloc_bytes(a.byteLength);
   try {
@@ -146,9 +136,7 @@ export async function streamFile(
   try {
     for (let first = 0; first < length; first += chunk) {
       const n = Math.min(chunk, length - first),
-        bytes = new Uint8Array(
-          await file.slice(offset + first, offset + first + n).arrayBuffer(),
-        );
+        bytes = new Uint8Array(await file.slice(offset + first, offset + first + n).arrayBuffer());
       if (bytes.length !== n) throw new Error("Truncated file read.");
       new Uint8Array(w.memory.buffer, p, n).set(bytes);
       consume(p, n, first);

@@ -6,14 +6,9 @@ import { resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { decodeCut as readCut } from "../tests/wasm";
-test("user sample: three trials and sixteen tetrodes load without cuts", async ({
-  page,
-}) => {
+test("user sample: three trials and sixteen tetrodes load without cuts", async ({ page }) => {
   const dir = process.env.WAVEFORM_SAMPLE_DIR;
-  test.skip(
-    !dir,
-    "Set WAVEFORM_SAMPLE_DIR for private local sample validation.",
-  );
+  test.skip(!dir, "Set WAVEFORM_SAMPLE_DIR for private local sample validation.");
   test.setTimeout(120000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -21,9 +16,7 @@ test("user sample: three trials and sixteen tetrodes load without cuts", async (
   const files = readdirSync(dir!)
     .filter((f) => /\.(set|pos|\d+)$/.test(f))
     .map((f) => resolve(dir!, f));
-  await page
-    .getByLabel("Import recording files", { exact: true })
-    .setInputFiles(files);
+  await page.getByLabel("Import recording files", { exact: true }).setInputFiles(files);
   await ready(page, 60000);
   await expect(
     page
@@ -61,25 +54,17 @@ test("user sample: three trials and sixteen tetrodes load without cuts", async (
   await page.mouse.move(box.x + 10, box.y + 120, { steps: 5 });
   await page.mouse.move(box.x + 10, box.y + 10, { steps: 5 });
   await page.mouse.up();
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeEnabled();
-  await expect(
-    page.getByRole("button", { name: "Select cell 1", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Select cell 1", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Undo", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Select cell 1", exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Select cell 1", exact: true })).toHaveCount(0);
   await page.screenshot({
     path: "test-results/real-recording.png",
     fullPage: true,
   });
   expect(errors).toEqual([]);
 });
-test("nine million spikes and 100 cells: import, merge, undo and export", async ({
-  page,
-}) => {
+test("nine million spikes and 100 cells: import, merge, undo and export", async ({ page }) => {
   const dir = process.env.WAVEFORM_STRESS_DIR;
   test.skip(
     !dir || !existsSync(resolve(dir, "stress.1")),
@@ -103,17 +88,10 @@ test("nine million spikes and 100 cells: import, merge, undo and export", async 
   await page
     .locator('.cell-tile[data-cell="1"] .tile-waves')
     .dragTo(page.locator('.cell-tile[data-cell="2"] .tile-waves'));
-  await expect(
-    page.getByRole("button", { name: "Select cell 2", exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Select cell 2", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Select cell 1", exact: true }),
-  ).toBeVisible();
-  const [d] = await Promise.all([
-    page.waitForEvent("download"),
-    exportCut(page),
-  ]);
+  await expect(page.getByRole("button", { name: "Select cell 1", exact: true })).toBeVisible();
+  const [d] = await Promise.all([page.waitForEvent("download"), exportCut(page)]);
   expect(d.suggestedFilename()).toBe("stress_1.cut");
   const exported = await readCut(
     new File([await readFile((await d.path())!)], "stress_1.cut"),

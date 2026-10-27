@@ -21,9 +21,7 @@ async function demo(page: Page) {
     .click();
   await ready(page);
 }
-test("browser back/forward restores only trial, tetrode and cut choices", async ({
-  page,
-}) => {
+test("browser back/forward restores only trial, tetrode and cut choices", async ({ page }) => {
   await demo(page);
   const url = page.url(),
     initial = await selection(page),
@@ -39,9 +37,7 @@ test("browser back/forward restores only trial, tetrode and cut choices", async 
   const other = await selection(page);
   expect(other.trialId).not.toBe(initial.trialId);
   expect(other.tetNum).toBe(2);
-  await page
-    .getByRole("button", { name: "demo_box-b tetrode 2", exact: true })
-    .click();
+  await page.getByRole("button", { name: "demo_box-b tetrode 2", exact: true }).click();
   await ready(page);
   expect((await selection(page)).cutId).toBe("");
   await page.getByRole("button", { name: "02", exact: true }).click();
@@ -82,13 +78,9 @@ test("browser back/forward restores only trial, tetrode and cut choices", async 
   expect(await selection(page)).toEqual(other);
   await page.goForward();
   await ready(page);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeEnabled();
 });
-test("browser back cancels a split preview before restoring the recording", async ({
-  page,
-}) => {
+test("browser back cancels a split preview before restoring the recording", async ({ page }) => {
   await demo(page);
   const first = await selection(page);
   await page.getByRole("button", { name: "02", exact: true }).click();
@@ -103,7 +95,5 @@ test("browser back cancels a split preview before restoring the recording", asyn
   await expect(page.locator(".split-pair")).toHaveCount(0);
   await page.goForward();
   await ready(page);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
 });

@@ -1,14 +1,6 @@
 /** Fit data units uniformly on both axes, leaving unused canvas space around them. */
-export function fitGrid(
-  width: number,
-  height: number,
-  columns: number,
-  rows: number,
-) {
-  const unit = Math.max(
-    0,
-    Math.min(width / Math.max(1, columns), height / Math.max(1, rows)),
-  );
+export function fitGrid(width: number, height: number, columns: number, rows: number) {
+  const unit = Math.max(0, Math.min(width / Math.max(1, columns), height / Math.max(1, rows)));
   return {
     x: (width - columns * unit) / 2,
     y: (height - rows * unit) / 2,
@@ -40,9 +32,7 @@ export const waveY = (value: number) => 0.5 - ((value / 128) * WAVE_GAIN) / 2;
 export function wavePoint(x: number, y: number) {
   const wx = Math.min(0.99999, Math.max(0, x)) * 4,
     channel = Math.min(3, Math.floor(wx)),
-    sample = Math.round(
-      ((wx - channel - WAVE_MARGIN) / WAVE_SPAN) * (WAVE_SAMPLES - 1),
-    ),
+    sample = Math.round(((wx - channel - WAVE_MARGIN) / WAVE_SPAN) * (WAVE_SAMPLES - 1)),
     threshold = Math.round(((0.5 - y) * 2 * 128) / WAVE_GAIN);
   return {
     channel,

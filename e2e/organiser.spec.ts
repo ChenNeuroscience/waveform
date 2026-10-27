@@ -24,44 +24,33 @@ async function fixture(
     ]),
   });
   await page.goto("/?demo=quick");
-  await page
-    .getByLabel("Import recording files", { exact: true })
-    .setInputFiles([
-      ...extras,
-      tet(1),
-      tet(2),
-      tet(3),
-      {
-        name: "trial_1.cut",
-        mimeType: "text/plain",
-        buffer: Buffer.from("Exact_cut_for: trial spikes: 6\n1 1 2 2 3 3\n"),
-      },
-      {
-        name: "trial.clu.1",
-        mimeType: "text/plain",
-        buffer: Buffer.from("4\n2\n2\n3\n3\n4\n4\n"),
-      },
-      {
-        name: "trial_2.cut",
-        mimeType: "text/plain",
-        buffer: Buffer.from("Exact_cut_for: trial spikes: 6\n2 2 2 2 2 2\n"),
-      },
-    ]);
+  await page.getByLabel("Import recording files", { exact: true }).setInputFiles([
+    ...extras,
+    tet(1),
+    tet(2),
+    tet(3),
+    {
+      name: "trial_1.cut",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Exact_cut_for: trial spikes: 6\n1 1 2 2 3 3\n"),
+    },
+    {
+      name: "trial.clu.1",
+      mimeType: "text/plain",
+      buffer: Buffer.from("4\n2\n2\n3\n3\n4\n4\n"),
+    },
+    {
+      name: "trial_2.cut",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Exact_cut_for: trial spikes: 6\n2 2 2 2 2 2\n"),
+    },
+  ]);
   await ready(page);
 }
-const cut = (page: Page, name: string) =>
-  page.getByRole("button", { name, exact: true });
+const cut = (page: Page, name: string) => page.getByRole("button", { name, exact: true });
 async function assignments(page: Page) {
-  const [d] = await Promise.all([
-    page.waitForEvent("download"),
-    exportCut(page),
-  ]);
-  return [
-    ...(await decodeCut(
-      new File([await readFile((await d.path())!)], "trial_1.cut"),
-      6,
-    )),
-  ];
+  const [d] = await Promise.all([page.waitForEvent("download"), exportCut(page)]);
+  return [...(await decodeCut(new File([await readFile((await d.path())!)], "trial_1.cut"), 6))];
 }
 test("cut files remain inline when collapsed; edits create independently navigable local cuts with their histories", async ({
   page,
@@ -69,8 +58,7 @@ test("cut files remain inline when collapsed; edits create independently navigab
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await fixture(page);
-  const group = (n: number) =>
-    page.locator(`.tetrode-file-block[data-tetrode="${n}"]`);
+  const group = (n: number) => page.locator(`.tetrode-file-block[data-tetrode="${n}"]`);
   for (const n of [1, 2]) {
     const buttons = await group(n).getByRole("button").all();
     const boxes = await Promise.all(buttons.map((b) => b.boundingBox()));
@@ -136,19 +124,12 @@ test("cut files remain inline when collapsed; edits create independently navigab
   });
   expect(dragged.prevented).toBe(false);
   expect(dragged.names).toEqual(["trial_1 edited.cut"]);
-  expect(dragged.url).toMatch(
-    /^application\/octet-stream:trial_1 edited.cut:blob:/,
-  );
-  const url = dragged.url.slice(
-    "application/octet-stream:trial_1 edited.cut:".length,
-  );
-  const exported = await page.evaluate(
-    async (url) => await (await fetch(url)).text(),
-    url,
-  );
-  expect([
-    ...(await decodeCut(new File([exported], "trial_1.cut"), 6)),
-  ]).toEqual([1, 1, 2, 2, 3, 3]);
+  expect(dragged.url).toMatch(/^application\/octet-stream:trial_1 edited.cut:blob:/);
+  const url = dragged.url.slice("application/octet-stream:trial_1 edited.cut:".length);
+  const exported = await page.evaluate(async (url) => await (await fetch(url)).text(), url);
+  expect([...(await decodeCut(new File([exported], "trial_1.cut"), 6))]).toEqual([
+    1, 1, 2, 2, 3, 3,
+  ]);
   await expect(created).toHaveClass(/active/);
   await expect(cut(page, "Undo")).toBeDisabled();
   expect(await assignments(page)).toEqual([0, 0, 0, 0, 0, 0]);
@@ -168,15 +149,9 @@ test("original favicon and compact tile corners; extra filter, time controls and
   page,
 }) => {
   await fixture(page);
-  await expect(
-    page.getByRole("textbox", { name: "Find cell", exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole("slider", { name: "Time window start", exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole("slider", { name: "Time window end", exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Find cell", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("slider", { name: "Time window start", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("slider", { name: "Time window end", exact: true })).toHaveCount(0);
   await expect(page.locator(".wave-channel-names")).toHaveCount(0);
   const icon = await page.locator("link[rel=icon]").getAttribute("href");
   const response = await page.request.get(new URL(icon!, page.url()).href);
@@ -189,12 +164,7 @@ test("original favicon and compact tile corners; extra filter, time controls and
   expect(row.width).toBe(waves.width + plots.width + 3);
   expect(badge.x + badge.width).toBeLessThanOrEqual(row.x + row.width);
   expect(badge.x).toBeLessThan(plots.x + plots.width);
-  for (const name of [
-    "Spatial rate",
-    "Head direction",
-    "Speed",
-    "Autocorrelation",
-  ])
+  for (const name of ["Spatial rate", "Head direction", "Speed", "Autocorrelation"])
     await cut(page, name).click({ modifiers: ["Shift"] });
   const frame = await tile.locator(".tile-waves").evaluate((el) => ({
     w: Number((el as HTMLElement).dataset.plotWidth),
@@ -245,42 +215,29 @@ test("trial rows keep the current tetrode and cut history; clock/speed summaries
     },
   ]);
   await expect(page.locator(".other-files")).toHaveText("2 other files");
-  await expect(page.locator(".other-files")).toHaveAttribute(
-    "title",
-    /trial.eeg\ntrial.fet.1/,
-  );
-  await expect(
-    page.getByRole("status").filter({ hasText: /skipped/ }),
-  ).toHaveCount(0);
+  await expect(page.locator(".other-files")).toHaveAttribute("title", /trial.eeg\ntrial.fet.1/);
+  await expect(page.getByRole("status").filter({ hasText: /skipped/ })).toHaveCount(0);
   await page.locator(".desktop-toolbar").hover();
   await expect(page.locator(".position-info")).toBeVisible();
-  await expect(page.locator(".position-time")).toHaveText(
-    "16:07–16:2821 min 5 sec",
-  );
+  await expect(page.locator(".position-time")).toHaveText("16:07–16:2821 min 5 sec");
   await page.locator(".position-pane").hover();
   await expect(page.locator(".position-info")).toBeVisible();
-  const histogram = (await page
-      .locator(".position-speed canvas")
-      .boundingBox())!,
+  const histogram = (await page.locator(".position-speed canvas").boundingBox())!,
     axis = (await page.locator(".speed-axis-limit").boundingBox())!,
     pane = (await page.locator(".position-pane").boundingBox())!;
   expect(histogram.x).toBe(pane.x + 4);
   expect(
-    await page
-      .locator(".speed-axis-limit")
-      .evaluate((el) => getComputedStyle(el).borderWidth),
+    await page.locator(".speed-axis-limit").evaluate((el) => getComputedStyle(el).borderWidth),
   ).toBe("0px");
   expect(axis.y).toBe(histogram.y + histogram.height);
-  const axisPixels = await page
-    .locator(".position-speed canvas")
-    .evaluate((el) => {
-      const c = el as HTMLCanvasElement,
-        ctx = c.getContext("2d")!;
-      return {
-        horizontal: [...ctx.getImageData(10, c.height - 1, 1, 1).data],
-        vertical: [...ctx.getImageData(0, Math.floor(c.height / 2), 1, 1).data],
-      };
-    });
+  const axisPixels = await page.locator(".position-speed canvas").evaluate((el) => {
+    const c = el as HTMLCanvasElement,
+      ctx = c.getContext("2d")!;
+    return {
+      horizontal: [...ctx.getImageData(10, c.height - 1, 1, 1).data],
+      vertical: [...ctx.getImageData(0, Math.floor(c.height / 2), 1, 1).data],
+    };
+  });
   expect(axisPixels.vertical[0]).toBe(255);
   expect(axisPixels.vertical[1]).toBe(0);
   expect(axisPixels.vertical[2]).toBe(0);
@@ -290,25 +247,23 @@ test("trial rows keep the current tetrode and cut history; clock/speed summaries
   await cut(page, "02").click();
   await adjacentSwap(page, 2, 1);
   await expect(cut(page, "~_2 edited.cut")).toHaveClass(/active/);
-  await page
-    .getByLabel("Import recording files", { exact: true })
-    .setInputFiles([
-      {
-        name: "other.2",
-        mimeType: "application/octet-stream",
-        buffer: Buffer.concat([
-          Buffer.from(
-            "num_spikes 6\nnum_chans 4\nsamples_per_spike 50\ntimebase 96000 hz\nduration 10\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start",
-          ),
-          Buffer.alloc(6 * 216),
-        ]),
-      },
-      {
-        name: "other.eeg",
-        mimeType: "application/octet-stream",
-        buffer: Buffer.from("skipped"),
-      },
-    ]);
+  await page.getByLabel("Import recording files", { exact: true }).setInputFiles([
+    {
+      name: "other.2",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.concat([
+        Buffer.from(
+          "num_spikes 6\nnum_chans 4\nsamples_per_spike 50\ntimebase 96000 hz\nduration 10\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start",
+        ),
+        Buffer.alloc(6 * 216),
+      ]),
+    },
+    {
+      name: "other.eeg",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from("skipped"),
+    },
+  ]);
   const other = page
       .locator(".trial-block")
       .filter({ has: page.locator('.trial-name[title="other"]') }),

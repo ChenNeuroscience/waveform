@@ -5,11 +5,7 @@ export function readPreference<T>(name: string | null, fallback: T): T {
   try {
     const value = JSON.parse(localStorage.getItem(prefix + name) || "null");
     if (value === null) return fallback;
-    if (
-      typeof fallback === "object" &&
-      fallback !== null &&
-      !Array.isArray(fallback)
-    ) {
+    if (typeof fallback === "object" && fallback !== null && !Array.isArray(fallback)) {
       return Object.fromEntries(
         Object.entries(fallback).map(([key, defaultValue]) => [
           key,
@@ -20,8 +16,7 @@ export function readPreference<T>(name: string | null, fallback: T): T {
         ]),
       ) as T;
     }
-    return typeof value === typeof fallback &&
-      (typeof value !== "number" || Number.isFinite(value))
+    return typeof value === typeof fallback && (typeof value !== "number" || Number.isFinite(value))
       ? value
       : fallback;
   } catch {
@@ -51,11 +46,7 @@ export const defaultLayout: PaneLayout = {
   files: 200,
   features: 300,
 };
-export function fitPaneLayout(
-  layout: PaneLayout,
-  width: number,
-  height: number,
-): PaneLayout {
+export function fitPaneLayout(layout: PaneLayout, width: number, height: number): PaneLayout {
   const h = Math.max(352, height),
     clamp = (v: number, min: number, max: number) =>
       Math.max(min, Math.min(max, Number.isFinite(v) ? v : min));
@@ -73,11 +64,7 @@ export interface WindowLayout {
   width: number;
   height: number;
 }
-export function fitWindowLayout(
-  layout: WindowLayout,
-  w: number,
-  h: number,
-): WindowLayout {
+export function fitWindowLayout(layout: WindowLayout, w: number, h: number): WindowLayout {
   const width = Math.min(Math.max(240, layout.width), w),
     height = Math.min(Math.max(100, layout.height), Math.max(100, h - 20));
   return {

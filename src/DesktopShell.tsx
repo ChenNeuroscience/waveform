@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { useEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
 import {
   FolderOpen,
   Folder,
@@ -70,12 +64,7 @@ interface Props {
   onHover: (n: number | null) => void;
   onTileHover: (n: number | null) => void;
   onMerge: (a: number, b: number) => void;
-  onWaveSplit: (
-    cell: number,
-    channel: number,
-    sample: number,
-    threshold: number,
-  ) => void;
+  onWaveSplit: (cell: number, channel: number, sample: number, threshold: number) => void;
   onPopOut: (cell: number, x?: number, y?: number) => void;
   onPopPlot: (kind: "path" | "features", x: number, y: number) => void;
   ready: boolean;
@@ -146,8 +135,7 @@ export function DesktopShell(p: Props) {
   const pathCell = p.dragComparison?.source ?? p.hoverCell,
     primary = p.analysis?.cell === pathCell ? p.analysis : null,
     secondary =
-      p.dragComparison?.target != null &&
-      p.comparisonAnalysis?.cell === p.dragComparison.target
+      p.dragComparison?.target != null && p.comparisonAnalysis?.cell === p.dragComparison.target
         ? p.comparisonAnalysis
         : null,
     // Stable unless the overlaid analyses change, so unrelated renders (hover,
@@ -164,23 +152,16 @@ export function DesktopShell(p: Props) {
       [primary, secondary],
     );
   const ready = p.ready,
-    numbers = [
-      ...new Set(p.trials.flatMap((t) => t.tetrodes.map((t) => t.number))),
-    ].sort((a, b) => a - b);
-  const dragSplit = (
-    e: React.PointerEvent,
-    part: "horizontal" | "files" | "position",
-  ) => {
+    numbers = [...new Set(p.trials.flatMap((t) => t.tetrodes.map((t) => t.number)))].sort(
+      (a, b) => a - b,
+    );
+  const dragSplit = (e: React.PointerEvent, part: "horizontal" | "files" | "position") => {
     e.currentTarget.setPointerCapture(e.pointerId);
     const move = (ev: PointerEvent) => {
       if (part === "horizontal") {
         const b = root.current!.getBoundingClientRect();
         setLayout((old) =>
-          fitPaneLayout(
-            { ...old, left: ev.clientX - b.left },
-            b.width,
-            left.current!.clientHeight,
-          ),
+          fitPaneLayout({ ...old, left: ev.clientX - b.left }, b.width, left.current!.clientHeight),
         );
       } else {
         const b = left.current!.getBoundingClientRect();
@@ -247,11 +228,7 @@ export function DesktopShell(p: Props) {
       />
       {p.trials.length > 0 ? (
         <>
-          <div
-            className="desktop-toolbar"
-            role="toolbar"
-            aria-label="Waveform tools"
-          >
+          <div className="desktop-toolbar" role="toolbar" aria-label="Waveform tools">
             <button
               title="Open files [Ctrl/Cmd O]"
               aria-label="Browse files"
@@ -313,17 +290,11 @@ export function DesktopShell(p: Props) {
             >
               <List size={17} />
             </button>
-            <button
-              title="Settings"
-              aria-label="Settings"
-              onClick={() => p.onPanel("settings")}
-            >
+            <button title="Settings" aria-label="Settings" onClick={() => p.onPanel("settings")}>
               <Settings2 size={17} />
             </button>
             <span className="tool-separator" />
-            {(
-              ["waveforms", "spatial", "direction", "speed", "ac"] as PlotMode[]
-            ).map((m) => (
+            {(["waveforms", "spatial", "direction", "speed", "ac"] as PlotMode[]).map((m) => (
               <button
                 key={m}
                 className={`plot-toggle ${p.shown[m] ? "checked" : ""}`}
@@ -359,15 +330,10 @@ export function DesktopShell(p: Props) {
                 }
               </button>
             ))}
-            <div
-              className="toolbar-status"
-              role="group"
-              aria-label="Recording details"
-            >
+            <div className="toolbar-status" role="group" aria-label="Recording details">
               {p.data && (
                 <span>
-                  Spikes: <b>{p.data.n.toLocaleString()}</b> ·{" "}
-                  {timing.durationText}
+                  Spikes: <b>{p.data.n.toLocaleString()}</b> · {timing.durationText}
                   {p.data.waveSlots < p.data.n && (
                     <strong
                       className="toolbar-warning"
@@ -414,9 +380,7 @@ export function DesktopShell(p: Props) {
                       key={n}
                       className={n === p.tetNum ? "active" : ""}
                       aria-label={String(n).padStart(2, "0")}
-                      disabled={
-                        !p.trial?.tetrodes.find((t) => t.number === n)?.file
-                      }
+                      disabled={!p.trial?.tetrodes.find((t) => t.number === n)?.file}
                       onClick={() => p.onTet(n)}
                     >
                       {n}
@@ -432,10 +396,7 @@ export function DesktopShell(p: Props) {
                       aria-label={`${t.name} ${t.tetrodes.length}`}
                       onClick={() => p.onTrial(t)}
                       onKeyDown={(e) => {
-                        if (
-                          e.target === e.currentTarget &&
-                          (e.key === "Enter" || e.key === " ")
-                        ) {
+                        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
                           e.preventDefault();
                           e.stopPropagation();
                           p.onTrial(t);
@@ -447,12 +408,8 @@ export function DesktopShell(p: Props) {
                         <span className="trial-name" title={t.folder || t.name}>
                           <b>Trial '{t.name}'</b>
                         </span>
-                        <span className={`file-tag ${t.set ? "" : "missing"}`}>
-                          ~.set
-                        </span>
-                        <span className={`file-tag ${t.pos ? "" : "missing"}`}>
-                          ~.pos
-                        </span>
+                        <span className={`file-tag ${t.set ? "" : "missing"}`}>~.set</span>
+                        <span className={`file-tag ${t.pos ? "" : "missing"}`}>~.pos</span>
                         {!!t.otherFiles?.length && (
                           <span
                             className="other-files"
@@ -476,9 +433,7 @@ export function DesktopShell(p: Props) {
                                 title={e.file.name}
                                 aria-label={`${t.name} tetrode ${e.number}`}
                                 className={
-                                  t.id === p.trial?.id &&
-                                  e.number === p.tetNum &&
-                                  !p.cutId
+                                  t.id === p.trial?.id && e.number === p.tetNum && !p.cutId
                                     ? "active"
                                     : ""
                                 }
@@ -496,18 +451,14 @@ export function DesktopShell(p: Props) {
                                 title={`${c.name}${c.local ? " (modified cut)" : ""}`}
                                 data-local={c.local ? "true" : undefined}
                                 data-export-ready={
-                                  p.cutDownloads.entries.has(
-                                    cutDownloadKey(e, c),
-                                  )
+                                  p.cutDownloads.entries.has(cutDownloadKey(e, c))
                                     ? "true"
                                     : "false"
                                 }
                                 draggable
                                 onMouseEnter={() => p.onPrepareCut(t, e, c)}
                                 onPointerDown={() => p.onPrepareCut(t, e, c)}
-                                onDragStart={(event) =>
-                                  p.onCutDrag(event, t, e, c)
-                                }
+                                onDragStart={(event) => p.onCutDrag(event, t, e, c)}
                                 aria-label={c.name.replace(t.name, "~")}
                                 className={`cut-file ${c.local ? "local-cut" : ""} ${t.id === p.trial?.id && e.number === p.tetNum && p.cutId === c.id ? "active" : ""}`}
                                 onClick={(event) => {
@@ -551,26 +502,17 @@ export function DesktopShell(p: Props) {
                             speedAlignment="left"
                             compact
                           />
-                          <small className="speed-axis-limit">
-                            {p.settings.speedMax} cm/s max
-                          </small>
+                          <small className="speed-axis-limit">{p.settings.speedMax} cm/s max</small>
                         </div>
                       </div>
                       <div
                         className="position-path"
                         data-cell={primary?.cell}
                         data-cells={pathLayers.map((a) => a.cell).join(",")}
-                        data-spikes={pathLayers.reduce(
-                          (n, a) => n + a.spikes.length / 2,
-                          0,
-                        )}
-                        data-source-spikes={
-                          primary?.spikes.length ? primary.spikes.length / 2 : 0
-                        }
+                        data-spikes={pathLayers.reduce((n, a) => n + a.spikes.length / 2, 0)}
+                        data-source-spikes={primary?.spikes.length ? primary.spikes.length / 2 : 0}
                         data-target-spikes={
-                          secondary?.spikes.length
-                            ? secondary.spikes.length / 2
-                            : 0
+                          secondary?.spikes.length ? secondary.spikes.length / 2 : 0
                         }
                         onPointerDownCapture={(e) => {
                           if (p.grabMode && e.button === 0) {
@@ -580,10 +522,7 @@ export function DesktopShell(p: Props) {
                           }
                         }}
                       >
-                        <PathPlot
-                          trajectory={p.trajectory}
-                          layers={pathLayers}
-                        />
+                        <PathPlot trajectory={p.trajectory} layers={pathLayers} />
                       </div>
                     </>
                   ) : (
@@ -681,9 +620,7 @@ export function DesktopShell(p: Props) {
                   data={p.data}
                   settings={p.settings}
                   pos={p.trial?.pos}
-                  posKey={
-                    p.trial?.pos ? `${p.trial.id}|${fileId(p.trial.pos)}` : ""
-                  }
+                  posKey={p.trial?.pos ? `${p.trial.id}|${fileId(p.trial.pos)}` : ""}
                   selected={p.cell}
                   shown={p.shown}
                   onSelect={p.onCell}
@@ -700,9 +637,7 @@ export function DesktopShell(p: Props) {
                   onPopOut={p.onPopOut}
                 />
               ) : (
-                <div className="pane-placeholder">
-                  {p.message || "Loading recording…"}
-                </div>
+                <div className="pane-placeholder">{p.message || "Loading recording…"}</div>
               )}
             </section>
           </div>
@@ -710,12 +645,8 @@ export function DesktopShell(p: Props) {
       ) : (
         <main className="start-screen">
           <div className="start-drop">
-            <h1 className={p.drag ? "drop-title-wobble" : ""}>
-              drag &amp; drop files here
-            </h1>
-            <p className="recognised-types">
-              the following types of data files are recognised:
-            </p>
+            <h1 className={p.drag ? "drop-title-wobble" : ""}>drag &amp; drop files here</h1>
+            <p className="recognised-types">the following types of data files are recognised:</p>
             <div className="supported-formats">
               <code>.set</code>
               <code>.pos</code>
@@ -729,16 +660,11 @@ export function DesktopShell(p: Props) {
               Other file types will be ignored.
             </p>
             <p className="start-actions">
-              <button
-                aria-label="Browse files"
-                onClick={() => p.fileInput.current?.click()}
-              >
+              <button aria-label="Browse files" onClick={() => p.fileInput.current?.click()}>
                 Choose files
               </button>
               <span> · </span>
-              <button onClick={() => p.folderInput.current?.click()}>
-                Choose folder
-              </button>
+              <button onClick={() => p.folderInput.current?.click()}>Choose folder</button>
               <span> · </span>
               <a
                 href="https://github.com/ChenNeuroscience/waveform"
@@ -778,8 +704,7 @@ export function DesktopShell(p: Props) {
                 <small>
                   {new URLSearchParams(location.search).get("demo") === "quick"
                     ? "Quick preview"
-                    : new URLSearchParams(location.search).get("demo") ===
-                        "stress"
+                    : new URLSearchParams(location.search).get("demo") === "stress"
                       ? "9 million spikes · 100 cells · stress test"
                       : "~50k spikes/tetrode · 20 minutes · 5 trials"}
                 </small>

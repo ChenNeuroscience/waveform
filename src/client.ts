@@ -1,10 +1,5 @@
 import type { ViewData, ViewMessage } from "./types";
-import {
-  Superseded,
-  type Payload,
-  type RequestType,
-  type Result,
-} from "./protocol";
+import { Superseded, type Payload, type RequestType, type Result } from "./protocol";
 import wasmUrl from "./generated/waveform_core.wasm?url";
 const worker = new Worker(new URL("./engine.worker.ts", import.meta.url), {
   type: "module",
@@ -19,8 +14,7 @@ let id = 0,
   // only when the recording changes.
   population: Pick<ViewData, "key" | "features" | "times"> | null = null;
 function complete(data: any) {
-  if (!data || typeof data !== "object" || !("labels" in data && "key" in data))
-    return data;
+  if (!data || typeof data !== "object" || !("labels" in data && "key" in data)) return data;
   const view = data as ViewMessage;
   if (view.features && view.times)
     population = { key: view.key, features: view.features, times: view.times };
@@ -48,13 +42,11 @@ worker.onmessage = (e) => {
     return;
   }
   pending.delete(m.id);
-  if (m.error)
-    p.reject(m.superseded ? new Superseded(m.error) : new Error(m.error));
+  if (m.error) p.reject(m.superseded ? new Superseded(m.error) : new Error(m.error));
   else p.resolve(complete(m.data));
 };
 worker.onerror = (e) => {
-  for (const p of pending.values())
-    p.reject(new Error(e.message || "Data worker failed."));
+  for (const p of pending.values()) p.reject(new Error(e.message || "Data worker failed."));
   pending.clear();
 };
 export function request<K extends RequestType>(

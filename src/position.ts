@@ -28,9 +28,7 @@ export async function parsePosition(
   const n = parseInt(h.num_pos_samples),
     ppm = parseFloat(h.pixels_per_metre),
     rate = parseFloat(h.sample_rate),
-    tb = parseFloat(
-      h.timestamp_timebase || h.timebase || h.sample_rate || "50",
-    );
+    tb = parseFloat(h.timestamp_timebase || h.timebase || h.sample_rate || "50");
   const minX = parseFloat(h.window_min_x || "0"),
     minY = parseFloat(h.window_min_y || "0"),
     maxX = parseFloat(h.window_max_x),
@@ -64,17 +62,9 @@ export function trajectory(w: Core, pos: Position): Trajectory {
   const size = w.alloc_bytes(8);
   try {
     w.position_size(pos.handle, size);
-    const [arenaWidth, arenaHeight] = new Float32Array(
-      w.memory.buffer,
-      size,
-      2,
-    );
+    const [arenaWidth, arenaHeight] = new Float32Array(w.memory.buffer, size, 2);
     return {
-      path: copyF32(
-        w,
-        w.position_path(pos.handle),
-        w.position_path_len(pos.handle),
-      ),
+      path: copyF32(w, w.position_path(pos.handle), w.position_path_len(pos.handle)),
       arenaWidth,
       arenaHeight,
     };
@@ -104,19 +94,9 @@ export function analyse(
     s.speedBin,
     s.speedMax,
   );
-  const meta = new Float64Array(
-    w.memory.buffer,
-    w.engine_analysis_meta(engine),
-    8,
-  ).slice();
-  const array = (
-    name: "spatial" | "spikes" | "direction" | "speed" | "speed_dwell" | "ac",
-  ) =>
-    copyF32(
-      w,
-      w[`engine_analysis_${name}`](engine),
-      w[`engine_analysis_${name}_len`](engine),
-    );
+  const meta = new Float64Array(w.memory.buffer, w.engine_analysis_meta(engine), 8).slice();
+  const array = (name: "spatial" | "spikes" | "direction" | "speed" | "speed_dwell" | "ac") =>
+    copyF32(w, w[`engine_analysis_${name}`](engine), w[`engine_analysis_${name}_len`](engine));
   return {
     cell: meta[0],
     arenaWidth: meta[6],

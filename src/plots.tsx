@@ -84,20 +84,11 @@ export function Clusters({
       for (let i = 0; i < data.labels.length; i++) {
         const label = data.labels[i],
           time = data.times[i] * timeScale;
-        if (
-          (isolate && label !== selected) ||
-          time < range[0] ||
-          time > range[1]
-        )
-          continue;
+        if ((isolate && label !== selected) || time < range[0] || time > range[1]) continue;
         const x =
-            origin.x +
-            frame.x +
-            (0.035 + (0.93 * data.features[i * 4 + ax]) / 255) * frame.width,
+            origin.x + frame.x + (0.035 + (0.93 * data.features[i * 4 + ax]) / 255) * frame.width,
           y =
-            origin.y +
-            frame.y +
-            (0.965 - (0.93 * data.features[i * 4 + ay]) / 255) * frame.height,
+            origin.y + frame.y + (0.965 - (0.93 * data.features[i * 4 + ay]) / 255) * frame.height,
           distance = (p[0] - x) ** 2 + (p[1] - y) ** 2;
         if (distance < best || (distance === best && label === selected)) {
           group = label;
@@ -130,8 +121,7 @@ export function Clusters({
           Math.min(
             6,
             Math.floor(
-              (wrapper.current!.parentElement!.clientWidth + FEATURE_GAP) /
-                FEATURE_STRIDE,
+              (wrapper.current!.parentElement!.clientWidth + FEATURE_GAP) / FEATURE_STRIDE,
             ),
           ),
         ),
@@ -148,34 +138,15 @@ export function Clusters({
   }, []);
   useEffect(() => {
     try {
-      if (!gpu.current && canvas.current)
-        gpu.current = new ClusterGPU(canvas.current);
-      gpu.current?.draw(
-        data,
-        settings,
-        selected,
-        isolate,
-        range,
-        axes,
-        columns,
-      );
+      if (!gpu.current && canvas.current) gpu.current = new ClusterGPU(canvas.current);
+      gpu.current?.draw(data, settings, selected, isolate, range, axes, columns);
     } catch (e) {
       setError(String(e));
     }
     // Only point size and drift affect the points; other settings (rate maps,
     // analysis windows) must not redraw the whole population.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only point size and drift among the settings affect the drawn points
-  }, [
-    data,
-    settings.pointSize,
-    settings.drift,
-    selected,
-    isolate,
-    range,
-    axes,
-    version,
-    columns,
-  ]);
+  }, [data, settings.pointSize, settings.drift, selected, isolate, range, axes, version, columns]);
   const grid = featureGridSize(columns);
   const point = (e: React.PointerEvent) => {
     const b = e.currentTarget.getBoundingClientRect();
@@ -190,9 +161,7 @@ export function Clusters({
       onPointerDown={(e) => {
         if (e.button !== 0 || (tool !== "lasso" && tool !== "brush")) return;
         const p = point(e),
-          plot =
-            Math.floor(p[1] / FEATURE_STRIDE) * columns +
-            Math.floor(p[0] / FEATURE_STRIDE);
+          plot = Math.floor(p[1] / FEATURE_STRIDE) * columns + Math.floor(p[0] / FEATURE_STRIDE);
         if (
           p[0] >= grid.width ||
           p[1] >= grid.height ||
@@ -225,29 +194,13 @@ export function Clusters({
           points = d.points;
         if (tool !== "brush" && points.length < 3) return;
         const poly = points.flatMap(([x, y]) => [
-          Math.max(
-            0,
-            Math.min(
-              1,
-              ((x - origin.x - frame.x) / frame.width - 0.035) / 0.93,
-            ),
-          ),
-          Math.max(
-            0,
-            Math.min(
-              1,
-              1 - ((y - origin.y - frame.y) / frame.height - 0.035) / 0.93,
-            ),
-          ),
+          Math.max(0, Math.min(1, ((x - origin.x - frame.x) / frame.width - 0.035) / 0.93)),
+          Math.max(0, Math.min(1, 1 - ((y - origin.y - frame.y) / frame.height - 0.035) / 0.93)),
         ]);
         onPolygon(poly, axes[d.plot][0], axes[d.plot][1]);
       }}
     >
-      <canvas
-        ref={canvas}
-        style={grid}
-        aria-label="Six WebGL2 spike feature projections"
-      />
+      <canvas ref={canvas} style={grid} aria-label="Six WebGL2 spike feature projections" />
       <div
         className="projection-labels"
         style={{
@@ -339,16 +292,8 @@ export function AnalysisPlot({
         ctx.fillStyle = "#ffffff";
         if (!positionSpeed) ctx.fillRect(0, 0, w, h);
         if (compact && (mode === "ac" || mode === "speed")) {
-          const box = fitGrid(
-            w,
-            h,
-            mode === "ac" ? 128 : 24,
-            mode === "ac" ? 32 : 80,
-          );
-          ctx.translate(
-            mode === "speed" && speedAlignment === "left" ? 0 : box.x,
-            box.y,
-          );
+          const box = fitGrid(w, h, mode === "ac" ? 128 : 24, mode === "ac" ? 32 : 80);
+          ctx.translate(mode === "speed" && speedAlignment === "left" ? 0 : box.x, box.y);
           ctx.scale(box.unit, box.unit);
           w = mode === "ac" ? 128 : 24;
           h = mode === "ac" ? 32 : 80;
@@ -398,12 +343,7 @@ export function AnalysisPlot({
           ctx.fill();
           ctx.stroke();
         } else if (compact) {
-          const a =
-              mode === "ac"
-                ? data.ac
-                : positionSpeed
-                  ? data.speedDwell
-                  : data.speed,
+          const a = mode === "ac" ? data.ac : positionSpeed ? data.speedDwell : data.speed,
             max = Math.max(...a, 1);
           if (mode === "ac") {
             ctx.strokeStyle = "#f00000";
@@ -435,12 +375,7 @@ export function AnalysisPlot({
             }
           }
         } else {
-          const a =
-              mode === "ac"
-                ? data.ac
-                : positionSpeed
-                  ? data.speedDwell
-                  : data.speed,
+          const a = mode === "ac" ? data.ac : positionSpeed ? data.speedDwell : data.speed,
             max = Math.max(...a, 1),
             bw = (w - 36) / a.length;
           ctx.strokeStyle = "#888";
@@ -457,11 +392,7 @@ export function AnalysisPlot({
           ctx.fillStyle = "#555";
           ctx.font = "10px monospace";
           ctx.fillText("0", 25, h - 7);
-          ctx.fillText(
-            mode === "ac" ? "lag →" : "speed (cm/s) →",
-            w / 2 - 25,
-            h - 7,
-          );
+          ctx.fillText(mode === "ac" ? "lag →" : "speed (cm/s) →", w / 2 - 25, h - 7);
         }
       };
     draw();
@@ -486,13 +417,7 @@ export interface SpikeLayer {
 /** The trajectory with spike overlays. The path is drawn once into an offscreen
  * canvas (per trajectory and size); layer changes, such as hovering a tile, only
  * copy it back and draw the spike dots. One visible canvas keeps copies simple. */
-export function PathPlot({
-  trajectory,
-  layers,
-}: {
-  trajectory: Trajectory;
-  layers: SpikeLayer[];
-}) {
+export function PathPlot({ trajectory, layers }: { trajectory: Trajectory; layers: SpikeLayer[] }) {
   const canvas = useRef<HTMLCanvasElement>(null),
     base = useRef<{
       key: string;
@@ -515,10 +440,7 @@ export function PathPlot({
         // Hidden or not yet laid out: nothing to draw (and a 0×0 offscreen
         // canvas cannot be copied with drawImage).
         if (!w || !h) return;
-        if (
-          base.current?.key !== key ||
-          base.current.trajectory !== trajectory
-        ) {
+        if (base.current?.key !== key || base.current.trajectory !== trajectory) {
           const image = document.createElement("canvas");
           image.width = w * dpr;
           image.height = h * dpr;
@@ -560,7 +482,5 @@ export function PathPlot({
     ro.observe(c);
     return () => ro.disconnect();
   }, [trajectory, layers]);
-  return (
-    <canvas ref={canvas} className="analysis-canvas" aria-label="path plot" />
-  );
+  return <canvas ref={canvas} className="analysis-canvas" aria-label="path plot" />;
 }

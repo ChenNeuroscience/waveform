@@ -1,13 +1,7 @@
 /** The worker request protocol: each request type's payload and result, shared by
  * the client (client.ts) and the worker (engine.worker.ts) so a renamed request or
  * field fails to compile rather than at runtime. */
-import type {
-  AnalysisData,
-  Settings,
-  Trajectory,
-  ViewData,
-  ViewMessage,
-} from "./types";
+import type { AnalysisData, Settings, Trajectory, ViewData, ViewMessage } from "./types";
 
 /** A request dropped because a newer one replaced it (another recording, a newer
  * analysis batch, an outdated export). Callers ignore these rather than report them. */
@@ -60,10 +54,7 @@ export interface PositionRequest {
 
 /** [payload, result] for each request type. */
 export interface Requests {
-  demo: [
-    { options: { quick?: boolean; stress?: boolean; seed: number } },
-    File[],
-  ];
+  demo: [{ options: { quick?: boolean; stress?: boolean; seed: number } }, File[]];
   load: [
     {
       file: File;
@@ -83,14 +74,10 @@ export interface Requests {
   export: [Session & { format: "cut" | "clu"; trial: string }, Blob];
   /** Export a cut that may not be the active one (by its session key). */
   export_cut: [Session & { revision?: number; trial: string }, Blob];
-  wave_batch: [
-    { asset: string; first: number; count: number },
-    { waves: Uint8Array },
-  ];
+  wave_batch: [{ asset: string; first: number; count: number }, { waves: Uint8Array }];
   trajectory: [PositionRequest, Trajectory | null];
   analysis: [
-    Partial<Session> &
-      PositionRequest & { cell: number; summary?: boolean; batch?: string },
+    Partial<Session> & PositionRequest & { cell: number; summary?: boolean; batch?: string },
     AnalysisData,
   ];
 }

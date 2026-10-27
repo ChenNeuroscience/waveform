@@ -7,11 +7,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     watch: {
-      ignored: [
-        "**/core/target/**",
-        "**/test-results/**",
-        "**/playwright-report/**",
-      ],
+      ignored: ["**/core/target/**", "**/test-results/**", "**/playwright-report/**"],
     },
   },
   worker: { format: "es" },

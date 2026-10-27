@@ -92,8 +92,7 @@ export function useShortcuts(context: ShortcutContext) {
       if (cmd || e.altKey) return;
       if (c.swap) {
         e.preventDefault();
-        if (e.key === "Escape" || (e.key.toLowerCase() === "s" && !e.repeat))
-          c.cancelSwap();
+        if (e.key === "Escape" || (e.key.toLowerCase() === "s" && !e.repeat)) c.cancelSwap();
         return;
       }
       const hovered = c.hoveredTile.current;
@@ -113,17 +112,14 @@ export function useShortcuts(context: ShortcutContext) {
       if (e.key === "p") c.update("density", !c.settings.density);
       const group = c.ready && !e.repeat ? c.hoverCell : null;
       if (e.key.toLowerCase() === "e" && group !== null) c.selectDest(group);
-      if (e.key.toLowerCase() === "f" && group !== null)
-        c.selectSource(group, e.shiftKey);
+      if (e.key.toLowerCase() === "f" && group !== null) c.selectSource(group, e.shiftKey);
       if (e.key === "l") c.setTool("lasso");
       if (e.key === "Enter" && c.ready) {
         e.preventDefault();
         c.newDestination();
       }
-      if (/^[0-9]$/.test(e.key))
-        c.chooseTet(Math.floor(c.tetNum / 10) * 10 + +e.key);
-      if (e.key === "o")
-        c.chooseTet(c.tetNum >= 10 ? c.tetNum - 10 : c.tetNum + 10);
+      if (/^[0-9]$/.test(e.key)) c.chooseTet(Math.floor(c.tetNum / 10) * 10 + +e.key);
+      if (e.key === "o") c.chooseTet(c.tetNum >= 10 ? c.tetNum - 10 : c.tetNum + 10);
       const mode = plotKeys[e.key.toLowerCase()];
       if (mode) c.showPlot(mode, e.shiftKey);
       if (c.trial && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {

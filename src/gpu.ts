@@ -1,10 +1,6 @@
 import { groupPalette } from "./palette";
 import type { Settings, ViewData } from "./types";
-import {
-  projectionFrame,
-  featurePlotOrigin,
-  FEATURE_PLOT,
-} from "./plot-geometry";
+import { projectionFrame, featurePlotOrigin, FEATURE_PLOT } from "./plot-geometry";
 const vertex = `#version 300 es
 precision highp float;
 layout(location=0) in vec4 amplitudes;
@@ -91,18 +87,13 @@ export class ClusterGPU {
       preserveDrawingBuffer: true,
     });
     if (!gl)
-      throw new Error(
-        "WebGL2 is unavailable. Enable hardware acceleration and reopen this page.",
-      );
+      throw new Error("WebGL2 is unavailable. Enable hardware acceleration and reopen this page.");
     this.gl = gl;
     this.p = program(gl, vertex, fragment);
     this.empty = gl.createVertexArray()!;
     // Mean-time drift needs additive blending into a float target; where that is
     // unsupported, drift is not drawn and points keep their cell colours.
-    if (
-      gl.getExtension("EXT_color_buffer_float") &&
-      gl.getExtension("EXT_float_blend")
-    ) {
+    if (gl.getExtension("EXT_color_buffer_float") && gl.getExtension("EXT_float_blend")) {
       this.sums = program(gl, vertex, accumulate);
       this.resolve = program(gl, resolveVertex, resolveFragment);
     }
@@ -249,13 +240,7 @@ export class ClusterGPU {
       gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RG32F, w, h);
       const fbo = gl.createFramebuffer()!;
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.framebufferTexture2D(
-        gl.FRAMEBUFFER,
-        gl.COLOR_ATTACHMENT0,
-        gl.TEXTURE_2D,
-        texture,
-        0,
-      );
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
       this.target = { texture, fbo, w, h };
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.target.fbo);

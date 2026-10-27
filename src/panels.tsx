@@ -72,8 +72,7 @@ function HistoryPanel({ c }: { c: PanelContext }) {
   return (
     <>
       <p className="muted">
-        Each cut keeps its own undo and redo history when you switch trials or
-        tetrodes.
+        Each cut keeps its own undo and redo history when you switch trials or tetrodes.
       </p>
       <div className="history-actions">
         <button
@@ -155,11 +154,7 @@ export function SettingsPanel({
         unit="px"
         onChange={(v) => update("pointSize", v)}
       />
-      <Toggle
-        label="Isolate selected cell"
-        checked={isolate}
-        onChange={onIsolate}
-      />
+      <Toggle label="Isolate selected cell" checked={isolate} onChange={onIsolate} />
       <Toggle
         label="Colour by recording time"
         checked={settings.drift}
@@ -272,8 +267,7 @@ export function SettingsPanel({
         Renumber cells by spike count
       </button>
       <p className="muted">
-        Largest cell becomes 1. Noise remains 0. This changes the cut and can be
-        undone.
+        Largest cell becomes 1. Noise remains 0. This changes the cut and can be undone.
       </p>
     </>
   );
@@ -282,8 +276,7 @@ export function HelpPanel() {
   return (
     <>
       <p className="muted">
-        Import a selection of LTX files or a folder to begin. Add cut files at
-        any time.
+        Import a selection of LTX files or a folder to begin. Add cut files at any time.
       </p>
       <h3>Navigation</h3>
       <Shortcut keys="0–9" text="Jump to tetrode (ones digit)" />
@@ -293,28 +286,16 @@ export function HelpPanel() {
       <Shortcut keys="K / ?" text="Keyboard shortcuts" />
       <h3>Cut editing</h3>
       <Shortcut keys="Drag tile" text="Merge higher cell number into lower" />
-      <Shortcut
-        keys="Right drag"
-        text="Adjust a split preview from either waveform tile"
-      />
+      <Shortcut keys="Right drag" text="Adjust a split preview from either waveform tile" />
       <Shortcut keys="L" text="Lasso source spikes into destination" />
-      <Shortcut
-        keys="E / F"
-        text="Group under pointer as destination / source"
-      />
-      <Shortcut
-        keys="Shift F"
-        text="Toggle the group under the pointer in the source set"
-      />
+      <Shortcut keys="E / F" text="Group under pointer as destination / source" />
+      <Shortcut keys="Shift F" text="Toggle the group under the pointer in the source set" />
       <Shortcut
         keys="Left / right click chip"
         text="Choose destination / source; Shift-right toggles a source"
       />
       <Shortcut keys="Enter / +" text="First unused destination group" />
-      <Shortcut
-        keys="Click tile"
-        text="Bring the group's feature points to the front"
-      />
+      <Shortcut keys="Click tile" text="Bring the group's feature points to the front" />
       <Shortcut
         keys="S"
         text="Hover a tile, then click or type the group to swap with; Escape cancels"
@@ -324,28 +305,15 @@ export function HelpPanel() {
       <Shortcut keys="⌘ / Ctrl S" text="Export .cut" />
       <Shortcut keys="⌘ / Ctrl C" text="Copy active cell plots" />
       <h3>Views</h3>
-      <Shortcut
-        keys="Hover tile"
-        text="Show cell spikes on the position path"
-      />
-      <Shortcut
-        keys="Hold Space"
-        text="Click a plot to copy it; click a window to close it"
-      />
+      <Shortcut keys="Hover tile" text="Show cell spikes on the position path" />
+      <Shortcut keys="Hold Space" text="Click a plot to copy it; click a window to close it" />
       <Shortcut
         keys="W / R / C / V / T"
         text="Show only waves / spatial / direction / speed / autocorrelation; Shift adds or removes"
       />
-      <Shortcut
-        keys="D / P"
-        text="Time colours (features and waveforms) / waveform density"
-      />
+      <Shortcut keys="D / P" text="Time colours (features and waveforms) / waveform density" />
       <Shortcut keys="Esc" text="Close panel, return to paint" />
-      <a
-        href="https://github.com/ChenNeuroscience/waveform"
-        target="_blank"
-        rel="noreferrer"
-      >
+      <a href="https://github.com/ChenNeuroscience/waveform" target="_blank" rel="noreferrer">
         Original project & source ↗
       </a>
     </>
@@ -400,11 +368,7 @@ function Toggle({
   return (
     <label className="toggle-field">
       <span>{label}</span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-      />
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
     </label>
   );
 }
@@ -416,11 +380,7 @@ function Shortcut({ keys, text }: { keys: string; text: string }) {
     </div>
   );
 }
-export function HeadersPanel({
-  headers,
-}: {
-  headers: Record<string, Record<string, string>>;
-}) {
+export function HeadersPanel({ headers }: { headers: Record<string, Record<string, string>> }) {
   const [filter, setFilter] = useState("");
   return (
     <>
@@ -438,9 +398,7 @@ export function HeadersPanel({
           <h3>{file}</h3>
           <dl className="headers-list">
             {Object.entries(h)
-              .filter(([k, v]) =>
-                `${k} ${v}`.toLowerCase().includes(filter.toLowerCase()),
-              )
+              .filter(([k, v]) => `${k} ${v}`.toLowerCase().includes(filter.toLowerCase()))
               .map(([k, v]) => (
                 <div key={k}>
                   <dt>{k}</dt>

@@ -133,10 +133,8 @@ export interface AnalysisData {
   refractory: number;
   rate: number;
 }
-export const fileId = (f: File) =>
-  `${f.webkitRelativePath || f.name}:${f.size}:${f.lastModified}`;
+export const fileId = (f: File) => `${f.webkitRelativePath || f.name}:${f.size}:${f.lastModified}`;
 export { groupTextColor } from "./palette";
 import { groupRgb8 } from "./palette";
-export const cellRgb = (cell: number) =>
-  groupRgb8(cell).map((value) => value / 255);
+export const cellRgb = (cell: number) => groupRgb8(cell).map((value) => value / 255);
 export const color = (cell: number) => `rgb(${groupRgb8(cell).join(",")})`;

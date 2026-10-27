@@ -4,18 +4,13 @@ import { EXPORTS } from "../src/wasm";
 
 it("the typed export table matches the compiled Wasm module", async () => {
   const module = await WebAssembly.compile(
-      await readFile(
-        new URL("../public/wasm/waveform_core.wasm", import.meta.url),
-      ),
+      await readFile(new URL("../public/wasm/waveform_core.wasm", import.meta.url)),
     ),
     instance = await WebAssembly.instantiate(module, {}),
     actual = Object.fromEntries(
       WebAssembly.Module.exports(module)
         .filter((e) => e.kind === "function")
-        .map((e) => [
-          e.name,
-          (instance.exports[e.name] as (...args: number[]) => number).length,
-        ]),
+        .map((e) => [e.name, (instance.exports[e.name] as (...args: number[]) => number).length]),
     );
   expect(actual).toEqual(EXPORTS);
 });

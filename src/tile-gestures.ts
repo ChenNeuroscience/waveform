@@ -1,9 +1,4 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { wavePoint } from "./plot-geometry";
 export interface DragComparison {
   source: number;
@@ -111,9 +106,7 @@ export function useTileGestures({
       };
     };
     const locate = () => {
-      const hit = document
-          .elementFromPoint(px, py)
-          ?.closest<HTMLElement>(".cell-tile"),
+      const hit = document.elementFromPoint(px, py)?.closest<HTMLElement>(".cell-tile"),
         valid = hit?.closest(".tile-wall") === wall,
         n = valid ? Number(hit!.dataset.cell) : null,
         next = n !== cell ? n : null;
@@ -183,9 +176,7 @@ export function useTileGestures({
     };
     const restore = () => {
       if (!image) return;
-      const source = wall.querySelector<HTMLElement>(
-          `.cell-tile[data-cell="${cell}"]`,
-        ),
+      const source = wall.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`),
         bounds = source?.getBoundingClientRect(),
         viewport = wall.getBoundingClientRect();
       let home = bounds;

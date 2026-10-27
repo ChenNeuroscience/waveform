@@ -5,10 +5,7 @@ export interface RecordingSelection {
   cutId: string;
 }
 const same = (a: RecordingSelection | null, b: RecordingSelection) =>
-  !!a &&
-  a.trialId === b.trialId &&
-  a.tetNum === b.tetNum &&
-  a.cutId === b.cutId;
+  !!a && a.trialId === b.trialId && a.tetNum === b.tetNum && a.cutId === b.cutId;
 function savedSelection(value: any): RecordingSelection | null {
   return value &&
     typeof value.trialId === "string" &&
@@ -21,10 +18,7 @@ function savedSelection(value: any): RecordingSelection | null {
 /** Only recording choices enter browser history. Edits refresh the current entry. */
 export function useRecordingHistory(
   selection: RecordingSelection | null,
-  restore: (
-    selection: RecordingSelection,
-    current: () => boolean,
-  ) => void | Promise<void>,
+  restore: (selection: RecordingSelection, current: () => boolean) => void | Promise<void>,
 ) {
   const workspace = useRef(crypto.randomUUID()),
     selected = useRef(selection),
@@ -34,14 +28,11 @@ export function useRecordingHistory(
   selected.current = selection;
   callback.current = restore;
   const entry = (next: RecordingSelection) => ({
-    ...(history.state && typeof history.state === "object"
-      ? history.state
-      : {}),
+    ...(history.state && typeof history.state === "object" ? history.state : {}),
     waveform: { workspace: workspace.current, selection: next },
   });
   useEffect(() => {
-    if (selection && !restoring.current)
-      history.replaceState(entry(selection), "");
+    if (selection && !restoring.current) history.replaceState(entry(selection), "");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- replace the history entry only when the selection's identity changes
   }, [selection?.trialId, selection?.tetNum, selection?.cutId]);
   useEffect(() => {
@@ -67,10 +58,7 @@ export function useRecordingHistory(
       history.replaceState(entry(next), "");
       return;
     }
-    if (
-      selected.current &&
-      history.state?.waveform?.workspace !== workspace.current
-    )
+    if (selected.current && history.state?.waveform?.workspace !== workspace.current)
       history.replaceState(entry(selected.current), "");
     history.pushState(entry(next), "");
   };

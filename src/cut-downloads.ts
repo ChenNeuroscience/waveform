@@ -10,11 +10,7 @@ export const cutDownloadKey = (tet: Tetrode, cut: CutFile) =>
 export class CutDownloads {
   entries = new Map<string, PreparedCut>();
   pending = new Map<string, Promise<PreparedCut>>();
-  async prepare(
-    trial: Trial,
-    tet: Tetrode,
-    cut: CutFile,
-  ): Promise<PreparedCut> {
+  async prepare(trial: Trial, tet: Tetrode, cut: CutFile): Promise<PreparedCut> {
     const key = cutDownloadKey(tet, cut),
       cached = this.entries.get(key);
     if (cached) {
@@ -55,10 +51,7 @@ import { fileId as fileIdentity } from "./types";
 export function writeCutDrag(data: DataTransfer, cut: PreparedCut) {
   data.effectAllowed = "copy";
   data.items.add(cut.file);
-  data.setData(
-    "DownloadURL",
-    `application/octet-stream:${cut.file.name}:${cut.url}`,
-  );
+  data.setData("DownloadURL", `application/octet-stream:${cut.file.name}:${cut.url}`);
   data.setData("text/uri-list", cut.url);
   data.setData("application/x-waveform-cut", cut.file.name);
 }

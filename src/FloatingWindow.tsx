@@ -39,18 +39,13 @@ export function FloatingWindow({
     [z, setZ] = useState(() => ++top),
     position = fitWindowLayout(geometry, innerWidth, innerHeight);
   useEffect(() => {
-    const clamp = () =>
-      setGeometry((g) => fitWindowLayout(g, innerWidth, innerHeight));
+    const clamp = () => setGeometry((g) => fitWindowLayout(g, innerWidth, innerHeight));
     clamp();
     const observer = new ResizeObserver(() => {
       const b = root.current!.getBoundingClientRect();
       setGeometry((g) =>
         Math.abs(g.width - b.width) > 0.5 || Math.abs(g.height - b.height) > 0.5
-          ? fitWindowLayout(
-              { ...g, width: b.width, height: b.height },
-              innerWidth,
-              innerHeight,
-            )
+          ? fitWindowLayout({ ...g, width: b.width, height: b.height }, innerWidth, innerHeight)
           : g,
       );
     });
@@ -66,10 +61,7 @@ export function FloatingWindow({
     onFocus?.();
   };
   const drag = (e: React.PointerEvent) => {
-    if (
-      e.button !== 0 ||
-      (e.target as HTMLElement).closest("button,input,select,textarea,a")
-    )
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button,input,select,textarea,a"))
       return;
     e.preventDefault();
     const origin = {
@@ -118,10 +110,7 @@ export function FloatingWindow({
         } else focus();
       }}
     >
-      <header
-        className="floating-titlebar"
-        onPointerDown={comparison ? undefined : drag}
-      >
+      <header className="floating-titlebar" onPointerDown={comparison ? undefined : drag}>
         <span>{title}</span>
         <button aria-label="Close panel" title="Close" onClick={onClose}>
           <X size={13} />
