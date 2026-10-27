@@ -6,14 +6,14 @@ const glsl = (n: number) => (Number.isInteger(n) ? `${n}.` : `${n}`);
 // Raw 216-byte records live in an R8I texture array, 9 records per 1944-byte row and
 // 2048 rows per layer (within WebGL2's guaranteed size limits). The shader reads the
 // file's own layout, so no CPU transposition is needed. One layer is one batch.
-const RECORD = 216,
-  PER_ROW = 9,
-  ROW_BYTES = PER_ROW * RECORD,
-  LAYER_ROWS = 2048,
-  PER_LAYER = PER_ROW * LAYER_ROWS,
-  ORDER_WIDTH = 4096,
-  SPIKES_PER_FRAME = 1 << 17,
-  CACHE_BYTES = 192 << 20;
+const RECORD = 216;
+const PER_ROW = 9;
+const ROW_BYTES = PER_ROW * RECORD;
+const LAYER_ROWS = 2048;
+const PER_LAYER = PER_ROW * LAYER_ROWS;
+const ORDER_WIDTH = 4096;
+const SPIKES_PER_FRAME = 1 << 17;
+const CACHE_BYTES = 192 << 20;
 const lineVertex = `#version 300 es
 precision highp float;precision highp int;precision highp isampler2DArray;precision highp usampler2D;
 uniform isampler2DArray waves;uniform usampler2D order;uniform int base;uniform int channel;uniform float timeScale;
@@ -33,9 +33,9 @@ const quadVertex = `#version 300 es
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0.,1.);}`;
 // Per-pixel (line count, summed spike time) becomes flag colour (any count), the
 // original density palette, or drift: mean spike time, red (start) to green (end).
-const FLAG = 0,
-  DENSITY = 1,
-  DRIFT = 2;
+const FLAG = 0;
+const DENSITY = 1;
+const DRIFT = 2;
 const quadFragment = `#version 300 es
 precision highp float;uniform sampler2D counts;uniform vec2 origin;uniform vec3 rgb;uniform float unit;uniform float total;uniform int mode;out vec4 c;
 vec3 palette(float count){return vec3(count>.5?(count>.75?4.-4.*count:4.*count-2.):(count>.25?2.-4.*count:4.*count),count<.5?2.*count:2.-2.*count,count);}
@@ -102,8 +102,9 @@ export class WaveGPU {
       depth: false,
       preserveDrawingBuffer: true,
     });
-    if (!gl)
+    if (!gl) {
       throw new Error("WebGL2 is unavailable. Enable hardware acceleration and reopen this page.");
+    }
     this.gl = gl;
     canvas.addEventListener("webglcontextlost", this.lost);
     canvas.addEventListener("webglcontextrestored", this.restored);
@@ -119,9 +120,13 @@ export class WaveGPU {
     // Flag colouring only needs count > 0.
     const float = gl.getExtension("EXT_color_buffer_float");
     this.timed = !!(float && gl.getExtension("EXT_float_blend"));
-    if (this.timed) [this.countFormat, this.unit, this.bytesPerPixel] = [gl.RG32F, 1, 8];
-    else if (float) [this.countFormat, this.unit, this.bytesPerPixel] = [gl.R16F, 1, 2];
-    else [this.countFormat, this.unit, this.bytesPerPixel] = [gl.RGBA8, 1 / 255, 4];
+    if (this.timed) {
+      [this.countFormat, this.unit, this.bytesPerPixel] = [gl.RG32F, 1, 8];
+    } else if (float) {
+      [this.countFormat, this.unit, this.bytesPerPixel] = [gl.R16F, 1, 2];
+    } else {
+      [this.countFormat, this.unit, this.bytesPerPixel] = [gl.RGBA8, 1 / 255, 4];
+    }
   }
   private lost = (e: Event) => {
     e.preventDefault();
@@ -135,16 +140,20 @@ export class WaveGPU {
     this.asset = "";
     this.done = "";
     this.init();
-    if (this.scene) this.update(this.scene);
+    if (this.scene) {
+      this.update(this.scene);
+    }
   };
   update(scene: Scene) {
-    const gl = this.gl,
-      { data } = scene;
+    const gl = this.gl;
+    const { data } = scene;
     this.scene = scene;
-    if (data.key !== this.asset) this.reset(data.key, data.waveSlots);
+    if (data.key !== this.asset) {
+      this.reset(data.key, data.waveSlots);
+    }
     if (data.waveOrder !== this.orderData && this.order) {
-      const rows = Math.max(1, Math.ceil(data.waveSlots / ORDER_WIDTH)),
-        padded = new Uint32Array(rows * ORDER_WIDTH);
+      const rows = Math.max(1, Math.ceil(data.waveSlots / ORDER_WIDTH));
+      const padded = new Uint32Array(rows * ORDER_WIDTH);
       padded.set(data.waveOrder);
       gl.bindTexture(gl.TEXTURE_2D, this.order);
       gl.texSubImage2D(
@@ -160,8 +169,8 @@ export class WaveGPU {
       );
       this.orderData = data.waveOrder;
     }
-    const dpr = Math.min(2, devicePixelRatio || 1),
-      size = `${Math.round(scene.layout.waveWidth * dpr)}x${Math.round(scene.layout.waveHeight * dpr)}`;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const size = `${Math.round(scene.layout.waveWidth * dpr)}x${Math.round(scene.layout.waveHeight * dpr)}`;
     if (size !== this.cacheSize) {
       this.clearCache();
       this.cacheSize = size;
@@ -194,7 +203,9 @@ export class WaveGPU {
     this.asset = asset;
     this.loaded = false;
     const token = ++this.loading;
-    if (!slots) return;
+    if (!slots) {
+      return;
+    }
     const layers = Math.ceil(slots / PER_LAYER);
     this.waves = texture(gl, gl.TEXTURE_2D_ARRAY);
     gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.R8I, ROW_BYTES, LAYER_ROWS, layers);
@@ -208,10 +219,12 @@ export class WaveGPU {
     );
     (async () => {
       for (let layer = 0; layer < layers; layer++) {
-        const first = layer * PER_LAYER,
-          count = Math.min(PER_LAYER, slots - first),
-          bytes = await this.load(asset, first, count);
-        if (token !== this.loading) return;
+        const first = layer * PER_LAYER;
+        const count = Math.min(PER_LAYER, slots - first);
+        const bytes = await this.load(asset, first, count);
+        if (token !== this.loading) {
+          return;
+        }
         const rows = Math.ceil(count / PER_ROW);
         let data = new Int8Array(bytes.buffer, bytes.byteOffset, bytes.length);
         if (data.length < rows * ROW_BYTES) {
@@ -240,7 +253,9 @@ export class WaveGPU {
     })().catch(() => {});
   }
   private clearCache() {
-    for (const entry of this.cache.values()) this.release(entry);
+    for (const entry of this.cache.values()) {
+      this.release(entry);
+    }
     this.cache.clear();
     this.done = "";
   }
@@ -249,8 +264,8 @@ export class WaveGPU {
     this.gl.deleteTexture(entry.texture);
   }
   private key(cell: number) {
-    const { waveStarts: starts, waveHashes: hashes } = this.scene!.data,
-      total = starts[cell + 1] - starts[cell];
+    const { waveStarts: starts, waveHashes: hashes } = this.scene!.data;
+    const total = starts[cell + 1] - starts[cell];
     return total ? `${total}:${hashes[cell * 2]}:${hashes[cell * 2 + 1]}` : null;
   }
   private entry(key: string, total: number, [w, h]: number[]) {
@@ -260,8 +275,8 @@ export class WaveGPU {
       this.cache.set(key, entry);
       return entry;
     }
-    const gl = this.gl,
-      t = texture(gl, gl.TEXTURE_2D);
+    const gl = this.gl;
+    const t = texture(gl, gl.TEXTURE_2D);
     gl.texStorage2D(gl.TEXTURE_2D, 1, this.countFormat, w, h);
     const fbo = gl.createFramebuffer()!;
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
@@ -276,8 +291,12 @@ export class WaveGPU {
   private evict(keep: Set<string>, [w, h]: number[]) {
     const limit = Math.max(keep.size, Math.floor(CACHE_BYTES / (w * h * this.bytesPerPixel)));
     for (const [key, entry] of this.cache) {
-      if (this.cache.size <= limit) break;
-      if (keep.has(key)) continue;
+      if (this.cache.size <= limit) {
+        break;
+      }
+      if (keep.has(key)) {
+        continue;
+      }
       this.release(entry);
       this.cache.delete(key);
     }
@@ -290,16 +309,20 @@ export class WaveGPU {
   }
   /** Render up to SPIKES_PER_FRAME spikes of unfinished visible cells, then composite. */
   private tick() {
-    const gl = this.gl,
-      scene = this.scene;
-    if (!scene || gl.isContextLost()) return;
-    const { cells, layout, data } = scene,
-      dpr = Math.min(2, devicePixelRatio || 1),
-      size = this.cacheSize.split("x").map(Number),
-      keys = cells.map((c) => (this.loaded ? this.key(c) : null));
-    if (!(size[0] > 0 && size[1] > 0)) return;
-    let budget = SPIKES_PER_FRAME,
-      complete = this.loaded || !data.waveSlots;
+    const gl = this.gl;
+    const scene = this.scene;
+    if (!scene || gl.isContextLost()) {
+      return;
+    }
+    const { cells, layout, data } = scene;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const size = this.cacheSize.split("x").map(Number);
+    const keys = cells.map((c) => (this.loaded ? this.key(c) : null));
+    if (!(size[0] > 0 && size[1] > 0)) {
+      return;
+    }
+    let budget = SPIKES_PER_FRAME;
+    let complete = this.loaded || !data.waveSlots;
     if (this.loaded) {
       // Create/touch cache entries before binding samplers: allocating a texture
       // binds it to the active unit, which would displace the order texture.
@@ -324,9 +347,13 @@ export class WaveGPU {
       gl.viewport(0, 0, size[0], size[1]);
       cells.forEach((cell, i) => {
         const entry = entries[i];
-        if (!entry) return;
+        if (!entry) {
+          return;
+        }
         const total = entry.total;
-        if (entry.drawn >= total) return;
+        if (entry.drawn >= total) {
+          return;
+        }
         if (budget > 0) {
           const n = Math.min(budget, total - entry.drawn);
           gl.bindFramebuffer(gl.FRAMEBUFFER, entry.fbo);
@@ -339,7 +366,9 @@ export class WaveGPU {
           entry.drawn += n;
           budget -= n;
         }
-        if (entry.drawn < total) complete = false;
+        if (entry.drawn < total) {
+          complete = false;
+        }
       });
       gl.disable(gl.BLEND);
       this.evict(new Set(keys.filter((k) => k !== null)), size);
@@ -357,14 +386,14 @@ export class WaveGPU {
     gl.uniform1i(u("mode"), scene.drift && this.timed ? DRIFT : scene.density ? DENSITY : FLAG);
     cells.forEach((cell, i) => {
       const entry = keys[i] && this.cache.get(keys[i]);
-      if (!entry) return;
-      const x = Math.round(((i % layout.columns) * layout.tileStride + layout.inset) * dpr),
-        y =
-          this.canvas.height -
-          Math.round(
-            (Math.floor(i / layout.columns) * layout.rowStride + (layout.top || 0)) * dpr,
-          ) -
-          size[1];
+      if (!entry) {
+        return;
+      }
+      const x = Math.round(((i % layout.columns) * layout.tileStride + layout.inset) * dpr);
+      const y =
+        this.canvas.height -
+        Math.round((Math.floor(i / layout.columns) * layout.rowStride + (layout.top || 0)) * dpr) -
+        size[1];
       gl.viewport(x, y, size[0], size[1]);
       gl.bindTexture(gl.TEXTURE_2D, entry.texture);
       gl.uniform2f(u("origin"), x, y);
@@ -374,8 +403,12 @@ export class WaveGPU {
     });
     // While records are still loading, the loader's final tick resumes rendering.
     if (!complete) {
-      if (this.loaded) this.schedule();
-    } else if (this.done !== scene.readyKey) this.onReady((this.done = scene.readyKey));
+      if (this.loaded) {
+        this.schedule();
+      }
+    } else if (this.done !== scene.readyKey) {
+      this.onReady((this.done = scene.readyKey));
+    }
   }
 }
 function texture(gl: WebGL2RenderingContext, target: number) {

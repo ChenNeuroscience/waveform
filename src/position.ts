@@ -14,25 +14,27 @@ export async function parsePosition(
   identity: string,
   base?: Position,
 ): Promise<Position> {
-  if (base)
+  if (base) {
     return {
       handle: w.position_variant(base.handle, s.leds, s.maxSpeed, s.posSmooth),
       identity,
       header: base.header,
     };
+  }
   const { header: h, offset } = parseHeader(
     new Uint8Array(await file.slice(0, 65536).arrayBuffer()),
   );
-  if (h.pos_format !== "t,x1,y1,x2,y2,numpix1,numpix2")
+  if (h.pos_format !== "t,x1,y1,x2,y2,numpix1,numpix2") {
     throw new Error("Unsupported LTX position format.");
-  const n = parseInt(h.num_pos_samples),
-    ppm = parseFloat(h.pixels_per_metre),
-    rate = parseFloat(h.sample_rate),
-    tb = parseFloat(h.timestamp_timebase || h.timebase || h.sample_rate || "50");
-  const minX = parseFloat(h.window_min_x || "0"),
-    minY = parseFloat(h.window_min_y || "0"),
-    maxX = parseFloat(h.window_max_x),
-    maxY = parseFloat(h.window_max_y);
+  }
+  const n = parseInt(h.num_pos_samples);
+  const ppm = parseFloat(h.pixels_per_metre);
+  const rate = parseFloat(h.sample_rate);
+  const tb = parseFloat(h.timestamp_timebase || h.timebase || h.sample_rate || "50");
+  const minX = parseFloat(h.window_min_x || "0");
+  const minY = parseFloat(h.window_min_y || "0");
+  const maxX = parseFloat(h.window_max_x);
+  const maxY = parseFloat(h.window_max_y);
   if (
     !Number.isSafeInteger(n) ||
     n < 0 ||
@@ -42,8 +44,9 @@ export async function parsePosition(
     !(tb > 0) ||
     !(maxX > minX) ||
     !(maxY > minY)
-  )
+  ) {
     throw new Error("Invalid or truncated position file.");
+  }
   const handle = w.position_new(n, ppm, rate, tb, minX, minY, maxX, maxY);
   try {
     w.position_bearing(handle, parseFloat(h.bearing_colour_1 || "0"));

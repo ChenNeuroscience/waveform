@@ -11,8 +11,8 @@ export function SwapPrompt({
   onGroup: (group: number) => void;
   onCancel: () => void;
 }) {
-  const [value, setValue] = useState(""),
-    [error, setError] = useState("");
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
   const source = state.source;
   return (
     <form
@@ -29,10 +29,13 @@ export function SwapPrompt({
       onSubmit={(event) => {
         event.preventDefault();
         const target = Number(value);
-        if (!value.trim() || !Number.isInteger(target) || target < 0 || target >= counts.length)
+        if (!value.trim() || !Number.isInteger(target) || target < 0 || target >= counts.length) {
           setError(`Enter a group number from 0 to ${counts.length - 1}.`);
-        else if (target === source) setError("Choose a different group.");
-        else onGroup(target);
+        } else if (target === source) {
+          setError("Choose a different group.");
+        } else {
+          onGroup(target);
+        }
       }}
     >
       <div className="swap-instructions" role="status">

@@ -52,7 +52,9 @@ export function GroupSelector({
       onContextMenu={(event) => event.preventDefault()}
       onClick={() => onDest(group)}
       onMouseUp={(event) => {
-        if (event.button !== 0) onSource(group, event.shiftKey);
+        if (event.button !== 0) {
+          onSource(group, event.shiftKey);
+        }
       }}
     >
       {group}

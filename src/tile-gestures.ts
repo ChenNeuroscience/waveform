@@ -36,20 +36,20 @@ export function useTileGestures({
   onPopOut: (n: number, x: number, y: number) => void;
   snapshot: (n: number) => string | undefined;
 }) {
-  const [ghost, setGhost] = useState<TileImage | null>(null),
-    [settling, setSettling] = useState<TileImage | null>(null),
-    [dragging, setDragging] = useState<number | null>(null),
-    [target, setTarget] = useState<number | null>(null),
-    [split, setSplit] = useState<{
-      cell: number;
-      x: number;
-      y: number;
-      channel: number;
-      sample: number;
-      threshold: number;
-    } | null>(null),
-    cancel = useRef<() => void>(() => {}),
-    settleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [ghost, setGhost] = useState<TileImage | null>(null);
+  const [settling, setSettling] = useState<TileImage | null>(null);
+  const [dragging, setDragging] = useState<number | null>(null);
+  const [target, setTarget] = useState<number | null>(null);
+  const [split, setSplit] = useState<{
+    cell: number;
+    x: number;
+    y: number;
+    channel: number;
+    sample: number;
+    threshold: number;
+  } | null>(null);
+  const cancel = useRef<() => void>(() => {});
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(
     () => () => {
       cancel.current();
@@ -61,43 +61,51 @@ export function useTileGestures({
   const begin = (event: ReactPointerEvent<HTMLElement>, cell: number) => {
     // While splitting, either button on the two split tiles adjusts the gate.
     const splitting = splitSource !== undefined;
-    if (splitting && ![splitSource, splitSource + 1].includes(cell)) return;
-    if ((event.target as HTMLElement).closest("button,input,select")) return;
+    if (splitting && ![splitSource, splitSource + 1].includes(cell)) {
+      return;
+    }
+    if ((event.target as HTMLElement).closest("button,input,select")) {
+      return;
+    }
     if (grab && !splitting && event.button === 0) {
       event.preventDefault();
       onPopOut(cell, event.clientX, event.clientY);
       return;
     }
-    if (busy || (event.button !== 0 && event.button !== 2)) return;
-    const row = event.currentTarget,
-      rect = row.getBoundingClientRect(),
-      wave = row.querySelector<HTMLElement>(".tile-waves")!,
-      wr = wave.getBoundingClientRect();
+    if (busy || (event.button !== 0 && event.button !== 2)) {
+      return;
+    }
+    const row = event.currentTarget;
+    const rect = row.getBoundingClientRect();
+    const wave = row.querySelector<HTMLElement>(".tile-waves")!;
+    const wr = wave.getBoundingClientRect();
     const gating = splitting || event.button === 2;
-    if (gating && !(event.target as HTMLElement).closest(".tile-waves")) return;
+    if (gating && !(event.target as HTMLElement).closest(".tile-waves")) {
+      return;
+    }
     event.preventDefault();
     cancel.current();
     clearTimeout(settleTimer.current);
     setSettling(null);
-    let moved = false,
-      to: number | null = null,
-      frame = 0,
-      scrollFrame = 0,
-      live = true,
-      px = event.clientX,
-      py = event.clientY,
-      image: string | undefined;
-    const origin = { x: event.clientX, y: event.clientY },
-      wall = row.closest<HTMLElement>(".tile-wall")!,
-      initialScroll = { left: wall.scrollLeft, top: wall.scrollTop },
-      pointerId = event.pointerId,
-      button = event.button;
+    let moved = false;
+    let to: number | null = null;
+    let frame = 0;
+    let scrollFrame = 0;
+    let live = true;
+    let px = event.clientX;
+    let py = event.clientY;
+    let image: string | undefined;
+    const origin = { x: event.clientX, y: event.clientY };
+    const wall = row.closest<HTMLElement>(".tile-wall")!;
+    const initialScroll = { left: wall.scrollLeft, top: wall.scrollTop };
+    const pointerId = event.pointerId;
+    const button = event.button;
     const gate = () => {
-      const x = Math.max(0, Math.min(wr.width - 1, px - wr.left)),
-        plotWidth = Number(wave.dataset.plotWidth) || wr.width,
-        plotHeight = Number(wave.dataset.plotHeight) || rect.height,
-        plotTop = Number(wave.dataset.plotTop) || 0,
-        y = Math.max(0, Math.min(rect.height - 1, py - rect.top));
+      const x = Math.max(0, Math.min(wr.width - 1, px - wr.left));
+      const plotWidth = Number(wave.dataset.plotWidth) || wr.width;
+      const plotHeight = Number(wave.dataset.plotHeight) || rect.height;
+      const plotTop = Number(wave.dataset.plotTop) || 0;
+      const y = Math.max(0, Math.min(rect.height - 1, py - rect.top));
       return {
         cell,
         x,
@@ -106,10 +114,10 @@ export function useTileGestures({
       };
     };
     const locate = () => {
-      const hit = document.elementFromPoint(px, py)?.closest<HTMLElement>(".cell-tile"),
-        valid = hit?.closest(".tile-wall") === wall,
-        n = valid ? Number(hit!.dataset.cell) : null,
-        next = n !== cell ? n : null;
+      const hit = document.elementFromPoint(px, py)?.closest<HTMLElement>(".cell-tile");
+      const valid = hit?.closest(".tile-wall") === wall;
+      const n = valid ? Number(hit!.dataset.cell) : null;
+      const next = n !== cell ? n : null;
       if (next !== to) {
         to = next;
         setTarget(to);
@@ -129,7 +137,9 @@ export function useTileGestures({
       }
     };
     const scroll = () => {
-      if (!live || !moved) return;
+      if (!live || !moved) {
+        return;
+      }
       const b = wall.getBoundingClientRect();
       if (px >= b.left && px <= b.right) {
         const dy = py < b.top + 24 ? -10 : py > b.bottom - 24 ? 10 : 0;
@@ -141,7 +151,9 @@ export function useTileGestures({
       frame = requestAnimationFrame(scroll);
     };
     const move = (e: PointerEvent) => {
-      if (e.pointerId !== pointerId) return;
+      if (e.pointerId !== pointerId) {
+        return;
+      }
       px = e.clientX;
       py = e.clientY;
       if (gating) {
@@ -155,10 +167,14 @@ export function useTileGestures({
         onCompare({ source: cell, target: null });
         frame = requestAnimationFrame(scroll);
       }
-      if (moved) locate();
+      if (moved) {
+        locate();
+      }
     };
     const stop = () => {
-      if (!live) return;
+      if (!live) {
+        return;
+      }
       live = false;
       cancelAnimationFrame(frame);
       cancelAnimationFrame(scrollFrame);
@@ -172,13 +188,17 @@ export function useTileGestures({
       setDragging(null);
       setTarget(null);
       setSplit(null);
-      if (moved) onCompare(null);
+      if (moved) {
+        onCompare(null);
+      }
     };
     const restore = () => {
-      if (!image) return;
-      const source = wall.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`),
-        bounds = source?.getBoundingClientRect(),
-        viewport = wall.getBoundingClientRect();
+      if (!image) {
+        return;
+      }
+      const source = wall.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`);
+      const bounds = source?.getBoundingClientRect();
+      const viewport = wall.getBoundingClientRect();
       let home = bounds;
       if (
         !home ||
@@ -205,28 +225,43 @@ export function useTileGestures({
     const abort = () => {
       const returning = moved && !gating;
       stop();
-      if (returning) restore();
+      if (returning) {
+        restore();
+      }
     };
     const up = (e: PointerEvent) => {
-      if (e.pointerId !== pointerId || e.button !== button) return;
+      if (e.pointerId !== pointerId || e.button !== button) {
+        return;
+      }
       px = e.clientX;
       py = e.clientY;
-      if (moved && !gating) locate(); // Only the actual release target can merge.
-      const last = gating ? gate() : null,
-        merge = moved ? to : null;
+      if (moved && !gating) {
+        locate();
+      } // Only the actual release target can merge.
+      const last = gating ? gate() : null;
+      const merge = moved ? to : null;
       stop();
-      if (last) onSplit(cell, last.channel, last.sample, last.threshold);
-      else if (merge !== null) onMerge(cell, merge);
-      else if (moved) restore();
-      else onSelect(cell);
+      if (last) {
+        onSplit(cell, last.channel, last.sample, last.threshold);
+      } else if (merge !== null) {
+        onMerge(cell, merge);
+      } else if (moved) {
+        restore();
+      } else {
+        onSelect(cell);
+      }
     };
     const escape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") abort();
+      if (e.key === "Escape") {
+        abort();
+      }
     };
     const reposition = () => {
       cancelAnimationFrame(scrollFrame);
       scrollFrame = requestAnimationFrame(() => {
-        if (live && moved) locate();
+        if (live && moved) {
+          locate();
+        }
       });
     };
     cancel.current = stop; // A different recording/layout cancels without a stale image.
@@ -236,7 +271,9 @@ export function useTileGestures({
     window.addEventListener("blur", abort);
     window.addEventListener("keydown", escape);
     window.addEventListener("scroll", reposition, true);
-    if (gating) setSplit(gate());
+    if (gating) {
+      setSplit(gate());
+    }
   };
   return { begin, ghost, settling, dragging, target, split };
 }

@@ -9,20 +9,23 @@ worker.postMessage({
   type: "init",
   url: new URL(wasmUrl, document.baseURI).href,
 });
-let id = 0,
-  // The latest recording's per-spike amplitudes and times, which the worker sends
-  // only when the recording changes.
-  population: Pick<ViewData, "key" | "features" | "times"> | null = null;
+let id = 0;
+// The latest recording's per-spike amplitudes and times, which the worker sends
+// only when the recording changes.
+let population: Pick<ViewData, "key" | "features" | "times"> | null = null;
 function complete(data: any) {
-  if (!data || typeof data !== "object" || !("labels" in data && "key" in data)) return data;
+  if (!data || typeof data !== "object" || !("labels" in data && "key" in data)) {
+    return data;
+  }
   const view = data as ViewMessage;
-  if (view.features && view.times)
+  if (view.features && view.times) {
     population = { key: view.key, features: view.features, times: view.times };
-  else if (population?.key === view.key)
+  } else if (population?.key === view.key) {
     Object.assign(view, {
       features: population.features,
       times: population.times,
     });
+  }
   return view;
 }
 const pending = new Map<
@@ -34,19 +37,26 @@ const pending = new Map<
   }
 >();
 worker.onmessage = (e) => {
-  const m = e.data,
-    p = pending.get(m.id);
-  if (!p) return;
+  const m = e.data;
+  const p = pending.get(m.id);
+  if (!p) {
+    return;
+  }
   if (m.progress !== undefined) {
     p.progress?.(m.progress, m.message);
     return;
   }
   pending.delete(m.id);
-  if (m.error) p.reject(m.superseded ? new Superseded(m.error) : new Error(m.error));
-  else p.resolve(complete(m.data));
+  if (m.error) {
+    p.reject(m.superseded ? new Superseded(m.error) : new Error(m.error));
+  } else {
+    p.resolve(complete(m.data));
+  }
 };
 worker.onerror = (e) => {
-  for (const p of pending.values()) p.reject(new Error(e.message || "Data worker failed."));
+  for (const p of pending.values()) {
+    p.reject(new Error(e.message || "Data worker failed."));
+  }
   pending.clear();
 };
 export function request<K extends RequestType>(

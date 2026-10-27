@@ -11,14 +11,16 @@ export class CutDownloads {
   entries = new Map<string, PreparedCut>();
   pending = new Map<string, Promise<PreparedCut>>();
   async prepare(trial: Trial, tet: Tetrode, cut: CutFile): Promise<PreparedCut> {
-    const key = cutDownloadKey(tet, cut),
-      cached = this.entries.get(key);
+    const key = cutDownloadKey(tet, cut);
+    const cached = this.entries.get(key);
     if (cached) {
       this.entries.delete(key);
       this.entries.set(key, cached);
       return cached;
     }
-    if (this.pending.has(key)) return this.pending.get(key)!;
+    if (this.pending.has(key)) {
+      return this.pending.get(key)!;
+    }
     const promise = (async () => {
       const bytes = cut.local
         ? await request("export_cut", {
@@ -28,9 +30,9 @@ export class CutDownloads {
           })
         : cut.file;
       const file = new File([bytes], cut.name, {
-          type: "application/octet-stream",
-        }),
-        result = { file, url: URL.createObjectURL(file) };
+        type: "application/octet-stream",
+      });
+      const result = { file, url: URL.createObjectURL(file) };
       this.entries.set(key, result);
       while (this.entries.size > 4) {
         const first = this.entries.keys().next().value!;
@@ -43,7 +45,9 @@ export class CutDownloads {
     return promise;
   }
   dispose() {
-    for (const entry of this.entries.values()) URL.revokeObjectURL(entry.url);
+    for (const entry of this.entries.values()) {
+      URL.revokeObjectURL(entry.url);
+    }
     this.entries.clear();
   }
 }

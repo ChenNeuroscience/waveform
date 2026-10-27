@@ -103,17 +103,17 @@ interface Props {
 }
 const FULL_RANGE = [0, 1];
 export function DesktopShell(p: Props) {
-  const root = useRef<HTMLDivElement>(null),
-    left = useRef<HTMLDivElement>(null),
-    [layout, setLayout] = usePreference("panes", defaultLayout);
+  const root = useRef<HTMLDivElement>(null);
+  const left = useRef<HTMLDivElement>(null);
+  const [layout, setLayout] = usePreference("panes", defaultLayout);
   const fitted = fitPaneLayout(
-      layout,
-      root.current?.clientWidth || innerWidth,
-      left.current?.clientHeight || innerHeight - 35,
-    ),
-    split = fitted.left,
-    rows = [fitted.files, fitted.features],
-    timing = experimentTiming(p.data?.headers || {}, p.data?.duration || 0);
+    layout,
+    root.current?.clientWidth || innerWidth,
+    left.current?.clientHeight || innerHeight - 35,
+  );
+  const split = fitted.left;
+  const rows = [fitted.files, fitted.features];
+  const timing = experimentTiming(p.data?.headers || {}, p.data?.duration || 0);
   useEffect(() => {
     const resize = () =>
       setLayout((saved) =>
@@ -132,29 +132,29 @@ export function DesktopShell(p: Props) {
       ?.querySelector<HTMLElement>(".trial-block.selected")
       ?.scrollIntoView({ block: "nearest" });
   }, [p.trial?.id]);
-  const pathCell = p.dragComparison?.source ?? p.hoverCell,
-    primary = p.analysis?.cell === pathCell ? p.analysis : null,
-    secondary =
-      p.dragComparison?.target != null && p.comparisonAnalysis?.cell === p.dragComparison.target
-        ? p.comparisonAnalysis
-        : null,
-    // Stable unless the overlaid analyses change, so unrelated renders (hover,
-    // progress, selection) do not repaint the full-resolution trajectory.
-    pathLayers = useMemo(
-      () =>
-        [primary, secondary]
-          .filter((a): a is AnalysisData => !!a)
-          .map((a) => ({
-            cell: a.cell,
-            spikes: a.spikes,
-            color: color(a.cell),
-          })),
-      [primary, secondary],
-    );
-  const ready = p.ready,
-    numbers = [...new Set(p.trials.flatMap((t) => t.tetrodes.map((t) => t.number)))].sort(
-      (a, b) => a - b,
-    );
+  const pathCell = p.dragComparison?.source ?? p.hoverCell;
+  const primary = p.analysis?.cell === pathCell ? p.analysis : null;
+  const secondary =
+    p.dragComparison?.target != null && p.comparisonAnalysis?.cell === p.dragComparison.target
+      ? p.comparisonAnalysis
+      : null;
+  // Stable unless the overlaid analyses change, so unrelated renders (hover,
+  // progress, selection) do not repaint the full-resolution trajectory.
+  const pathLayers = useMemo(
+    () =>
+      [primary, secondary]
+        .filter((a): a is AnalysisData => !!a)
+        .map((a) => ({
+          cell: a.cell,
+          spikes: a.spikes,
+          color: color(a.cell),
+        })),
+    [primary, secondary],
+  );
+  const ready = p.ready;
+  const numbers = [...new Set(p.trials.flatMap((t) => t.tetrodes.map((t) => t.number)))].sort(
+    (a, b) => a - b,
+  );
   const dragSplit = (e: React.PointerEvent, part: "horizontal" | "files" | "position") => {
     e.currentTarget.setPointerCapture(e.pointerId);
     const move = (ev: PointerEvent) => {
@@ -195,11 +195,14 @@ export function DesktopShell(p: Props) {
         if (
           e.dataTransfer.types.includes("Files") &&
           !e.dataTransfer.types.includes("application/x-waveform-cut")
-        )
+        ) {
           p.onDrag(true);
+        }
       }}
       onDragLeave={(e) => {
-        if (!e.relatedTarget) p.onDrag(false);
+        if (!e.relatedTarget) {
+          p.onDrag(false);
+        }
       }}
       onDrop={p.onDrop}
     >
@@ -210,7 +213,9 @@ export function DesktopShell(p: Props) {
         multiple
         hidden
         onChange={(e) => {
-          if (e.target.files) p.onImport([...e.target.files]);
+          if (e.target.files) {
+            p.onImport([...e.target.files]);
+          }
           e.target.value = "";
         }}
       />
@@ -222,7 +227,9 @@ export function DesktopShell(p: Props) {
         hidden
         {...({ webkitdirectory: "" } as any)}
         onChange={(e) => {
-          if (e.target.files) p.onImport([...e.target.files]);
+          if (e.target.files) {
+            p.onImport([...e.target.files]);
+          }
           e.target.value = "";
         }}
       />

@@ -35,22 +35,22 @@ export function Clusters({
   onPolygon: (p: number[], ax: number, ay: number) => void;
   onPick: (group: number, source: boolean, toggle: boolean) => void;
 }) {
-  const wrapper = useRef<HTMLDivElement>(null),
-    [columns, setColumns] = useState(2),
-    canvas = useRef<HTMLCanvasElement>(null),
-    gpu = useRef<ClusterGPU | null>(null),
-    [error, setError] = useState(""),
-    axes = projections,
-    [stroke, setStroke] = useState<number[][]>([]),
-    drawing = useRef<{ plot: number; points: number[][] } | null>(null),
-    pointer = useRef<number[] | null>(null),
-    [version, setVersion] = useState(0);
+  const wrapper = useRef<HTMLDivElement>(null);
+  const [columns, setColumns] = useState(2);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const gpu = useRef<ClusterGPU | null>(null);
+  const [error, setError] = useState("");
+  const axes = projections;
+  const [stroke, setStroke] = useState<number[][]>([]);
+  const drawing = useRef<{ plot: number; points: number[][] } | null>(null);
+  const pointer = useRef<number[] | null>(null);
+  const [version, setVersion] = useState(0);
   useEffect(() => {
     // Resolve the sampled cloud only when E/F is pressed, never on every move.
     // Picking respects the focused group's foreground and displayed time range.
     const pick = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase(),
-        p = pointer.current;
+      const key = event.key.toLowerCase();
+      const p = pointer.current;
       if (
         !p ||
         drawing.current ||
@@ -61,52 +61,58 @@ export function Clusters({
         event.metaKey ||
         event.altKey ||
         (event.target as HTMLElement).matches("input,select,textarea")
-      )
+      ) {
         return;
+      }
       event.preventDefault();
       event.stopImmediatePropagation();
-      const col = Math.floor(p[0] / FEATURE_STRIDE),
-        row = Math.floor(p[1] / FEATURE_STRIDE),
-        plot = row * columns + col,
-        frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT),
-        origin = featurePlotOrigin(plot, columns);
+      const col = Math.floor(p[0] / FEATURE_STRIDE);
+      const row = Math.floor(p[1] / FEATURE_STRIDE);
+      const plot = row * columns + col;
+      const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
+      const origin = featurePlotOrigin(plot, columns);
       if (
         col >= columns ||
         plot >= axes.length ||
         p[0] % FEATURE_STRIDE >= FEATURE_PLOT ||
         p[1] % FEATURE_STRIDE >= FEATURE_PLOT
-      )
+      ) {
         return;
+      }
       const [ax, ay] = axes[plot];
-      let group: number | null = null,
-        best = 25;
+      let group: number | null = null;
+      let best = 25;
       const timeScale = 1 / Math.max(1, data.times[data.times.length - 1] || 0);
       for (let i = 0; i < data.labels.length; i++) {
-        const label = data.labels[i],
-          time = data.times[i] * timeScale;
-        if ((isolate && label !== selected) || time < range[0] || time > range[1]) continue;
+        const label = data.labels[i];
+        const time = data.times[i] * timeScale;
+        if ((isolate && label !== selected) || time < range[0] || time > range[1]) {
+          continue;
+        }
         const x =
-            origin.x + frame.x + (0.035 + (0.93 * data.features[i * 4 + ax]) / 255) * frame.width,
-          y =
-            origin.y + frame.y + (0.965 - (0.93 * data.features[i * 4 + ay]) / 255) * frame.height,
-          distance = (p[0] - x) ** 2 + (p[1] - y) ** 2;
+          origin.x + frame.x + (0.035 + (0.93 * data.features[i * 4 + ax]) / 255) * frame.width;
+        const y =
+          origin.y + frame.y + (0.965 - (0.93 * data.features[i * 4 + ay]) / 255) * frame.height;
+        const distance = (p[0] - x) ** 2 + (p[1] - y) ** 2;
         if (distance < best || (distance === best && label === selected)) {
           group = label;
           best = distance;
         }
       }
-      if (group !== null) onPick(group, key === "f", event.shiftKey);
+      if (group !== null) {
+        onPick(group, key === "f", event.shiftKey);
+      }
     };
     window.addEventListener("keydown", pick, true);
     return () => window.removeEventListener("keydown", pick, true);
   }, [data, selected, isolate, range, columns, tool, onPick, axes]);
   useEffect(() => {
     const c = canvas.current!;
-    const restore = () => setVersion((v) => v + 1),
-      lost = (e: Event) => {
-        e.preventDefault();
-        gpu.current = null;
-      };
+    const restore = () => setVersion((v) => v + 1);
+    const lost = (e: Event) => {
+      e.preventDefault();
+      gpu.current = null;
+    };
     c.addEventListener("webglcontextlost", lost);
     c.addEventListener("webglcontextrestored", restore);
     try {
@@ -138,7 +144,9 @@ export function Clusters({
   }, []);
   useEffect(() => {
     try {
-      if (!gpu.current && canvas.current) gpu.current = new ClusterGPU(canvas.current);
+      if (!gpu.current && canvas.current) {
+        gpu.current = new ClusterGPU(canvas.current);
+      }
       gpu.current?.draw(data, settings, selected, isolate, range, axes, columns);
     } catch (e) {
       setError(String(e));
@@ -159,24 +167,30 @@ export function Clusters({
       data-columns={columns}
       style={grid}
       onPointerDown={(e) => {
-        if (e.button !== 0 || (tool !== "lasso" && tool !== "brush")) return;
-        const p = point(e),
-          plot = Math.floor(p[1] / FEATURE_STRIDE) * columns + Math.floor(p[0] / FEATURE_STRIDE);
+        if (e.button !== 0 || (tool !== "lasso" && tool !== "brush")) {
+          return;
+        }
+        const p = point(e);
+        const plot =
+          Math.floor(p[1] / FEATURE_STRIDE) * columns + Math.floor(p[0] / FEATURE_STRIDE);
         if (
           p[0] >= grid.width ||
           p[1] >= grid.height ||
           p[0] % FEATURE_STRIDE >= FEATURE_PLOT ||
           p[1] % FEATURE_STRIDE >= FEATURE_PLOT ||
           plot >= 6
-        )
+        ) {
           return;
+        }
         drawing.current = { plot, points: [p] };
         setStroke([p]);
         e.currentTarget.setPointerCapture(e.pointerId);
       }}
       onPointerMove={(e) => {
         pointer.current = point(e);
-        if (!drawing.current) return;
+        if (!drawing.current) {
+          return;
+        }
         const p = point(e);
         drawing.current.points.push(p);
         setStroke([...drawing.current.points]);
@@ -188,11 +202,15 @@ export function Clusters({
         const d = drawing.current;
         drawing.current = null;
         setStroke([]);
-        if (!d) return;
-        const origin = featurePlotOrigin(d.plot, columns),
-          frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT),
-          points = d.points;
-        if (tool !== "brush" && points.length < 3) return;
+        if (!d) {
+          return;
+        }
+        const origin = featurePlotOrigin(d.plot, columns);
+        const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
+        const points = d.points;
+        if (tool !== "brush" && points.length < 3) {
+          return;
+        }
         const poly = points.flatMap(([x, y]) => [
           Math.max(0, Math.min(1, ((x - origin.x - frame.x) / frame.width - 0.035) / 0.93)),
           Math.max(0, Math.min(1, 1 - ((y - origin.y - frame.y) / frame.height - 0.035) / 0.93)),
@@ -233,12 +251,14 @@ export function Clusters({
   );
 }
 export function captureFeatureGrid(): HTMLCanvasElement | undefined {
-  const source = document.querySelector<HTMLCanvasElement>(".clusters canvas"),
-    root = source?.closest<HTMLElement>(".clusters");
-  if (!source || !root) return;
-  const columns = Number(root.dataset.columns),
-    scale = source.width / source.clientWidth,
-    copy = document.createElement("canvas");
+  const source = document.querySelector<HTMLCanvasElement>(".clusters canvas");
+  const root = source?.closest<HTMLElement>(".clusters");
+  if (!source || !root) {
+    return;
+  }
+  const columns = Number(root.dataset.columns);
+  const scale = source.width / source.clientWidth;
+  const copy = document.createElement("canvas");
   copy.width = source.width;
   copy.height = source.height;
   const ctx = copy.getContext("2d")!;
@@ -280,121 +300,131 @@ export function AnalysisPlot({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    const c = canvas.current!,
-      draw = () => {
-        const dpr = Math.min(2, devicePixelRatio || 1);
-        c.width = c.clientWidth * dpr;
-        c.height = c.clientHeight * dpr;
-        const ctx = c.getContext("2d")!;
-        ctx.scale(dpr, dpr);
-        let w = c.clientWidth,
-          h = c.clientHeight;
-        ctx.fillStyle = "#ffffff";
-        if (!positionSpeed) ctx.fillRect(0, 0, w, h);
-        if (compact && (mode === "ac" || mode === "speed")) {
-          const box = fitGrid(w, h, mode === "ac" ? 128 : 24, mode === "ac" ? 32 : 80);
-          ctx.translate(mode === "speed" && speedAlignment === "left" ? 0 : box.x, box.y);
-          ctx.scale(box.unit, box.unit);
-          w = mode === "ac" ? 128 : 24;
-          h = mode === "ac" ? 32 : 80;
+    const c = canvas.current!;
+    const draw = () => {
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      c.width = c.clientWidth * dpr;
+      c.height = c.clientHeight * dpr;
+      const ctx = c.getContext("2d")!;
+      ctx.scale(dpr, dpr);
+      let w = c.clientWidth;
+      let h = c.clientHeight;
+      ctx.fillStyle = "#ffffff";
+      if (!positionSpeed) {
+        ctx.fillRect(0, 0, w, h);
+      }
+      if (compact && (mode === "ac" || mode === "speed")) {
+        const box = fitGrid(w, h, mode === "ac" ? 128 : 24, mode === "ac" ? 32 : 80);
+        ctx.translate(mode === "speed" && speedAlignment === "left" ? 0 : box.x, box.y);
+        ctx.scale(box.unit, box.unit);
+        w = mode === "ac" ? 128 : 24;
+        h = mode === "ac" ? 32 : 80;
+      }
+      if (mode === "spatial") {
+        const scale = maxRate || data.peak || 1;
+        const box = fitGrid(w, h, data.width, data.height);
+        const ww = box.unit;
+        const hh = box.unit;
+        for (let i = 0; i < data.spatial.length; i++) {
+          const v = data.spatial[i];
+          ctx.fillStyle = Number.isFinite(v)
+            ? `hsl(${240 - Math.min(1, v / scale) * 240} 100% 50%)`
+            : "#ffffff";
+          ctx.fillRect(
+            box.x + (i % data.width) * ww,
+            box.y + Math.floor(i / data.width) * hh,
+            ww + 0.5,
+            hh + 0.5,
+          );
         }
-        if (mode === "spatial") {
-          const scale = maxRate || data.peak || 1,
-            box = fitGrid(w, h, data.width, data.height),
-            ww = box.unit,
-            hh = box.unit;
-          for (let i = 0; i < data.spatial.length; i++) {
-            const v = data.spatial[i];
-            ctx.fillStyle = Number.isFinite(v)
-              ? `hsl(${240 - Math.min(1, v / scale) * 240} 100% 50%)`
-              : "#ffffff";
+      } else if (mode === "direction") {
+        const a = data.direction;
+        const max = Math.max(...a, 1);
+        const r = Math.min(w, h) * 0.4;
+        const cx = w / 2;
+        const cy = h / 2;
+        ctx.strokeStyle = "#dddddd";
+        for (const k of [0.5, 1]) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, r * k, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = "#111111";
+        ctx.fillStyle = "transparent";
+        ctx.beginPath();
+        for (let i = 0; i <= a.length; i++) {
+          const j = i % a.length;
+          const theta = (j / a.length) * Math.PI * 2 - Math.PI;
+          const rr = (a[j] / max) * r;
+          const x = cx + Math.cos(theta) * rr;
+          const y = cy + Math.sin(theta) * rr;
+          if (!i) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (compact) {
+        const a = mode === "ac" ? data.ac : positionSpeed ? data.speedDwell : data.speed;
+        const max = Math.max(...a, 1);
+        if (mode === "ac") {
+          ctx.strokeStyle = "#f00000";
+          ctx.lineWidth = 0.7;
+          ctx.beginPath();
+          for (let i = 0; i < a.length; i++) {
+            const x = (i / (a.length - 1)) * (w - 2) + 1;
+            const y = h - 2 - (a[i] / max) * (h - 4);
+            if (!i) {
+              ctx.moveTo(x, y);
+            } else {
+              ctx.lineTo(x, y);
+            }
+          }
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = "#111";
+          const bh = h / a.length;
+          for (let i = 0; i < a.length; i++) {
+            if (!(a[i] > 0)) {
+              continue;
+            }
+            const bw = (a[i] / max) * (w - 1);
             ctx.fillRect(
-              box.x + (i % data.width) * ww,
-              box.y + Math.floor(i / data.width) * hh,
-              ww + 0.5,
-              hh + 0.5,
+              speedAlignment === "left" ? 0 : w - bw,
+              i * bh,
+              bw,
+              Math.max(0.5, bh - 0.4),
             );
           }
-        } else if (mode === "direction") {
-          const a = data.direction,
-            max = Math.max(...a, 1),
-            r = Math.min(w, h) * 0.4,
-            cx = w / 2,
-            cy = h / 2;
-          ctx.strokeStyle = "#dddddd";
-          for (const k of [0.5, 1]) {
-            ctx.beginPath();
-            ctx.arc(cx, cy, r * k, 0, Math.PI * 2);
-            ctx.stroke();
+          if (positionSpeed) {
+            ctx.fillStyle = "#f00";
+            ctx.fillRect(0, 0, 0.6, h);
           }
-          ctx.strokeStyle = "#111111";
-          ctx.fillStyle = "transparent";
-          ctx.beginPath();
-          for (let i = 0; i <= a.length; i++) {
-            const j = i % a.length,
-              theta = (j / a.length) * Math.PI * 2 - Math.PI,
-              rr = (a[j] / max) * r,
-              x = cx + Math.cos(theta) * rr,
-              y = cy + Math.sin(theta) * rr;
-            if (!i) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-          }
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-        } else if (compact) {
-          const a = mode === "ac" ? data.ac : positionSpeed ? data.speedDwell : data.speed,
-            max = Math.max(...a, 1);
-          if (mode === "ac") {
-            ctx.strokeStyle = "#f00000";
-            ctx.lineWidth = 0.7;
-            ctx.beginPath();
-            for (let i = 0; i < a.length; i++) {
-              const x = (i / (a.length - 1)) * (w - 2) + 1,
-                y = h - 2 - (a[i] / max) * (h - 4);
-              if (!i) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-          } else {
-            ctx.fillStyle = "#111";
-            const bh = h / a.length;
-            for (let i = 0; i < a.length; i++) {
-              if (!(a[i] > 0)) continue;
-              const bw = (a[i] / max) * (w - 1);
-              ctx.fillRect(
-                speedAlignment === "left" ? 0 : w - bw,
-                i * bh,
-                bw,
-                Math.max(0.5, bh - 0.4),
-              );
-            }
-            if (positionSpeed) {
-              ctx.fillStyle = "#f00";
-              ctx.fillRect(0, 0, 0.6, h);
-            }
-          }
-        } else {
-          const a = mode === "ac" ? data.ac : positionSpeed ? data.speedDwell : data.speed,
-            max = Math.max(...a, 1),
-            bw = (w - 36) / a.length;
-          ctx.strokeStyle = "#888";
-          ctx.beginPath();
-          ctx.moveTo(28, 10);
-          ctx.lineTo(28, h - 23);
-          ctx.lineTo(w - 6, h - 23);
-          ctx.stroke();
-          ctx.fillStyle = "#0044cc";
-          for (let i = 0; i < a.length; i++) {
-            const v = (a[i] / max) * (h - 40);
-            ctx.fillRect(29 + i * bw, h - 24 - v, Math.max(1, bw - 1), v);
-          }
-          ctx.fillStyle = "#555";
-          ctx.font = "10px monospace";
-          ctx.fillText("0", 25, h - 7);
-          ctx.fillText(mode === "ac" ? "lag →" : "speed (cm/s) →", w / 2 - 25, h - 7);
         }
-      };
+      } else {
+        const a = mode === "ac" ? data.ac : positionSpeed ? data.speedDwell : data.speed;
+        const max = Math.max(...a, 1);
+        const bw = (w - 36) / a.length;
+        ctx.strokeStyle = "#888";
+        ctx.beginPath();
+        ctx.moveTo(28, 10);
+        ctx.lineTo(28, h - 23);
+        ctx.lineTo(w - 6, h - 23);
+        ctx.stroke();
+        ctx.fillStyle = "#0044cc";
+        for (let i = 0; i < a.length; i++) {
+          const v = (a[i] / max) * (h - 40);
+          ctx.fillRect(29 + i * bw, h - 24 - v, Math.max(1, bw - 1), v);
+        }
+        ctx.fillStyle = "#555";
+        ctx.font = "10px monospace";
+        ctx.fillText("0", 25, h - 7);
+        ctx.fillText(mode === "ac" ? "lag →" : "speed (cm/s) →", w / 2 - 25, h - 7);
+      }
+    };
     draw();
     const ro = new ResizeObserver(draw);
     ro.observe(c);
@@ -418,65 +448,71 @@ export interface SpikeLayer {
  * canvas (per trajectory and size); layer changes, such as hovering a tile, only
  * copy it back and draw the spike dots. One visible canvas keeps copies simple. */
 export function PathPlot({ trajectory, layers }: { trajectory: Trajectory; layers: SpikeLayer[] }) {
-  const canvas = useRef<HTMLCanvasElement>(null),
-    base = useRef<{
-      key: string;
-      trajectory: Trajectory;
-      image: HTMLCanvasElement;
-    } | null>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const base = useRef<{
+    key: string;
+    trajectory: Trajectory;
+    image: HTMLCanvasElement;
+  } | null>(null);
   useEffect(() => {
-    const c = canvas.current!,
-      draw = () => {
-        const dpr = Math.min(2, devicePixelRatio || 1),
-          w = c.clientWidth,
-          h = c.clientHeight,
-          key = `${w}x${h}x${dpr}`,
-          // Use the full pane width and start at its top; retain one physical
-          // scale for x/y, with any unused space below or beside the arena.
-          box = {
-            ...fitGrid(w, h, trajectory.arenaWidth, trajectory.arenaHeight),
-            y: 0,
-          };
-        // Hidden or not yet laid out: nothing to draw (and a 0×0 offscreen
-        // canvas cannot be copied with drawImage).
-        if (!w || !h) return;
-        if (base.current?.key !== key || base.current.trajectory !== trajectory) {
-          const image = document.createElement("canvas");
-          image.width = w * dpr;
-          image.height = h * dpr;
-          const ctx = image.getContext("2d")!,
-            path = trajectory.path;
-          ctx.scale(dpr, dpr);
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(0, 0, w, h);
-          ctx.strokeStyle = "#333333";
-          ctx.lineWidth = 0.6;
-          ctx.beginPath();
-          for (let i = 0; i < path.length; i += 2) {
-            const x = box.x + path[i] * box.width,
-              y = box.y + path[i + 1] * box.height;
-            if (i) ctx.lineTo(x, y);
-            else ctx.moveTo(x, y);
-          }
-          ctx.stroke();
-          base.current = { key, trajectory, image };
-        }
-        c.width = w * dpr;
-        c.height = h * dpr;
-        const ctx = c.getContext("2d")!;
-        ctx.drawImage(base.current.image, 0, 0);
-        ctx.scale(dpr, dpr);
-        for (const layer of layers) {
-          ctx.fillStyle = layer.color;
-          for (let i = 0; i < layer.spikes.length; i += 2)
-            ctx.fillRect(
-              box.x + layer.spikes[i] * box.width,
-              box.y + layer.spikes[i + 1] * box.height,
-              1.6,
-              1.6,
-            );
-        }
+    const c = canvas.current!;
+    const draw = () => {
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      const w = c.clientWidth;
+      const h = c.clientHeight;
+      const key = `${w}x${h}x${dpr}`;
+      // Use the full pane width and start at its top; retain one physical
+      // scale for x/y, with any unused space below or beside the arena.
+      const box = {
+        ...fitGrid(w, h, trajectory.arenaWidth, trajectory.arenaHeight),
+        y: 0,
       };
+      // Hidden or not yet laid out: nothing to draw (and a 0×0 offscreen
+      // canvas cannot be copied with drawImage).
+      if (!w || !h) {
+        return;
+      }
+      if (base.current?.key !== key || base.current.trajectory !== trajectory) {
+        const image = document.createElement("canvas");
+        image.width = w * dpr;
+        image.height = h * dpr;
+        const ctx = image.getContext("2d")!;
+        const path = trajectory.path;
+        ctx.scale(dpr, dpr);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = "#333333";
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        for (let i = 0; i < path.length; i += 2) {
+          const x = box.x + path[i] * box.width;
+          const y = box.y + path[i + 1] * box.height;
+          if (i) {
+            ctx.lineTo(x, y);
+          } else {
+            ctx.moveTo(x, y);
+          }
+        }
+        ctx.stroke();
+        base.current = { key, trajectory, image };
+      }
+      c.width = w * dpr;
+      c.height = h * dpr;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(base.current.image, 0, 0);
+      ctx.scale(dpr, dpr);
+      for (const layer of layers) {
+        ctx.fillStyle = layer.color;
+        for (let i = 0; i < layer.spikes.length; i += 2) {
+          ctx.fillRect(
+            box.x + layer.spikes[i] * box.width,
+            box.y + layer.spikes[i + 1] * box.height,
+            1.6,
+            1.6,
+          );
+        }
+      }
+    };
     draw();
     const ro = new ResizeObserver(draw);
     ro.observe(c);

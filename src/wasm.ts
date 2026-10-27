@@ -104,8 +104,8 @@ export function copyF32(w: Core, p: number, n: number) {
   return new Float32Array(w.memory.buffer, p, n).slice();
 }
 export function withU16<T>(w: Core, values: number[], f: (p: number, n: number) => T): T {
-  const a = new Uint16Array(values),
-    p = w.alloc_bytes(a.byteLength);
+  const a = new Uint16Array(values);
+  const p = w.alloc_bytes(a.byteLength);
   try {
     new Uint16Array(w.memory.buffer, p, a.length).set(a);
     return f(p, a.length);
@@ -114,8 +114,8 @@ export function withU16<T>(w: Core, values: number[], f: (p: number, n: number) 
   }
 }
 export function withF32<T>(w: Core, values: number[], f: (p: number, n: number) => T): T {
-  const a = new Float32Array(values),
-    p = w.alloc_bytes(a.byteLength);
+  const a = new Float32Array(values);
+  const p = w.alloc_bytes(a.byteLength);
   try {
     new Float32Array(w.memory.buffer, p, a.length).set(a);
     return f(p, a.length);
@@ -135,9 +135,13 @@ export async function streamFile(
   const p = w.alloc_bytes(chunk);
   try {
     for (let first = 0; first < length; first += chunk) {
-      const n = Math.min(chunk, length - first),
-        bytes = new Uint8Array(await file.slice(offset + first, offset + first + n).arrayBuffer());
-      if (bytes.length !== n) throw new Error("Truncated file read.");
+      const n = Math.min(chunk, length - first);
+      const bytes = new Uint8Array(
+        await file.slice(offset + first, offset + first + n).arrayBuffer(),
+      );
+      if (bytes.length !== n) {
+        throw new Error("Truncated file read.");
+      }
       new Uint8Array(w.memory.buffer, p, n).set(bytes);
       consume(p, n, first);
       progress?.((first + n) / Math.max(1, length));

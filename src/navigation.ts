@@ -20,11 +20,11 @@ export function useRecordingHistory(
   selection: RecordingSelection | null,
   restore: (selection: RecordingSelection, current: () => boolean) => void | Promise<void>,
 ) {
-  const workspace = useRef(crypto.randomUUID()),
-    selected = useRef(selection),
-    callback = useRef(restore),
-    version = useRef(0),
-    restoring = useRef(false);
+  const workspace = useRef(crypto.randomUUID());
+  const selected = useRef(selection);
+  const callback = useRef(restore);
+  const version = useRef(0);
+  const restoring = useRef(false);
   selected.current = selection;
   callback.current = restore;
   const entry = (next: RecordingSelection) => ({
@@ -32,20 +32,26 @@ export function useRecordingHistory(
     waveform: { workspace: workspace.current, selection: next },
   });
   useEffect(() => {
-    if (selection && !restoring.current) history.replaceState(entry(selection), "");
+    if (selection && !restoring.current) {
+      history.replaceState(entry(selection), "");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- replace the history entry only when the selection's identity changes
   }, [selection?.trialId, selection?.tetNum, selection?.cutId]);
   useEffect(() => {
     const pop = async (event: PopStateEvent) => {
-      const state = event.state?.waveform,
-        next = savedSelection(state?.selection);
-      if (!next || state.workspace !== workspace.current) return;
+      const state = event.state?.waveform;
+      const next = savedSelection(state?.selection);
+      if (!next || state.workspace !== workspace.current) {
+        return;
+      }
       const token = ++version.current;
       restoring.current = true;
       try {
         await callback.current(next, () => token === version.current);
       } finally {
-        if (token === version.current) restoring.current = false;
+        if (token === version.current) {
+          restoring.current = false;
+        }
       }
     };
     addEventListener("popstate", pop);
@@ -58,8 +64,9 @@ export function useRecordingHistory(
       history.replaceState(entry(next), "");
       return;
     }
-    if (selected.current && history.state?.waveform?.workspace !== workspace.current)
+    if (selected.current && history.state?.waveform?.workspace !== workspace.current) {
       history.replaceState(entry(selected.current), "");
+    }
     history.pushState(entry(next), "");
   };
 }

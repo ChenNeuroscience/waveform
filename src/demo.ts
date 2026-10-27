@@ -1,8 +1,8 @@
 import { fileId } from "./types";
 import { copyU8, type Core } from "./wasm";
-const encode = new TextEncoder(),
-  tail = encode.encode("\r\ndata_end"),
-  CHUNK = 32768;
+const encode = new TextEncoder();
+const tail = encode.encode("\r\ndata_end");
+const CHUNK = 32768;
 interface SourceSpec {
   context: number;
   spikes: number;
@@ -47,17 +47,19 @@ export class SyntheticRecording extends File {
   override slice(start = 0, end = this.size, contentType = ""): Blob {
     start = Math.max(0, Math.min(this.size, start < 0 ? this.size + start : start));
     end = Math.max(start, Math.min(this.size, end < 0 ? this.size + end : end));
-    const { header, spikes, context } = this.spec,
-      rawEnd = header.length + spikes * 216;
+    const { header, spikes, context } = this.spec;
+    const rawEnd = header.length + spikes * 216;
     const parts: BlobPart[] = [];
-    if (start < header.length) parts.push(header.slice(start, Math.min(end, header.length)));
-    const rawStart = Math.max(start, header.length),
-      rawStop = Math.min(end, rawEnd);
+    if (start < header.length) {
+      parts.push(header.slice(start, Math.min(end, header.length)));
+    }
+    const rawStart = Math.max(start, header.length);
+    const rawStop = Math.min(end, rawEnd);
     if (rawStop > rawStart) {
-      const first = Math.floor((rawStart - header.length) / 216),
-        count = Math.ceil((rawStop - header.length) / 216) - first,
-        bytes = count * 216,
-        p = this.wasm.alloc_bytes(bytes);
+      const first = Math.floor((rawStart - header.length) / 216);
+      const count = Math.ceil((rawStop - header.length) / 216) - first;
+      const bytes = count * 216;
+      const p = this.wasm.alloc_bytes(bytes);
       try {
         this.wasm.synthetic_records(context, first, count, p);
         parts.push(
@@ -70,7 +72,9 @@ export class SyntheticRecording extends File {
         this.wasm.free_bytes(p, bytes);
       }
     }
-    if (end > rawEnd) parts.push(tail.slice(Math.max(0, start - rawEnd), end - rawEnd));
+    if (end > rawEnd) {
+      parts.push(tail.slice(Math.max(0, start - rawEnd), end - rawEnd));
+    }
     return new Blob(parts, { type: contentType });
   }
 }
@@ -84,25 +88,25 @@ export async function demoFiles(
   options: { quick?: boolean; stress?: boolean; seed: number },
   progress: (fraction: number, message: string) => void,
 ): Promise<File[]> {
-  const files: File[] = [],
-    modified = Date.now(),
-    duration = options.quick ? 600 : 1200,
-    sizes = Array.from({ length: 5 }, (_, trial) =>
-      Array.from({ length: 8 }, (_, tet) =>
-        options.quick
-          ? trial === 0
-            ? 18000
-            : 36000
-          : options.stress
-            ? trial === 0 && tet === 0
-              ? 9000000
-              : 50000
-            : tet === 0
-              ? 50000
-              : 40000 + ((trial * 317 + tet * 2711) % 20001),
-      ),
+  const files: File[] = [];
+  const modified = Date.now();
+  const duration = options.quick ? 600 : 1200;
+  const sizes = Array.from({ length: 5 }, (_, trial) =>
+    Array.from({ length: 8 }, (_, tet) =>
+      options.quick
+        ? trial === 0
+          ? 18000
+          : 36000
+        : options.stress
+          ? trial === 0 && tet === 0
+            ? 9000000
+            : 50000
+          : tet === 0
+            ? 50000
+            : 40000 + ((trial * 317 + tet * 2711) % 20001),
     ),
-    total = sizes.flat().reduce((a, b) => a + b, 0);
+  );
+  const total = sizes.flat().reduce((a, b) => a + b, 0);
   let completed = 0;
   for (let trial = 0; trial < 5; trial++) {
     const name = `demo_box-${String.fromCharCode(97 + trial)}`;
@@ -116,26 +120,28 @@ export async function demoFiles(
       ),
     );
     for (let tet = 1; tet <= 8; tet++) {
-      const cells = options.quick ? 12 : options.stress ? 100 : [24, 36, 48][(tet - 1) % 3],
-        context = w.synthetic_new(
-          (options.seed + trial * 173) >>> 0,
-          cells,
-          sizes[trial][tet - 1],
-          duration,
-          tet,
-        ),
-        // Poisson spiking: the count is near the requested size, not exact.
-        spikes = context ? w.synthetic_spikes(context) : 0,
-        header = encode.encode(
-          `duration ${duration}\nnum_spikes ${spikes}\nnum_chans 4\nsamples_per_spike 50\nbytes_per_sample 1\nbytes_per_timestamp 4\ntimebase 96000 hz\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start`,
-        ),
-        file = new File([header], `${name}.${tet}`, { lastModified: modified });
-      if (!context) throw new Error("Invalid simulated recording configuration.");
+      const cells = options.quick ? 12 : options.stress ? 100 : [24, 36, 48][(tet - 1) % 3];
+      const context = w.synthetic_new(
+        (options.seed + trial * 173) >>> 0,
+        cells,
+        sizes[trial][tet - 1],
+        duration,
+        tet,
+      );
+      // Poisson spiking: the count is near the requested size, not exact.
+      const spikes = context ? w.synthetic_spikes(context) : 0;
+      const header = encode.encode(
+        `duration ${duration}\nnum_spikes ${spikes}\nnum_chans 4\nsamples_per_spike 50\nbytes_per_sample 1\nbytes_per_timestamp 4\ntimebase 96000 hz\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start`,
+      );
+      const file = new File([header], `${name}.${tet}`, { lastModified: modified });
+      if (!context) {
+        throw new Error("Invalid simulated recording configuration.");
+      }
       sources.set(fileId(file), { context, spikes, header, file });
       files.push(file);
       if (tet === 1) {
-        const length = duration * 50 * 20,
-          p = w.alloc_bytes(length);
+        const length = duration * 50 * 20;
+        const p = w.alloc_bytes(length);
         try {
           w.synthetic_position(context, p);
           files.push(
@@ -159,11 +165,11 @@ export async function demoFiles(
         completed += spikes;
         continue;
       }
-      const keep = tet === 7 ? 2 : 0,
-        parts: BlobPart[] = [
-          `n_clusters: ${(keep || cells) + 1}\nn_channels: 4\nExact_cut_for: ${name} spikes: ${spikes}\n`,
-        ],
-        p = w.alloc_bytes(CHUNK * 4);
+      const keep = tet === 7 ? 2 : 0;
+      const parts: BlobPart[] = [
+        `n_clusters: ${(keep || cells) + 1}\nn_channels: 4\nExact_cut_for: ${name} spikes: ${spikes}\n`,
+      ];
+      const p = w.alloc_bytes(CHUNK * 4);
       try {
         for (let first = 0; first < spikes; first += CHUNK) {
           const count = Math.min(CHUNK, spikes - first);

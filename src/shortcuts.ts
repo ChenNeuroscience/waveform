@@ -47,14 +47,18 @@ export function useShortcuts(context: ShortcutContext) {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const c = latest.current;
-      if ((e.target as HTMLElement).matches("input,select,textarea")) return;
+      if ((e.target as HTMLElement).matches("input,select,textarea")) {
+        return;
+      }
       if (c.dragging) {
         e.preventDefault();
         return;
       }
       if (e.code === "Space" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
-        if (!c.swap) c.setGrabMode(true);
+        if (!c.swap) {
+          c.setGrabMode(true);
+        }
         return;
       }
       if (c.splitPoint) {
@@ -89,10 +93,14 @@ export function useShortcuts(context: ShortcutContext) {
       }
       // Browser commands (reload, close tab, back, etc.) must never fall
       // through to the unmodified plot/navigation shortcuts.
-      if (cmd || e.altKey) return;
+      if (cmd || e.altKey) {
+        return;
+      }
       if (c.swap) {
         e.preventDefault();
-        if (e.key === "Escape" || (e.key.toLowerCase() === "s" && !e.repeat)) c.cancelSwap();
+        if (e.key === "Escape" || (e.key.toLowerCase() === "s" && !e.repeat)) {
+          c.cancelSwap();
+        }
         return;
       }
       const hovered = c.hoveredTile.current;
@@ -105,26 +113,50 @@ export function useShortcuts(context: ShortcutContext) {
         c.closePane();
         return;
       }
-      if (e.key === "k" || e.key === "?") c.togglePane("help");
-      if (e.key === "h") c.togglePane("headers");
-      if (e.key === "z") c.togglePane("history");
-      if (e.key === "d") c.update("drift", !c.settings.drift);
-      if (e.key === "p") c.update("density", !c.settings.density);
+      if (e.key === "k" || e.key === "?") {
+        c.togglePane("help");
+      }
+      if (e.key === "h") {
+        c.togglePane("headers");
+      }
+      if (e.key === "z") {
+        c.togglePane("history");
+      }
+      if (e.key === "d") {
+        c.update("drift", !c.settings.drift);
+      }
+      if (e.key === "p") {
+        c.update("density", !c.settings.density);
+      }
       const group = c.ready && !e.repeat ? c.hoverCell : null;
-      if (e.key.toLowerCase() === "e" && group !== null) c.selectDest(group);
-      if (e.key.toLowerCase() === "f" && group !== null) c.selectSource(group, e.shiftKey);
-      if (e.key === "l") c.setTool("lasso");
+      if (e.key.toLowerCase() === "e" && group !== null) {
+        c.selectDest(group);
+      }
+      if (e.key.toLowerCase() === "f" && group !== null) {
+        c.selectSource(group, e.shiftKey);
+      }
+      if (e.key === "l") {
+        c.setTool("lasso");
+      }
       if (e.key === "Enter" && c.ready) {
         e.preventDefault();
         c.newDestination();
       }
-      if (/^[0-9]$/.test(e.key)) c.chooseTet(Math.floor(c.tetNum / 10) * 10 + +e.key);
-      if (e.key === "o") c.chooseTet(c.tetNum >= 10 ? c.tetNum - 10 : c.tetNum + 10);
+      if (/^[0-9]$/.test(e.key)) {
+        c.chooseTet(Math.floor(c.tetNum / 10) * 10 + +e.key);
+      }
+      if (e.key === "o") {
+        c.chooseTet(c.tetNum >= 10 ? c.tetNum - 10 : c.tetNum + 10);
+      }
       const mode = plotKeys[e.key.toLowerCase()];
-      if (mode) c.showPlot(mode, e.shiftKey);
+      if (mode) {
+        c.showPlot(mode, e.shiftKey);
+      }
       if (c.trial && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         const i = c.trials.indexOf(c.trial) + (e.key === "ArrowLeft" ? -1 : 1);
-        if (c.trials[i]) c.chooseTrial(c.trials[i]);
+        if (c.trials[i]) {
+          c.chooseTrial(c.trials[i]);
+        }
       }
     };
     addEventListener("keydown", key);

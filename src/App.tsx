@@ -48,8 +48,8 @@ function readSettings(): Settings {
   }
 }
 function download(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob),
-    a = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
   a.href = url;
   a.download = name;
   a.click();
@@ -57,26 +57,26 @@ function download(blob: Blob, name: string) {
 }
 type Pane = PanelName | null;
 export default function App() {
-  const [trials, setTrials] = useState<Trial[]>([]),
-    [trialId, setTrialId] = useState(""),
-    [tetNum, setTetNum] = useState(1),
-    [cutId, setCutId] = useState(""),
-    [data, setData] = useState<ViewData | null>(null),
-    [analysis, setAnalysis] = useState<AnalysisData | null>(null),
-    [trajectory, setTrajectory] = useState<Trajectory | null>(null);
-  const [settings, setSettings] = useState<Settings>(readSettings),
-    [cell, setCell] = useState(1),
-    [sources, setSources] = useState<number[]>([1]),
-    [dest, setDest] = useState(2),
-    [tool, setTool] = useState("brush"),
-    [isolate, setIsolate] = usePreference("isolate", false),
-    [shown, setShown] = usePreference<VisiblePlots>("plots", {
-      waveforms: true,
-      spatial: true,
-      direction: true,
-      speed: true,
-      ac: true,
-    });
+  const [trials, setTrials] = useState<Trial[]>([]);
+  const [trialId, setTrialId] = useState("");
+  const [tetNum, setTetNum] = useState(1);
+  const [cutId, setCutId] = useState("");
+  const [data, setData] = useState<ViewData | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
+  const [trajectory, setTrajectory] = useState<Trajectory | null>(null);
+  const [settings, setSettings] = useState<Settings>(readSettings);
+  const [cell, setCell] = useState(1);
+  const [sources, setSources] = useState<number[]>([1]);
+  const [dest, setDest] = useState(2);
+  const [tool, setTool] = useState("brush");
+  const [isolate, setIsolate] = usePreference("isolate", false);
+  const [shown, setShown] = usePreference<VisiblePlots>("plots", {
+    waveforms: true,
+    spatial: true,
+    direction: true,
+    speed: true,
+    ac: true,
+  });
   // As in v1: show only the chosen plot; with Shift, toggle it among the others.
   const showPlot = (mode: PlotMode, multiple: boolean) =>
     setShown((s) =>
@@ -91,48 +91,48 @@ export default function App() {
             [mode]: true,
           },
     );
-  const [pane, setPane] = useState<Pane>(null),
-    [panels, setPanels] = useState<PanelName[]>([]),
-    [grabMode, setGrabMode] = useState(false),
-    [hoverCell, setHoverCell] = useState<number | null>(null),
-    [dragComparison, setDragComparison] = useState<DragComparison | null>(null),
-    [compareAnalysis, setCompareAnalysis] = useState<{
-      key: string;
-      data: AnalysisData;
-    } | null>(null),
-    [splitPoint, setSplitPoint] = useState<SplitPoint | null>(null),
-    [swap, setSwap] = useState<SwapState | null>(null),
-    [tileFeedback, setTileFeedback] = useState<TileFeedback | null>(null),
-    [copies, setCopies] = useState<
-      {
-        id: string;
-        title: string;
-        image: string;
-        cell?: number;
-        stats?: CellStat[];
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-      }[]
-    >([]),
-    [downloadVersion, setDownloadVersion] = useState(0),
-    [busy, setBusy] = useState(false),
-    [progress, setProgress] = useState(0),
-    [message, setMessage] = useState(""),
-    [error, setError] = useState(""),
-    [notice, setNotice] = useState(""),
-    [drag, setDrag] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null),
-    folderInput = useRef<HTMLInputElement>(null),
-    // Bumped per recording load; async edits, loads and progress updates compare
-    // their captured value so replies for a previous recording are ignored.
-    loadGen = useRef(0),
-    lastCuts = useRef(new Map<string, string>()),
-    dirtySessions = useRef(new Set<string>()),
-    finishingSplit = useRef(false),
-    splitCompletion = useRef<Promise<void> | null>(null),
-    cutDownloads = useRef(new CutDownloads());
+  const [pane, setPane] = useState<Pane>(null);
+  const [panels, setPanels] = useState<PanelName[]>([]);
+  const [grabMode, setGrabMode] = useState(false);
+  const [hoverCell, setHoverCell] = useState<number | null>(null);
+  const [dragComparison, setDragComparison] = useState<DragComparison | null>(null);
+  const [compareAnalysis, setCompareAnalysis] = useState<{
+    key: string;
+    data: AnalysisData;
+  } | null>(null);
+  const [splitPoint, setSplitPoint] = useState<SplitPoint | null>(null);
+  const [swap, setSwap] = useState<SwapState | null>(null);
+  const [tileFeedback, setTileFeedback] = useState<TileFeedback | null>(null);
+  const [copies, setCopies] = useState<
+    {
+      id: string;
+      title: string;
+      image: string;
+      cell?: number;
+      stats?: CellStat[];
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }[]
+  >([]);
+  const [downloadVersion, setDownloadVersion] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [drag, setDrag] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  // Bumped per recording load; async edits, loads and progress updates compare
+  // their captured value so replies for a previous recording are ignored.
+  const loadGen = useRef(0);
+  const lastCuts = useRef(new Map<string, string>());
+  const dirtySessions = useRef(new Set<string>());
+  const finishingSplit = useRef(false);
+  const splitCompletion = useRef<Promise<void> | null>(null);
+  const cutDownloads = useRef(new CutDownloads());
   const hoveredTile = useRef<number | null>(null);
   useEffect(() => () => cutDownloads.current.dispose(), []);
   useEffect(() => {
@@ -140,19 +140,21 @@ export default function App() {
       ? `${trials.find((t) => t.id === trialId)!.name} [Waveform]`
       : "Waveform";
   }, [trialId, trials]);
-  const trial = trials.find((t) => t.id === trialId),
-    tet = trial?.tetrodes.find((t) => t.number === tetNum),
-    cut = tet?.cuts.find((c) => c.id === cutId),
-    ready =
-      !!data &&
-      !busy &&
-      !!tet?.file &&
-      data.session === `${tet.id}|${fileId(tet.file)}|${cutId || "unsorted"}`;
+  const trial = trials.find((t) => t.id === trialId);
+  const tet = trial?.tetrodes.find((t) => t.number === tetNum);
+  const cut = tet?.cuts.find((c) => c.id === cutId);
+  const ready =
+    !!data &&
+    !busy &&
+    !!tet?.file &&
+    data.session === `${tet.id}|${fileId(tet.file)}|${cutId || "unsorted"}`;
   useEffect(() => {
     localStorage.setItem("waveform-desktop-settings", JSON.stringify(settings));
   }, [settings]);
   useEffect(() => {
-    if (data?.dirty) dirtySessions.current.add(data.session);
+    if (data?.dirty) {
+      dirtySessions.current.add(data.session);
+    }
     const f = (e: BeforeUnloadEvent) => {
       if (dirtySessions.current.size) {
         e.preventDefault();
@@ -183,7 +185,9 @@ export default function App() {
         const e = result.trials
           .find((t) => t.id === trialId)
           ?.tetrodes.find((t) => t.number === tetNum);
-        if (e && !cutId && e.cuts.length) setCutId(e.cuts[0].id);
+        if (e && !cutId && e.cuts.length) {
+          setCutId(e.cuts[0].id);
+        }
       }
     } catch (e) {
       setError(String(e));
@@ -196,9 +200,15 @@ export default function App() {
     const target = trials
       .find((t) => t.id === next.trialId)
       ?.tetrodes.find((e) => e.number === next.tetNum && e.file);
-    if (!target || (next.cutId && !target.cuts.some((c) => c.id === next.cutId))) return;
-    if (trialId === next.trialId && tetNum === next.tetNum && cutId === next.cutId) return;
-    if (tet) lastCuts.current.set(tet.id, cutId);
+    if (!target || (next.cutId && !target.cuts.some((c) => c.id === next.cutId))) {
+      return;
+    }
+    if (trialId === next.trialId && tetNum === next.tetNum && cutId === next.cutId) {
+      return;
+    }
+    if (tet) {
+      lastCuts.current.set(tet.id, cutId);
+    }
     ++loadGen.current; // Invalidate replies before the next load effect runs.
     setTrialId(next.trialId);
     setTetNum(next.tetNum);
@@ -213,25 +223,31 @@ export default function App() {
   const chooseTrial = (t: Trial) => {
     const e =
       t.tetrodes.find((e) => e.number === tetNum && e.file) || t.tetrodes.find((e) => e.file);
-    if (e)
+    if (e) {
       navigateTo({
         trialId: t.id,
         tetNum: e.number,
         cutId: rememberedCut(e),
       });
+    }
   };
   const chooseTet = (n: number) => {
     const e = trial?.tetrodes.find((t) => t.number === n && t.file);
-    if (e && trial)
+    if (e && trial) {
       navigateTo({
         trialId: trial.id,
         tetNum: n,
         cutId: rememberedCut(e),
       });
+    }
   };
   useEffect(() => {
-    if (!tet?.file) return;
-    if (data?.session === `${tet.id}|${fileId(tet.file)}|${cutId || "unsorted"}`) return;
+    if (!tet?.file) {
+      return;
+    }
+    if (data?.session === `${tet.id}|${fileId(tet.file)}|${cutId || "unsorted"}`) {
+      return;
+    }
     const gen = ++loadGen.current;
     setBusy(true);
     setProgress(0);
@@ -258,10 +274,12 @@ export default function App() {
       },
     )
       .then((d) => {
-        if (gen !== loadGen.current) return;
+        if (gen !== loadGen.current) {
+          return;
+        }
         setData(d);
-        const first = d.counts.findIndex((n, i) => n > 0 && i > 0),
-          c = first < 0 ? 0 : first;
+        const first = d.counts.findIndex((n, i) => n > 0 && i > 0);
+        const c = first < 0 ? 0 : first;
         setCell(c);
         // Paint from the lowest populated group (usually noise, 0) into a new group.
         const lowest = d.counts.findIndex((n) => n > 0);
@@ -293,7 +311,9 @@ export default function App() {
       settings,
     })
       .then((t) => {
-        if (live) setTrajectory(t);
+        if (live) {
+          setTrajectory(t);
+        }
       })
       .catch(() => {});
     return () => {
@@ -306,7 +326,9 @@ export default function App() {
   useEffect(() => {
     let live = true;
     const target = dragComparison?.target;
-    if (!data || busy || target == null) return;
+    if (!data || busy || target == null) {
+      return;
+    }
     const timeout = setTimeout(
       () =>
         request("analysis", {
@@ -317,10 +339,14 @@ export default function App() {
           settings,
         })
           .then((a) => {
-            if (live) setCompareAnalysis({ key: comparisonKey, data: a });
+            if (live) {
+              setCompareAnalysis({ key: comparisonKey, data: a });
+            }
           })
           .catch((e) => {
-            if (live) setError(e.message);
+            if (live) {
+              setError(e.message);
+            }
           }),
       25,
     );
@@ -331,11 +357,15 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- comparisonKey covers the comparison's inputs
   }, [comparisonKey, trial?.pos, busy]);
   useEffect(() => {
-    if (pane) setPanels((ps) => (ps.includes(pane) ? ps : [...ps, pane]));
+    if (pane) {
+      setPanels((ps) => (ps.includes(pane) ? ps : [...ps, pane]));
+    }
   }, [pane]);
   useEffect(() => {
     const up = (e: KeyboardEvent) => {
-      if (e.code === "Space") setGrabMode(false);
+      if (e.code === "Space") {
+        setGrabMode(false);
+      }
     };
     const blur = () => setGrabMode(false);
     addEventListener("keyup", up);
@@ -346,7 +376,9 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
-    if (!data || busy) return;
+    if (!data || busy) {
+      return;
+    }
     let live = true;
     const t = setTimeout(
       () =>
@@ -358,10 +390,14 @@ export default function App() {
           settings,
         })
           .then((a) => {
-            if (live) setAnalysis(a);
+            if (live) {
+              setAnalysis(a);
+            }
           })
           .catch((e) => {
-            if (live && !(e instanceof Superseded)) setError(e.message);
+            if (live && !(e instanceof Superseded)) {
+              setError(e.message);
+            }
           }),
       25,
     );
@@ -386,8 +422,8 @@ export default function App() {
     busy,
   ]);
   const newCut = () => {
-    let n = 1,
-      name: string;
+    let n = 1;
+    let name: string;
     do {
       name = `${trial!.name}_${tetNum} edited${n > 1 ? ` ${n}` : ""}.cut`;
       n++;
@@ -431,12 +467,15 @@ export default function App() {
       await cutDownloads.current.prepare(t, e, c);
       setDownloadVersion((v) => v + 1);
     } catch (error) {
-      if (!(error instanceof Superseded))
+      if (!(error instanceof Superseded)) {
         setNotice(`Could not prepare ${c.name}: ${String(error)}`);
+      }
     }
   };
   useEffect(() => {
-    if (!trial || !tet || !cut?.local || busy || splitPoint) return;
+    if (!trial || !tet || !cut?.local || busy || splitPoint) {
+      return;
+    }
     const timer = setTimeout(() => prepareCut(trial, tet, cut), 150);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-prepare only when the local cut or its revision changes
@@ -444,7 +483,9 @@ export default function App() {
   // Edits and undo/redo of the active cut; the first edit of an original also
   // names the new local cut.
   const operation = async (type: "edit" | "undo" | "redo", payload: Partial<EditRequest> = {}) => {
-    if (!ready) return;
+    if (!ready) {
+      return;
+    }
     setSwap(null);
     const generation = loadGen.current;
     setHoverCell(null);
@@ -473,7 +514,9 @@ export default function App() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (generation === loadGen.current) setBusy(false);
+      if (generation === loadGen.current) {
+        setBusy(false);
+      }
     }
   };
   const previewSplit = async (
@@ -482,7 +525,9 @@ export default function App() {
     sample: number,
     threshold: number,
   ) => {
-    if (!ready || finishingSplit.current) return;
+    if (!ready || finishingSplit.current) {
+      return;
+    }
     source = splitPoint?.source ?? source;
     setSplitPoint({ source, channel, sample, threshold });
     setBusy(true);
@@ -509,12 +554,18 @@ export default function App() {
       setData(await request("view", { session: data!.session }));
       setSplitPoint(null);
     } finally {
-      if (!finishingSplit.current) setBusy(false);
+      if (!finishingSplit.current) {
+        setBusy(false);
+      }
     }
   };
   const finishSplit = (cancel = false): Promise<void> => {
-    if (splitCompletion.current) return splitCompletion.current;
-    if (!splitPoint) return Promise.resolve();
+    if (splitCompletion.current) {
+      return splitCompletion.current;
+    }
+    if (!splitPoint) {
+      return Promise.resolve();
+    }
     const completion = (async () => {
       finishingSplit.current = true;
       setBusy(true);
@@ -543,20 +594,29 @@ export default function App() {
   const pushSelection = useRecordingHistory(
     trial && tet?.file ? { trialId, tetNum, cutId } : null,
     async (next, current) => {
-      if (splitPoint) await finishSplit(true);
-      if (current()) applySelection(next);
+      if (splitPoint) {
+        await finishSplit(true);
+      }
+      if (current()) {
+        applySelection(next);
+      }
     },
   );
   useEffect(() => {
-    if (!splitPoint) return;
+    if (!splitPoint) {
+      return;
+    }
     const complete = (event: PointerEvent) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0) {
+        return;
+      }
       // Left presses on either split tile's waveforms adjust the split instead.
       const tile = (event.target as Element | null)
         ?.closest(".tile-waves")
         ?.closest<HTMLElement>(".cell-tile");
-      if (tile && [splitPoint.source, splitPoint.source + 1].includes(Number(tile.dataset.cell)))
+      if (tile && [splitPoint.source, splitPoint.source + 1].includes(Number(tile.dataset.cell))) {
         return;
+      }
       event.preventDefault();
       event.stopImmediatePropagation();
       const swallow = (click: MouseEvent) => {
@@ -597,12 +657,18 @@ export default function App() {
   };
   const newDestination = () => {
     const group = data?.counts.findIndex((count, n) => n > 0 && !count) ?? -1;
-    if (group > 0) selectDest(group);
+    if (group > 0) {
+      selectDest(group);
+    }
   };
   const swapGroup = async (group: number) => {
-    if (!ready || !swap) return;
+    if (!ready || !swap) {
+      return;
+    }
     const source = swap.source;
-    if (source === group) return;
+    if (source === group) {
+      return;
+    }
     const result = await operation("edit", {
       action: "swap",
       source,
@@ -638,7 +704,9 @@ export default function App() {
     });
   };
   const exportCut = async () => {
-    if (!ready) return;
+    if (!ready) {
+      return;
+    }
     try {
       const b = await request("export", {
         session: data!.session,
@@ -661,16 +729,18 @@ export default function App() {
     );
   const popOut = (n: number, x = 45, y = 70) => {
     const canvas = captureTile(n, "", { header: false, details: false });
-    if (!canvas) return;
-    const ratio = Math.min(2, devicePixelRatio || 1),
-      width = Math.min(innerWidth - 20, Math.max(280, canvas.width / ratio)),
-      height = ((width - 2) * canvas.height) / canvas.width + 27,
-      stats = [...document.querySelectorAll(`.cell-tile[data-cell="${n}"] .caption-inner`)].map(
-        (el) => ({
-          label: el.querySelector(".stat-label")?.textContent || "",
-          value: el.querySelector(".stat-value")?.textContent || "",
-        }),
-      );
+    if (!canvas) {
+      return;
+    }
+    const ratio = Math.min(2, devicePixelRatio || 1);
+    const width = Math.min(innerWidth - 20, Math.max(280, canvas.width / ratio));
+    const height = ((width - 2) * canvas.height) / canvas.width + 27;
+    const stats = [...document.querySelectorAll(`.cell-tile[data-cell="${n}"] .caption-inner`)].map(
+      (el) => ({
+        label: el.querySelector(".stat-label")?.textContent || "",
+        value: el.querySelector(".stat-value")?.textContent || "",
+      }),
+    );
     setCopies((cs) => [
       ...cs,
       {
@@ -691,11 +761,13 @@ export default function App() {
       kind === "features"
         ? captureFeatureGrid()
         : document.querySelector<HTMLCanvasElement>(".position-path canvas");
-    if (!source) return;
-    const ratio = Math.min(2, devicePixelRatio || 1),
-      sourceWidth = kind === "features" ? source.width / ratio : source.clientWidth,
-      width = Math.max(240, Math.min(700, sourceWidth)),
-      height = ((width - 2) * source.height) / source.width + 27;
+    if (!source) {
+      return;
+    }
+    const ratio = Math.min(2, devicePixelRatio || 1);
+    const sourceWidth = kind === "features" ? source.width / ratio : source.clientWidth;
+    const width = Math.max(240, Math.min(700, sourceWidth));
+    const height = ((width - 2) * source.height) / source.width + 27;
     setCopies((cs) => [
       ...cs,
       {
@@ -711,9 +783,13 @@ export default function App() {
   };
   const copyPlot = async () => {
     const c = snapshot();
-    if (!c) return;
+    if (!c) {
+      return;
+    }
     c.toBlob(async (b) => {
-      if (!b) return;
+      if (!b) {
+        return;
+      }
       try {
         await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]);
         setNotice("Cell plot copied to clipboard.");
@@ -751,7 +827,9 @@ export default function App() {
       setSwap({ source: n });
     },
     closePane: () => {
-      if (pane) setPanels((ps) => ps.filter((p) => p !== pane));
+      if (pane) {
+        setPanels((ps) => ps.filter((p) => p !== pane));
+      }
       setPane(null);
       setTool("brush");
     },
@@ -766,7 +844,9 @@ export default function App() {
     showPlot,
   });
   const startDemo = async () => {
-    if (busy) return;
+    if (busy) {
+      return;
+    }
     setBusy(true);
     setMessage("Preparing simulated recordings…");
     try {
@@ -791,7 +871,9 @@ export default function App() {
   const drop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDrag(false);
-    if (e.dataTransfer.types.includes("application/x-waveform-cut")) return;
+    if (e.dataTransfer.types.includes("application/x-waveform-cut")) {
+      return;
+    }
     const entries = Array.from(e.dataTransfer.items)
       .map((i) => i.webkitGetAsEntry?.())
       .filter(Boolean);
@@ -809,14 +891,25 @@ export default function App() {
           const batch: any[] = await new Promise((resolve, reject) =>
             reader.readEntries(resolve, reject),
           );
-          if (!batch.length) break;
-          for (const child of batch) await walk(child, `${prefix}${entry.name}/`);
+          if (!batch.length) {
+            break;
+          }
+          for (const child of batch) {
+            await walk(child, `${prefix}${entry.name}/`);
+          }
         }
       }
     };
-    if (entries.length) for (const entry of entries) await walk(entry);
-    else files.push(...Array.from(e.dataTransfer.files));
-    if (files.length) await importFiles(files);
+    if (entries.length) {
+      for (const entry of entries) {
+        await walk(entry);
+      }
+    } else {
+      files.push(...Array.from(e.dataTransfer.files));
+    }
+    if (files.length) {
+      await importFiles(files);
+    }
   };
   const panelContext: PanelContext = {
     settings,
@@ -865,8 +958,8 @@ export default function App() {
       onPopOut={popOut}
       onPopPlot={popPlot}
       onMerge={async (a, b) => {
-        const source = Math.max(a, b),
-          dest = Math.min(a, b);
+        const source = Math.max(a, b);
+        const dest = Math.min(a, b);
         const result = await operation("edit", {
           action: "merge",
           source,
@@ -903,12 +996,13 @@ export default function App() {
       onTet={chooseTet}
       onRecording={(t, n, c) => {
         const target = t.tetrodes.find((e) => e.number === n && e.file);
-        if (target)
+        if (target) {
           navigateTo({
             trialId: t.id,
             tetNum: n,
             cutId: c ?? rememberedCut(target),
           });
+        }
       }}
       onCut={(id) => navigateTo({ trialId, tetNum, cutId: id })}
       downloadVersion={downloadVersion}

@@ -1,5 +1,6 @@
-// Only the React hooks rules: they catch effects whose dependency lists drift
-// from what the effect reads. Formatting is Prettier's job; types are tsc's.
+// React hooks rules (effects whose dependency lists drift from what they read)
+// plus two readability rules: braces on every if/else/loop, and one variable per
+// declaration. Formatting is Prettier's job; types are tsc's.
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 
@@ -10,5 +11,7 @@ export default tseslint.config({
   rules: {
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "warn",
+    curly: ["error", "all"],
+    "one-var": ["error", "never"],
   },
 });

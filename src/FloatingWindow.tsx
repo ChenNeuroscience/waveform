@@ -29,15 +29,15 @@ export function FloatingWindow({
   preferenceKey?: string;
   comparison?: boolean;
 }) {
-  const root = useRef<HTMLElement>(null),
-    [geometry, setGeometry] = usePreference(preferenceKey || null, {
-      x,
-      y,
-      width,
-      height,
-    }),
-    [z, setZ] = useState(() => ++top),
-    position = fitWindowLayout(geometry, innerWidth, innerHeight);
+  const root = useRef<HTMLElement>(null);
+  const [geometry, setGeometry] = usePreference(preferenceKey || null, {
+    x,
+    y,
+    width,
+    height,
+  });
+  const [z, setZ] = useState(() => ++top);
+  const position = fitWindowLayout(geometry, innerWidth, innerHeight);
   useEffect(() => {
     const clamp = () => setGeometry((g) => fitWindowLayout(g, innerWidth, innerHeight));
     clamp();
@@ -61,8 +61,9 @@ export function FloatingWindow({
     onFocus?.();
   };
   const drag = (e: React.PointerEvent) => {
-    if (e.button !== 0 || (e.target as HTMLElement).closest("button,input,select,textarea,a"))
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button,input,select,textarea,a")) {
       return;
+    }
     e.preventDefault();
     const origin = {
       x: e.clientX - position.x,
@@ -107,7 +108,9 @@ export function FloatingWindow({
           event.preventDefault();
           event.stopPropagation();
           onClose();
-        } else focus();
+        } else {
+          focus();
+        }
       }}
     >
       <header className="floating-titlebar" onPointerDown={comparison ? undefined : drag}>

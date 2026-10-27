@@ -19,8 +19,8 @@ import {
   type TileFeedback,
 } from "./types";
 export type VisiblePlots = Record<PlotMode, boolean>;
-const ROW = 124,
-  STRIDE = ROW + 2;
+const ROW = 124;
+const STRIDE = ROW + 2;
 export function TileWall({
   data,
   settings,
@@ -60,59 +60,59 @@ export function TileWall({
   onWaveSplit: (n: number, ch: number, t: number, v: number) => void;
   onPopOut: (n: number, x: number, y: number) => void;
 }) {
-  const scroller = useRef<HTMLDivElement>(null),
-    waveCanvas = useRef<HTMLCanvasElement>(null),
-    // Tile analyses keyed by cell membership, so edits only refetch cells whose
-    // spikes changed and renumbered cells keep theirs.
-    cache = useRef(new Map<string, AnalysisData>()),
-    [analysisVersion, setAnalysisVersion] = useState(0),
-    [scroll, setScroll] = useState(0),
-    [hovered, setHovered] = useState<number | null>(null),
-    [glows, setGlows] = useState<{ cell: number; rect: DOMRect }[]>([]),
-    [jiggles, setJiggles] = useState<{ cell: number; image: string; rect: DOMRect }[]>([]),
-    playedFeedback = useRef(""),
-    [height, setHeight] = useState(800),
-    [width, setWidth] = useState(800),
-    gpu = useRef<WaveGPU | null>(null),
-    [gpuGeneration, setGpuGeneration] = useState(0),
-    [wavesDone, setWavesDone] = useState("");
+  const scroller = useRef<HTMLDivElement>(null);
+  const waveCanvas = useRef<HTMLCanvasElement>(null);
+  // Tile analyses keyed by cell membership, so edits only refetch cells whose
+  // spikes changed and renumbered cells keep theirs.
+  const cache = useRef(new Map<string, AnalysisData>());
+  const [analysisVersion, setAnalysisVersion] = useState(0);
+  const [scroll, setScroll] = useState(0);
+  const [hovered, setHovered] = useState<number | null>(null);
+  const [glows, setGlows] = useState<{ cell: number; rect: DOMRect }[]>([]);
+  const [jiggles, setJiggles] = useState<{ cell: number; image: string; rect: DOMRect }[]>([]);
+  const playedFeedback = useRef("");
+  const [height, setHeight] = useState(800);
+  const [width, setWidth] = useState(800);
+  const gpu = useRef<WaveGPU | null>(null);
+  const [gpuGeneration, setGpuGeneration] = useState(0);
+  const [wavesDone, setWavesDone] = useState("");
   const all = Array.from(data.counts, (n, i) => ({ n, i }))
     .filter(
       (c) => c.n > 0 || (splitPoint && [splitPoint.source, splitPoint.source + 1].includes(c.i)),
     )
     .sort((a, b) => a.i - b.i)
     .map((c) => c.i);
-  const wavePixels = shown.waveforms ? ROW * 4 : 0,
-    tuningWidth = shown.ac ? 128 : (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0),
-    numericWidth = (shown.spatial ? 128 : 0) + tuningWidth,
-    tileWidth = wavePixels + numericWidth + 3,
-    waveFrameWidth = numericWidth ? wavePixels : Math.max(0, wavePixels - 24),
-    waveFrameHeight = waveFrameWidth / 4,
-    waveFrameTop = (ROW - waveFrameHeight) / 2,
-    tileStride = tileWidth + 2,
-    columns = Math.max(1, Math.floor((width - 4) / tileStride)),
-    totalRows = Math.ceil(all.length / columns),
-    startRow = Math.max(0, Math.min(totalRows - 1, Math.floor(scroll / STRIDE) - 1)),
-    start = startRow * columns,
-    visible = all.slice(start, start + (Math.ceil(height / STRIDE) + 3) * columns),
-    visibleRows = Math.ceil(visible.length / columns),
-    layout: WaveLayout = {
-      columns,
-      tileStride,
-      rowStride: STRIDE,
-      waveWidth: waveFrameWidth,
-      waveHeight: waveFrameHeight,
-      top: waveFrameTop,
-      inset: 2,
-    },
-    signature = visible.join(","),
-    waveScope = `${data.session}|${data.revision}`,
-    waveKey = `${waveScope}|${signature}|${settings.density}|${settings.drift}|${waveFrameWidth}`,
-    wavesReady = wavesDone === waveKey,
-    analysisKey = `${data.key}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}|${settings.speedMax}`,
-    // Cancels in-flight tile gestures whenever the cut or analyses change.
-    scope = `${data.session}|${data.revision}|${analysisKey}`,
-    analysisFor = (cell: number) => cache.current.get(membershipKey(data, cell));
+  const wavePixels = shown.waveforms ? ROW * 4 : 0;
+  const tuningWidth = shown.ac ? 128 : (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0);
+  const numericWidth = (shown.spatial ? 128 : 0) + tuningWidth;
+  const tileWidth = wavePixels + numericWidth + 3;
+  const waveFrameWidth = numericWidth ? wavePixels : Math.max(0, wavePixels - 24);
+  const waveFrameHeight = waveFrameWidth / 4;
+  const waveFrameTop = (ROW - waveFrameHeight) / 2;
+  const tileStride = tileWidth + 2;
+  const columns = Math.max(1, Math.floor((width - 4) / tileStride));
+  const totalRows = Math.ceil(all.length / columns);
+  const startRow = Math.max(0, Math.min(totalRows - 1, Math.floor(scroll / STRIDE) - 1));
+  const start = startRow * columns;
+  const visible = all.slice(start, start + (Math.ceil(height / STRIDE) + 3) * columns);
+  const visibleRows = Math.ceil(visible.length / columns);
+  const layout: WaveLayout = {
+    columns,
+    tileStride,
+    rowStride: STRIDE,
+    waveWidth: waveFrameWidth,
+    waveHeight: waveFrameHeight,
+    top: waveFrameTop,
+    inset: 2,
+  };
+  const signature = visible.join(",");
+  const waveScope = `${data.session}|${data.revision}`;
+  const waveKey = `${waveScope}|${signature}|${settings.density}|${settings.drift}|${waveFrameWidth}`;
+  const wavesReady = wavesDone === waveKey;
+  const analysisKey = `${data.key}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}|${settings.speedMax}`;
+  // Cancels in-flight tile gestures whenever the cut or analyses change.
+  const scope = `${data.session}|${data.revision}|${analysisKey}`;
+  const analysisFor = (cell: number) => cache.current.get(membershipKey(data, cell));
   const gestures = useTileGestures({
     splitSource: splitPoint?.source,
     grab: grabMode,
@@ -139,7 +139,9 @@ export function TileWall({
     ]);
     setGlows(
       [...highlighted].flatMap((cell) => {
-        if (cell == null) return [];
+        if (cell == null) {
+          return [];
+        }
         const row = scroller.current?.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`);
         return row ? [{ cell, rect: row.getBoundingClientRect() }] : [];
       }),
@@ -164,14 +166,15 @@ export function TileWall({
     return () => ro.disconnect();
   }, []);
   useEffect(() => {
-    const index = all.indexOf(selected),
-      row = Math.floor(index / columns),
-      el = scroller.current!;
+    const index = all.indexOf(selected);
+    const row = Math.floor(index / columns);
+    const el = scroller.current!;
     if (
       index >= 0 &&
       (row * STRIDE < el.scrollTop || (row + 1) * STRIDE > el.scrollTop + el.clientHeight)
-    )
+    ) {
       el.scrollTop = row * STRIDE;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll only when the selection, cut or column count changes, not as cells are added
   }, [selected, data.session, columns]);
   useEffect(() => {
@@ -180,9 +183,11 @@ export function TileWall({
   }, [analysisKey]);
   useEffect(() => {
     let current = true;
-    const batch = crypto.randomUUID(),
-      missing = visible.filter((c) => !analysisFor(c));
-    if (!missing.length) return;
+    const batch = crypto.randomUUID();
+    const missing = visible.filter((c) => !analysisFor(c));
+    if (!missing.length) {
+      return;
+    }
     Promise.all(
       missing.map((cell) =>
         request("analysis", {
@@ -197,12 +202,19 @@ export function TileWall({
       ),
     )
       .then((results) => {
-        if (!current) return;
+        if (!current) {
+          return;
+        }
         // Stored under the membership the worker actually analysed, which can
         // differ from this render's data if an edit was processed first.
-        for (const result of results)
-          if (result.membership) cache.current.set(result.membership, result);
-        while (cache.current.size > 512) cache.current.delete(cache.current.keys().next().value!);
+        for (const result of results) {
+          if (result.membership) {
+            cache.current.set(result.membership, result);
+          }
+        }
+        while (cache.current.size > 512) {
+          cache.current.delete(cache.current.keys().next().value!);
+        }
         setAnalysisVersion((v) => v + 1);
       })
       .catch(() => {});
@@ -212,7 +224,9 @@ export function TileWall({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by analysisKey (position and analysis settings), the visible signature and data
   }, [analysisKey, signature, data]);
   useEffect(() => {
-    if (!shown.waveforms || !waveCanvas.current) return;
+    if (!shown.waveforms || !waveCanvas.current) {
+      return;
+    }
     const g = new WaveGPU(
       waveCanvas.current,
       (asset, first, count) =>
@@ -252,24 +266,26 @@ export function TileWall({
       feedback.session !== data.session ||
       feedback.revision !== data.revision ||
       (shown.waveforms && !wavesReady)
-    )
+    ) {
       return;
+    }
     // Capture only the updated, visible result tiles after their cached plots
     // are ready. Animate these small composites; the population stays on the GPU.
     const focused = scroller.current?.querySelector<HTMLElement>(
       `.cell-tile[data-cell="${selected}"]`,
     );
-    if (!focused || feedback.cells.some((cell) => visible.includes(cell) && !analysisFor(cell)))
+    if (!focused || feedback.cells.some((cell) => visible.includes(cell) && !analysisFor(cell))) {
       return;
+    }
     const tiles = feedback.cells.flatMap((cell) => {
-      const row = scroller.current?.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`),
-        image =
-          row &&
-          captureTile(cell, "", {
-            header: false,
-            details: false,
-            transparentBadge: true,
-          });
+      const row = scroller.current?.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`);
+      const image =
+        row &&
+        captureTile(cell, "", {
+          header: false,
+          details: false,
+          transparentBadge: true,
+        });
       return row && image
         ? [
             {
@@ -326,23 +342,24 @@ export function TileWall({
             />
           )}
           {visible.map((cell, i) => {
-            const a = analysisFor(cell),
-              paired = !!splitPoint && [splitPoint.source, splitPoint.source + 1].includes(cell),
-              point = paired
-                ? gestures.split || {
-                    channel: splitPoint!.channel,
-                    sample: splitPoint!.sample,
-                    threshold: splitPoint!.threshold,
-                  }
-                : gestures.split?.cell === cell
-                  ? gestures.split
-                  : null,
-              marker = point
-                ? {
-                    x: waveX(point.channel, point.sample) * waveFrameWidth,
-                    y: waveFrameTop + waveY(point.threshold) * waveFrameHeight,
-                  }
+            const a = analysisFor(cell);
+            const paired =
+              !!splitPoint && [splitPoint.source, splitPoint.source + 1].includes(cell);
+            const point = paired
+              ? gestures.split || {
+                  channel: splitPoint!.channel,
+                  sample: splitPoint!.sample,
+                  threshold: splitPoint!.threshold,
+                }
+              : gestures.split?.cell === cell
+                ? gestures.split
                 : null;
+            const marker = point
+              ? {
+                  x: waveX(point.channel, point.sample) * waveFrameWidth,
+                  y: waveFrameTop + waveY(point.threshold) * waveFrameHeight,
+                }
+              : null;
             return (
               <section
                 key={cell}
@@ -362,22 +379,29 @@ export function TileWall({
                   gestures.begin(e, cell);
                 }}
                 onClickCapture={(e) => {
-                  if (!swap) return;
+                  if (!swap) {
+                    return;
+                  }
                   e.preventDefault();
                   e.stopPropagation();
                   onSwapGroup(cell);
                 }}
                 onContextMenu={(e) => {
-                  if ((e.target as HTMLElement).closest(".tile-waves")) e.preventDefault();
+                  if ((e.target as HTMLElement).closest(".tile-waves")) {
+                    e.preventDefault();
+                  }
                 }}
                 onPointerEnter={() => {
                   setHovered(cell);
-                  if (gestures.dragging === null && !grabMode && (!splitPoint || paired))
+                  if (gestures.dragging === null && !grabMode && (!splitPoint || paired)) {
                     onHover(cell);
+                  }
                 }}
                 onPointerLeave={() => {
                   setHovered(null);
-                  if (gestures.dragging === null) onHover(null);
+                  if (gestures.dragging === null) {
+                    onHover(null);
+                  }
                 }}
               >
                 <div
@@ -586,13 +610,15 @@ export function captureTile(
     transparentBadge?: boolean;
   } = {},
 ): HTMLCanvasElement | undefined {
-  const row = document.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`),
-    waves = document.querySelector<HTMLCanvasElement>(".tile-wave-canvas");
-  if (!row) return;
-  const rect = row.getBoundingClientRect(),
-    dpr = Math.min(2, devicePixelRatio || 1),
-    heading = options.header === false ? 0 : 28,
-    canvas = document.createElement("canvas");
+  const row = document.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`);
+  const waves = document.querySelector<HTMLCanvasElement>(".tile-wave-canvas");
+  if (!row) {
+    return;
+  }
+  const rect = row.getBoundingClientRect();
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  const heading = options.header === false ? 0 : 28;
+  const canvas = document.createElement("canvas");
   canvas.width = rect.width * dpr;
   canvas.height = (rect.height + heading) * dpr;
   const ctx = canvas.getContext("2d")!;
@@ -601,13 +627,15 @@ export function captureTile(
   ctx.fillRect(0, 0, rect.width - (options.transparentBadge ? 24 : 0), rect.height + heading);
   ctx.fillStyle = "black";
   ctx.font = "11px Arial";
-  if (heading) ctx.fillText(title, 6, 17);
+  if (heading) {
+    ctx.fillText(title, 6, 17);
+  }
   const waveRegion = row.querySelector<HTMLElement>(".tile-waves")!;
   if (waves && waveRegion.clientWidth) {
-    const w = waves.getBoundingClientRect(),
-      region = waveRegion.getBoundingClientRect(),
-      sx = waves.width / w.width,
-      sy = waves.height / w.height;
+    const w = waves.getBoundingClientRect();
+    const region = waveRegion.getBoundingClientRect();
+    const sx = waves.width / w.width;
+    const sy = waves.height / w.height;
     ctx.drawImage(
       waves,
       (region.left - w.left) * sx,
@@ -631,13 +659,16 @@ export function captureTile(
     ctx.fillRect(info.left - rect.left, info.top - rect.top + heading, info.width, info.height);
     ctx.font = "14px Arial";
     ctx.fillStyle = "#222";
-    for (const [i, line] of [...caption.querySelectorAll("span")].entries())
+    for (const [i, line] of [...caption.querySelectorAll("span")].entries()) {
       ctx.fillText(
         line.textContent || "",
         info.left - rect.left + 6,
         info.top - rect.top + heading + 17 + i * 18,
       );
+    }
   }
-  if (options.transparentBadge) ctx.clearRect(rect.width - 24, heading, 24, 24);
+  if (options.transparentBadge) {
+    ctx.clearRect(rect.width - 24, heading, 24, 24);
+  }
   return canvas;
 }

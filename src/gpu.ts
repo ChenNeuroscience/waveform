@@ -32,21 +32,23 @@ function shader(gl: WebGL2RenderingContext, type: number, source: string) {
   const s = gl.createShader(type)!;
   gl.shaderSource(s, source);
   gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
     throw new Error(gl.getShaderInfoLog(s) || "Shader compilation failed");
+  }
   return s;
 }
 export function program(gl: WebGL2RenderingContext, v: string, f: string) {
   const p = gl.createProgram()!;
-  const a = shader(gl, gl.VERTEX_SHADER, v),
-    b = shader(gl, gl.FRAGMENT_SHADER, f);
+  const a = shader(gl, gl.VERTEX_SHADER, v);
+  const b = shader(gl, gl.FRAGMENT_SHADER, f);
   gl.attachShader(p, a);
   gl.attachShader(p, b);
   gl.linkProgram(p);
   gl.deleteShader(a);
   gl.deleteShader(b);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
     throw new Error(gl.getProgramInfoLog(p) || "Shader link failed");
+  }
   return p;
 }
 export const projections = [
@@ -86,8 +88,9 @@ export class ClusterGPU {
       depth: true,
       preserveDrawingBuffer: true,
     });
-    if (!gl)
+    if (!gl) {
       throw new Error("WebGL2 is unavailable. Enable hardware acceleration and reopen this page.");
+    }
     this.gl = gl;
     this.p = program(gl, vertex, fragment);
     this.empty = gl.createVertexArray()!;
@@ -107,10 +110,10 @@ export class ClusterGPU {
     axes: number[][],
     columns = 3,
   ) {
-    const gl = this.gl,
-      dpr = Math.min(2, devicePixelRatio || 1),
-      w = Math.round(this.canvas.clientWidth * dpr),
-      h = Math.round(this.canvas.clientHeight * dpr);
+    const gl = this.gl;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const w = Math.round(this.canvas.clientWidth * dpr);
+    const h = Math.round(this.canvas.clientHeight * dpr);
     if (w !== this.canvas.width || h !== this.canvas.height) {
       this.canvas.width = w;
       this.canvas.height = h;
@@ -118,8 +121,8 @@ export class ClusterGPU {
     const key = data.key;
     let cached = this.cache.get(key);
     if (!cached) {
-      const vao = gl.createVertexArray()!,
-        buffers = [gl.createBuffer()!, gl.createBuffer()!, gl.createBuffer()!];
+      const vao = gl.createVertexArray()!;
+      const buffers = [gl.createBuffer()!, gl.createBuffer()!, gl.createBuffer()!];
       gl.bindVertexArray(vao);
       gl.bindBuffer(gl.ARRAY_BUFFER, buffers[0]);
       gl.bufferData(gl.ARRAY_BUFFER, data.features, gl.STATIC_DRAW);
@@ -157,8 +160,8 @@ export class ClusterGPU {
         cached.labels = data.labels;
       }
     }
-    const mean = s.drift && this.sums && this.resolve,
-      p = mean ? this.sums! : this.p;
+    const mean = s.drift && this.sums && this.resolve;
+    const p = mean ? this.sums! : this.p;
     gl.useProgram(p);
     gl.bindVertexArray(cached.vao);
     if (mean) {
@@ -189,10 +192,10 @@ export class ClusterGPU {
     gl.uniform2f(u("range"), range[0], range[1]);
     gl.uniform1f(u("timeScale"), cached.timeScale);
     axes.forEach(([ax, ay], i) => {
-      const origin = featurePlotOrigin(i, columns),
-        x = Math.round(origin.x * dpr),
-        y = Math.round(h - (origin.y + FEATURE_PLOT) * dpr),
-        hh = Math.round(FEATURE_PLOT * dpr);
+      const origin = featurePlotOrigin(i, columns);
+      const x = Math.round(origin.x * dpr);
+      const y = Math.round(h - (origin.y + FEATURE_PLOT) * dpr);
+      const hh = Math.round(FEATURE_PLOT * dpr);
       const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
       gl.viewport(
         x + frame.x * dpr,
@@ -256,8 +259,12 @@ export class ClusterGPU {
       g.deleteFramebuffer(this.target.fbo);
     }
     g.deleteProgram(this.p);
-    if (this.sums) g.deleteProgram(this.sums);
-    if (this.resolve) g.deleteProgram(this.resolve);
+    if (this.sums) {
+      g.deleteProgram(this.sums);
+    }
+    if (this.resolve) {
+      g.deleteProgram(this.resolve);
+    }
     g.deleteVertexArray(this.empty);
   }
 }
