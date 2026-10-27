@@ -42,6 +42,7 @@ export function useRecordingHistory(
   useEffect(() => {
     if (selection && !restoring.current)
       history.replaceState(entry(selection), "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- replace the history entry only when the selection's identity changes
   }, [selection?.trialId, selection?.tetNum, selection?.cutId]);
   useEffect(() => {
     const pop = async (event: PopStateEvent) => {

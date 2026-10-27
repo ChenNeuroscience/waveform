@@ -137,7 +137,7 @@ export function DesktopShell(p: Props) {
     resize();
     addEventListener("resize", resize);
     return () => removeEventListener("resize", resize);
-  }, []);
+  }, [setLayout]);
   useEffect(() => {
     root.current
       ?.querySelector<HTMLElement>(".trial-block.selected")

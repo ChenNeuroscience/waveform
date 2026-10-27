@@ -15,8 +15,11 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.4",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.9.10",
     "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.1",
     "vite": "^7.1.10",
     "vitest": "^5.0.5"
   },
@@ -28,7 +31,8 @@
     "test": "npm run build:wasm && vitest run",
     "test:rust": "cargo test --manifest-path core/Cargo.toml",
     "bench": "node scripts/benchmark.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "lint": "eslint src --max-warnings 0"
   },
   "repository": {
     "type": "git",

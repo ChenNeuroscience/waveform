@@ -189,6 +189,7 @@ export function TileWall({
         (row + 1) * STRIDE > el.scrollTop + el.clientHeight)
     )
       el.scrollTop = row * STRIDE;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll only when the selection, cut or column count changes, not as cells are added
   }, [selected, data.session, columns]);
   useEffect(() => {
     cache.current.clear();
@@ -226,6 +227,7 @@ export function TileWall({
     return () => {
       current = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by analysisKey (position and analysis settings), the visible signature and data
   }, [analysisKey, signature, data]);
   useEffect(() => {
     if (!shown.waveforms || !waveCanvas.current) return;
@@ -255,6 +257,7 @@ export function TileWall({
       drift: settings.drift,
       readyKey: waveKey,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- waveKey covers the visible cells, density, drift and frame width
   }, [data, waveKey, columns, tileStride, gpuGeneration]);
   const waveWidth = shown.waveforms ? `${ROW * 4}px` : "0px";
   useEffect(() => {
@@ -306,6 +309,7 @@ export function TileWall({
       playedFeedback.current = feedback.id;
       setJiggles(tiles);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- analysisFor and visible change with the listed analysisVersion, data and scope
   }, [
     feedback,
     data,

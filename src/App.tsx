@@ -305,6 +305,7 @@ export default function App() {
           setData(null);
         }
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when the tetrode or cut identity changes; other inputs are read at load time
   }, [tet?.id, tet?.file, cutId]);
   // The path is shared by every cell, so it is fetched once per position file and
   // processing settings rather than with each cell's analysis.
@@ -326,6 +327,7 @@ export default function App() {
     return () => {
       live = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the position-processing settings change the trajectory
   }, [
     data?.key,
     trial?.id,
@@ -361,6 +363,7 @@ export default function App() {
       live = false;
       clearTimeout(timeout);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- comparisonKey covers the comparison's inputs
   }, [comparisonKey, trial?.pos, busy]);
   useEffect(() => {
     if (pane) setPanels((ps) => (ps.includes(pane) ? ps : [...ps, pane]));
@@ -401,6 +404,7 @@ export default function App() {
       live = false;
       clearTimeout(t);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the listed analysis settings change the result; trial.id travels with trial.pos
   }, [
     data,
     displayCell,
@@ -470,6 +474,7 @@ export default function App() {
     if (!trial || !tet || !cut?.local || busy || splitPoint) return;
     const timer = setTimeout(() => prepareCut(trial, tet, cut), 150);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-prepare only when the local cut or its revision changes
   }, [cut?.id, cut?.revision, busy, splitPoint]);
   // Edits and undo/redo of the active cut; the first edit of an original also
   // names the new local cut.
@@ -618,6 +623,7 @@ export default function App() {
       window.removeEventListener("pointerdown", complete, true);
       window.removeEventListener("keydown", cancel, true);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- listeners are re-registered per split point; finishSplit reads only values fixed for the split
   }, [splitPoint]);
   const selectSource = (group: number, toggle = false) => {
     setSources((current) =>

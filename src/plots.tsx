@@ -109,7 +109,7 @@ export function Clusters({
     };
     window.addEventListener("keydown", pick, true);
     return () => window.removeEventListener("keydown", pick, true);
-  }, [data, selected, isolate, range, columns, tool, onPick]);
+  }, [data, selected, isolate, range, columns, tool, onPick, axes]);
   useEffect(() => {
     const c = canvas.current!;
     const restore = () => setVersion((v) => v + 1),
@@ -165,6 +165,7 @@ export function Clusters({
     }
     // Only point size and drift affect the points; other settings (rate maps,
     // analysis windows) must not redraw the whole population.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only point size and drift among the settings affect the drawn points
   }, [
     data,
     settings.pointSize,

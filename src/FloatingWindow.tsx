@@ -60,7 +60,7 @@ export function FloatingWindow({
       observer.disconnect();
       removeEventListener("resize", clamp);
     };
-  }, []);
+  }, [setGeometry]);
   const focus = () => {
     setZ(++top);
     onFocus?.();
