@@ -1,4 +1,10 @@
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   FolderOpen,
   Folder,
@@ -142,9 +148,19 @@ export function DesktopShell(p: Props) {
       p.comparisonAnalysis?.cell === p.dragComparison.target
         ? p.comparisonAnalysis
         : null,
-    pathLayers = [primary, secondary]
-      .filter((a): a is AnalysisData => !!a)
-      .map((a) => ({ cell: a.cell, spikes: a.spikes, color: color(a.cell) }));
+    // Stable unless the overlaid analyses change, so unrelated renders (hover,
+    // progress, selection) do not repaint the full-resolution trajectory.
+    pathLayers = useMemo(
+      () =>
+        [primary, secondary]
+          .filter((a): a is AnalysisData => !!a)
+          .map((a) => ({
+            cell: a.cell,
+            spikes: a.spikes,
+            color: color(a.cell),
+          })),
+      [primary, secondary],
+    );
   const ready = p.ready,
     active = p.trial?.tetrodes.find((t) => t.number === p.tetNum),
     numbers = [
