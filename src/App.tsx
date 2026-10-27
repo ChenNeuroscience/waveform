@@ -84,6 +84,20 @@ export default function App() {
       speed: true,
       ac: true,
     });
+  // As in v1: show only the chosen plot; with Shift, toggle it among the others.
+  const showPlot = (mode: PlotMode, multiple: boolean) =>
+    setShown((s) =>
+      multiple
+        ? { ...s, [mode]: !s[mode] }
+        : {
+            waveforms: false,
+            spatial: false,
+            direction: false,
+            speed: false,
+            ac: false,
+            [mode]: true,
+          },
+    );
   const [pane, setPane] = useState<Pane>(null),
     [panels, setPanels] = useState<Panel[]>([]),
     [grabMode, setGrabMode] = useState(false),
@@ -820,8 +834,8 @@ export default function App() {
         v: "speed",
         t: "ac",
       };
-      if (modes[e.key])
-        setShown((s) => ({ ...s, [modes[e.key]]: !s[modes[e.key]] }));
+      const mode = modes[e.key.toLowerCase()];
+      if (mode) showPlot(mode, e.shiftKey);
       if (trial && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         const i = trials.indexOf(trial) + (e.key === "ArrowLeft" ? -1 : 1);
         if (trials[i]) chooseTrial(trials[i]);
@@ -1132,7 +1146,7 @@ export default function App() {
       onDest={selectDest}
       onNewGroup={newDestination}
       onTool={setTool}
-      onToggle={(m) => setShown((s) => ({ ...s, [m]: !s[m] }))}
+      onToggle={showPlot}
       onPanel={setPane}
       onOperation={operation}
       onPolygon={polygon}
@@ -1296,22 +1310,13 @@ export default function App() {
                 />
                 <Shortcut
                   keys="W / R / C / V / T"
-                  text="Waves / spatial / direction / speed / autocorrelation"
+                  text="Show only waves / spatial / direction / speed / autocorrelation; Shift adds or removes"
                 />
                 <Shortcut
                   keys="D / P"
                   text="Time colours (features and waveforms) / waveform density"
                 />
                 <Shortcut keys="Esc" text="Close panel, return to paint" />
-                <h3>Reading the plots</h3>
-                <p className="muted">
-                  Feature space uses a bounded, evenly spaced display sample.
-                  Lasso cuts use all spikes from the chosen source cells, across
-                  the entire recording; the time sliders affect display only.
-                  Waveform traces use a stratified sample. Rate maps use
-                  occupancy-normalised rates. Autocorrelation omits the
-                  self-spike and uses sampled reference spikes for large groups.
-                </p>
                 <a
                   href="https://github.com/ChenNeuroscience/waveform"
                   target="_blank"

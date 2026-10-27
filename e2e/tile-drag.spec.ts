@@ -174,7 +174,9 @@ test("drag comparison leaves a placeholder, fades at exact alignment, overlays b
     "Speed",
     "Autocorrelation",
   ])
-    await page.getByRole("button", { name, exact: true }).click();
+    await page
+      .getByRole("button", { name, exact: true })
+      .click({ modifiers: ["Shift"] });
   await start(page, 1);
   await snap(page, 2);
   await page.mouse.up();

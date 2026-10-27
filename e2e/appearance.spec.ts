@@ -120,7 +120,9 @@ test("feature corner labels survive Space copies; settings and divider positions
   await ready(page);
   expect(await page.locator(".plot-copy").getAttribute("src")).toBe(png);
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
-  await page.getByRole("button", { name: "Waveforms", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Waveforms", exact: true })
+    .click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const settings = page.getByRole("dialog", { name: "Settings", exact: true });
   await settings
@@ -241,10 +243,16 @@ test("browser reload/close modifiers do not toggle plots before the leave warnin
     ),
   ).toBe(false);
   await page.getByRole("button", { name: "Settings", exact: true }).focus();
-  await page.keyboard.press("r");
+  // Shift toggles one plot; a plain key shows only that plot, as in v1.
+  await page.keyboard.press("Shift+R");
   await expect(rate).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Shift+R");
+  await expect(rate).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("r");
   await expect(rate).toHaveAttribute("aria-pressed", "true");
+  await expect(waves).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Shift+W");
+  await expect(waves).toHaveAttribute("aria-pressed", "true");
   const pane = (await page.locator(".position-pane").boundingBox())!,
     path = (await page.locator(".position-path canvas").boundingBox())!;
   expect(path.x).toBe(pane.x);

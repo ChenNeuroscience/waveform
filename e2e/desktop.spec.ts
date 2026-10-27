@@ -319,7 +319,9 @@ test("tiles wrap at their plot width, with details only on hover and no selectio
   const tile = (cell: number) =>
     page.locator(`.cell-tile[data-cell="${cell}"]`);
   const initial = (await tile(0).boundingBox())!;
-  await page.getByRole("button", { name: "Waveforms", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Waveforms", exact: true })
+    .click({ modifiers: ["Shift"] });
   await expect
     .poll(async () => (await tile(0).boundingBox())!.width)
     .toBeLessThan(initial.width);
@@ -340,13 +342,19 @@ test("tiles wrap at their plot width, with details only on hover and no selectio
   ).toBeGreaterThanOrEqual(14);
   await expect(tile(1).locator(".tile-caption")).toBeHidden();
   await page.screenshot({ path: "test-results/wrapped-tiles.png" });
-  await page.getByRole("button", { name: "Spatial rate", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Spatial rate", exact: true })
+    .click({ modifiers: ["Shift"] });
   await expect
     .poll(async () => (await tile(0).boundingBox())!.width)
     .toBeLessThan(a.width);
   for (const name of ["Head direction", "Speed", "Autocorrelation"])
-    await page.getByRole("button", { name, exact: true }).click();
-  await page.getByRole("button", { name: "Waveforms", exact: true }).click();
+    await page
+      .getByRole("button", { name, exact: true })
+      .click({ modifiers: ["Shift"] });
+  await page
+    .getByRole("button", { name: "Waveforms", exact: true })
+    .click({ modifiers: ["Shift"] });
   const size = (await tile(0).boundingBox())!;
   expect(size.width).toBeLessThan(initial.width);
   expect((await tile(1).boundingBox())!.y).toBe(size.y);

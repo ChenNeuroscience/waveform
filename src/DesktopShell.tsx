@@ -93,7 +93,7 @@ interface Props {
   onDest: (n: number) => void;
   onNewGroup: () => void;
   onTool: (s: string) => void;
-  onToggle: (m: PlotMode) => void;
+  onToggle: (m: PlotMode, multiple: boolean) => void;
   onPanel: (p: "settings" | "history" | "headers" | "help") => void;
   onOperation: (type: string, p?: Record<string, unknown>) => void;
   onPolygon: (p: number[], a: number, b: number) => void;
@@ -327,9 +327,9 @@ export function DesktopShell(p: Props) {
                     direction: "Head direction [C]",
                     speed: "Speed tuning [V]",
                     ac: "Autocorrelation [T]",
-                  }[m]
+                  }[m] + " · Shift-click to show several"
                 }
-                onClick={() => p.onToggle(m)}
+                onClick={(e) => p.onToggle(m, e.shiftKey)}
               >
                 {
                   {
@@ -510,11 +510,11 @@ export function DesktopShell(p: Props) {
               </section>
               <div
                 className="pane-splitter"
+                role="separator"
+                aria-orientation="horizontal"
                 title="Resize file and position panes"
                 onPointerDown={(e) => dragSplit(e, "files")}
-              >
-                •••
-              </div>
+              />
               <section className="position-pane">
                 <div className="position-content">
                   {p.analysis && p.trial?.pos ? (
@@ -582,11 +582,11 @@ export function DesktopShell(p: Props) {
               </section>
               <div
                 className="pane-splitter"
+                role="separator"
+                aria-orientation="horizontal"
                 title="Resize position and feature panes"
                 onPointerDown={(e) => dragSplit(e, "position")}
-              >
-                •••
-              </div>
+              />
               <section className="feature-pane">
                 <GroupSelector
                   counts={p.data?.counts}
@@ -647,11 +647,11 @@ export function DesktopShell(p: Props) {
             </div>
             <div
               className="desktop-splitter"
+              role="separator"
+              aria-orientation="vertical"
               title="Resize left panes and cell tile wall"
               onPointerDown={(e) => dragSplit(e, "horizontal")}
-            >
-              ⋮
-            </div>
+            />
             <section className="right-workspace">
               {p.swap && p.data && (
                 <SwapPrompt

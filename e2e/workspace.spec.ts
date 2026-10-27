@@ -82,7 +82,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   await page
     .getByRole("button", { name: "Head direction", exact: true })
-    .click();
+    .click({ modifiers: ["Shift"] });
   await expect(page.locator(".tile-wave-canvas")).toBeVisible();
   await page.keyboard.down("Space");
   await page.locator('.cell-tile[data-cell="1"] .tile-waves').click();
