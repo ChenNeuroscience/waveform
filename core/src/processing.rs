@@ -1,119 +1,6 @@
-//! Full-population parsing, sampling, display preparation, history and export.
+//! Full-population parsing, display preparation, history and export.
 use crate::{Engine, MAX_CELLS, RECORD};
-use std::{collections::HashSet, fmt::Write, slice};
-const CAP: usize = 128;
-#[derive(Default)]
-struct Reservoir {
-    seen: u32,
-    indices: Vec<u32>,
-    waves: Vec<i8>,
-}
-#[derive(Default)]
-pub(crate) struct Samples {
-    groups: Vec<Reservoir>,
-    pub(crate) indices: Vec<u32>,
-    pub(crate) waves: Vec<i8>,
-    labels: Vec<u16>,
-    plan: Vec<u32>,
-}
-impl Samples {
-    pub fn push(&mut self, index: u32, cell: u16, spike: &[u8]) {
-        if self.groups.is_empty() {
-            self.groups = (0..MAX_CELLS).map(|_| Reservoir::default()).collect();
-        }
-        let r = &mut self.groups[cell as usize];
-        r.seen += 1;
-        let slot = if r.seen <= CAP as u32 {
-            r.seen - 1
-        } else {
-            index.wrapping_add(1).wrapping_mul(2654435761) % r.seen
-        } as usize;
-        if slot >= CAP {
-            return;
-        }
-        if slot == r.indices.len() {
-            r.indices.push(index);
-            r.waves.resize((slot + 1) * 200, 0);
-        } else {
-            r.indices[slot] = index;
-        }
-        for c in 0..4 {
-            for t in 0..50 {
-                r.waves[slot * 200 + c * 50 + t] = spike[c * 54 + 4 + t] as i8;
-            }
-        }
-    }
-    fn finish(&mut self) {
-        for r in self.groups.drain(..) {
-            self.indices.extend(r.indices);
-            self.waves.extend(r.waves);
-        }
-        self.groups = vec![];
-    }
-    fn refresh(&mut self, labels: &[u16]) {
-        if self.indices.len() > 32768 {
-            let mut counts = vec![0; MAX_CELLS];
-            let keep: Vec<usize> = self
-                .indices
-                .iter()
-                .enumerate()
-                .filter_map(|(i, &idx)| {
-                    let c = &mut counts[labels[idx as usize] as usize];
-                    *c += 1;
-                    if *c <= CAP {
-                        Some(i)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if keep.len() < self.indices.len() {
-                let mut indices = Vec::with_capacity(keep.len());
-                let mut waves = Vec::with_capacity(keep.len() * 200);
-                for i in keep {
-                    indices.push(self.indices[i]);
-                    waves.extend_from_slice(&self.waves[i * 200..i * 200 + 200]);
-                }
-                self.indices = indices;
-                self.waves = waves;
-            }
-        }
-        self.labels = self.indices.iter().map(|&i| labels[i as usize]).collect();
-    }
-    fn plan(&mut self, labels: &[u16], cell: u16, count: usize) {
-        self.plan.clear();
-        let have = self
-            .indices
-            .iter()
-            .filter(|&&i| labels[i as usize] == cell)
-            .count();
-        if have >= count.min(64) {
-            return;
-        }
-        let mut ids = Vec::with_capacity(CAP);
-        let mut seen = 0u32;
-        for (i, &c) in labels.iter().enumerate() {
-            if c != cell {
-                continue;
-            }
-            seen += 1;
-            let slot = if seen <= CAP as u32 {
-                seen - 1
-            } else {
-                (i as u32).wrapping_add(1).wrapping_mul(2654435761) % seen
-            } as usize;
-            if slot < CAP {
-                if slot == ids.len() {
-                    ids.push(i as u32);
-                } else {
-                    ids[slot] = i as u32;
-                }
-            }
-        }
-        let existing: HashSet<u32> = self.indices.iter().copied().collect();
-        self.plan = ids.into_iter().filter(|i| !existing.contains(i)).collect();
-    }
-}
+use std::{fmt::Write, slice};
 #[derive(Default)]
 pub(crate) struct Display {
     budget: usize,
@@ -247,7 +134,7 @@ impl Engine {
         for (j, &i) in self.display.indices.iter().enumerate() {
             self.display.labels[j] = self.labels[i as usize];
         }
-        self.samples.refresh(&self.labels);
+        self.wave_order();
     }
     fn finish_edit(&mut self) -> usize {
         let before = self
@@ -356,17 +243,9 @@ pub unsafe extern "C" fn engine_cut_finish(e: *mut Engine) -> i32 {
     status
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_samples_finish(e: *mut Engine) {
-    (*e).samples.finish();
-}
-#[no_mangle]
 pub unsafe extern "C" fn engine_prepare_view(e: *mut Engine, budget: usize) {
     (*e).prepare_view(budget);
 }
-macro_rules! getter{($ptr:ident,$len:ident,[$($field:ident).+],$typ:ty)=>{
- #[no_mangle]pub unsafe extern "C" fn $ptr(e:*mut Engine)->*const $typ{let e=&*e;e.$($field).+.as_ptr()}
- #[no_mangle]pub unsafe extern "C" fn $len(e:*mut Engine)->usize{let e=&*e;e.$($field).+.len()}
-};}
 getter!(engine_view_amps, engine_view_amps_len, [display.amps], u8);
 getter!(
     engine_view_times,
@@ -386,50 +265,8 @@ getter!(
     [display.indices],
     u32
 );
-getter!(
-    engine_sample_indices,
-    engine_sample_count,
-    [samples.indices],
-    u32
-);
-getter!(
-    engine_sample_waves,
-    engine_sample_waves_len,
-    [samples.waves],
-    i8
-);
-getter!(
-    engine_sample_labels,
-    engine_sample_labels_len,
-    [samples.labels],
-    u16
-);
-getter!(
-    engine_sample_plan_indices,
-    engine_sample_plan_len,
-    [samples.plan],
-    u32
-);
 getter!(engine_patch, engine_patch_len, [edit.patch], u8);
 getter!(engine_output, engine_output_len, [output], u8);
-#[no_mangle]
-pub unsafe extern "C" fn engine_sample_plan(e: *mut Engine, cell: u16) {
-    let e = &mut *e;
-    e.samples
-        .plan(&e.labels, cell, e.counts[cell as usize] as usize);
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_sample_record(e: *mut Engine, index: u32, p: *const u8) {
-    let e = &mut *e;
-    let record = slice::from_raw_parts(p, RECORD);
-    e.density.remove(&e.labels[index as usize]);
-    e.samples.indices.push(index);
-    for c in 0..4 {
-        for t in 0..50 {
-            e.samples.waves.push(record[c * 54 + 4 + t] as i8);
-        }
-    }
-}
 #[no_mangle]
 pub unsafe extern "C" fn engine_gate_begin(e: *mut Engine, channel: usize, sample: usize) -> i32 {
     let e = &mut *e;
@@ -677,13 +514,10 @@ pub unsafe extern "C" fn engine_export_chunk(e: *mut Engine, first: usize, count
 pub unsafe extern "C" fn engine_resident_bytes(e: *mut Engine) -> usize {
     let e = &*e;
     e.groups.iter().map(|g| g.capacity() * 4).sum::<usize>()
-        + e.density.values().map(|d| d.capacity() * 2).sum::<usize>()
-        + e.density_atlas.capacity() * 2
         + e.times.capacity() * 4
         + e.amplitudes.capacity()
         + e.labels.capacity() * 2
-        + e.samples.waves.capacity()
-        + e.samples.indices.capacity() * 4
+        + e.wave_bytes()
         + e.display.amps.capacity()
         + e.display.times.capacity() * 4
         + e.display.indices.capacity() * 4

@@ -9,7 +9,6 @@ import { openStore, put, get } from "./history";
 import {
   streamFile,
   copyU8,
-  copyI8,
   copyU16,
   copyU32,
   copyF32,
@@ -203,7 +202,6 @@ async function loadAsset(
           `Preparing ${Math.round(fraction * n).toLocaleString()} / ${n.toLocaleString()} spikes`,
         ),
     );
-    wasm.engine_samples_finish(e);
     wasm.engine_recount(e);
     a.ms = performance.now() - start;
     assets.set(key, a);
@@ -233,16 +231,17 @@ function view(a: Asset, s: Session, cached: boolean): ViewData {
     times: copyF32(w, w.engine_view_times(e), w.engine_view_times_len(e)),
     labels: copyU16(w, w.engine_view_labels(e), w.engine_view_labels_len(e)),
     indices: copyU32(w, w.engine_view_indices(e), w.engine_view_indices_len(e)),
-    waves: copyI8(w, w.engine_sample_waves(e), w.engine_sample_waves_len(e)),
-    waveLabels: copyU16(
+    waveSlots: w.engine_wave_slots(e),
+    waveOrder: copyU32(w, w.engine_wave_order(e), w.engine_wave_order_len(e)),
+    waveStarts: copyU32(
       w,
-      w.engine_sample_labels(e),
-      w.engine_sample_labels_len(e),
+      w.engine_wave_starts(e),
+      w.engine_wave_starts_len(e),
     ),
-    waveIndices: copyU32(
+    waveHashes: copyU32(
       w,
-      w.engine_sample_indices(e),
-      w.engine_sample_count(e),
+      w.engine_wave_hashes(e),
+      w.engine_wave_hashes_len(e),
     ),
     headers: currentHeaders,
     undo: s.undo,
@@ -253,34 +252,42 @@ function view(a: Asset, s: Session, cached: boolean): ViewData {
     loadMs: a.ms,
   };
 }
-async function replenishWaves(a: Asset, cell: number) {
+/** One GPU batch of raw resident records. Unsampled batches are a single contiguous
+ * Blob slice handed over untouched; sampled ones stream through Rust, which copies
+ * only the resident records. */
+async function waveBatch(a: Asset, first: number, count: number) {
   const w = a.wasm,
-    e = a.e;
-  w.engine_sample_plan(e, cell);
-  const wanted = copyU32(
-    w,
-    w.engine_sample_plan_indices(e),
-    w.engine_sample_plan_len(e),
-  );
-  // Only a bounded plan (<=128 records) crosses this bridge. Rust selects the records
-  // and extracts signed channel samples; JS merely performs the browser reads.
-  for (let first = 0; first < wanted.length; first += 16)
-    await Promise.all(
-      [...wanted.subarray(first, first + 16)].map(async (index) => {
-        const bytes = new Uint8Array(
-            await a.file
-              .slice(a.offset + index * 216, a.offset + (index + 1) * 216)
-              .arrayBuffer(),
-          ),
-          p = w.alloc_bytes(216);
-        try {
-          new Uint8Array(w.memory.buffer, p, 216).set(bytes);
-          w.engine_sample_record(e, index, p);
-        } finally {
-          w.free_bytes(p, 216);
-        }
-      }),
+    e = a.e,
+    slots = w.engine_wave_slots(e);
+  if (
+    !Number.isInteger(first) ||
+    !Number.isInteger(count) ||
+    first < 0 ||
+    count < 1 ||
+    first >= slots
+  )
+    throw new Error("Invalid waveform batch.");
+  count = Math.min(count, slots - first);
+  const r0 = w.engine_wave_record(e, first),
+    r1 = w.engine_wave_record(e, first + count - 1) + 1,
+    start = a.offset + r0 * 216;
+  if (slots === a.n) {
+    const bytes = new Uint8Array(
+      await a.file.slice(start, start + count * 216).arrayBuffer(),
     );
+    if (bytes.length !== count * 216) throw new Error("Truncated file read.");
+    return bytes;
+  }
+  w.engine_wave_begin(e, first, count);
+  await streamFile(
+    w,
+    a.file,
+    start,
+    (r1 - r0) * 216,
+    32768 * 216,
+    (p, bytes, at) => w.engine_wave_feed(e, r0 + at / 216, p, bytes),
+  );
+  return copyU8(w, w.engine_wave_batch(e), w.engine_wave_batch_len(e));
 }
 async function waveformColumn(
   a: Asset,
@@ -309,7 +316,7 @@ async function waveformColumn(
   );
 }
 async function handle(m: any): Promise<any> {
-  if (splitState && !["split", "analysis", "wave_density"].includes(m.type))
+  if (splitState && !["split", "analysis", "wave_batch"].includes(m.type))
     throw new Error(
       "Finish the waveform split with a left click, or press Escape to cancel.",
     );
@@ -474,8 +481,6 @@ async function handle(m: any): Promise<any> {
           sample: m.sample,
           threshold: m.threshold,
         };
-        await replenishWaves(a, splitState.source);
-        await replenishWaves(a, splitState.source + 1);
       } else if (splitState) {
         if (m.phase === "cancel") w.engine_edit_rollback(e);
         else {
@@ -582,12 +587,6 @@ async function handle(m: any): Promise<any> {
     } finally {
       w.engine_patch_clear(e);
     }
-    if (changed)
-      try {
-        await replenishWaves(a, m.dest);
-      } catch {
-        progress(m.id, 1, "Cut saved; waveform sample refresh unavailable.");
-      }
     return view(a, s, true);
   }
   if (m.type === "undo" || m.type === "redo") {
@@ -620,13 +619,9 @@ async function handle(m: any): Promise<any> {
     }
     return view(a, s, true);
   }
-  if (m.type === "wave_density") {
-    for (const cell of m.cells) await replenishWaves(a, cell);
-    withU16(w, m.cells, (p, n) => w.engine_density(e, p, n));
-    return {
-      texture: copyU16(w, w.engine_density_ptr(e), w.engine_density_len(e)),
-      samples: copyU32(w, w.engine_density_sizes(e), m.cells.length),
-    };
+  if (m.type === "wave_batch") {
+    if (m.asset !== a.key) throw new Error("Superseded waveform batch.");
+    return { waves: await waveBatch(a, m.first, m.count) };
   }
   if (m.type === "analysis") {
     const opts = m.settings as Settings,

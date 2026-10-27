@@ -8,7 +8,7 @@ import {
   featureGridSize,
   featurePlotOrigin,
 } from "./plot-geometry";
-import { ClusterGPU, drawWaves, drawWaveOverview, projections } from "./gpu";
+import { ClusterGPU, projections } from "./gpu";
 import {
   color,
   type ViewData,
@@ -299,120 +299,6 @@ export function captureFeatureGrid(): HTMLCanvasElement | undefined {
     ctx.fillText(label.dataset.xAxis || "", x + 124, y + 124);
   }
   return copy;
-}
-export function WavePlot({ data, cell }: { data: ViewData; cell: number }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => drawWaves(ref.current!, data, cell), [data, cell]);
-  return (
-    <div className="wave-plot">
-      <div className="channel-labels">
-        {[1, 2, 3, 4].map((c) => (
-          <span key={c}>CH {c}</span>
-        ))}
-      </div>
-      <canvas ref={ref} aria-label={`Sampled waveforms for cell ${cell}`} />
-      <small>
-        50 samples / channel ·{" "}
-        {data.waveLabels.filter((c) => c === cell).length} sampled spikes
-      </small>
-    </div>
-  );
-}
-export function CellOverview({
-  data,
-  selected,
-  onSelect,
-}: {
-  data: ViewData;
-  selected: number;
-  onSelect: (n: number) => void;
-}) {
-  const [page, setPage] = useState(0),
-    [open, setOpen] = useState(false),
-    [cols, setCols] = useState(3),
-    [version, setVersion] = useState(0),
-    ref = useRef<HTMLCanvasElement>(null);
-  const ids = Array.from(data.counts, (n, i) => ({ n, i }))
-      .filter((c) => c.n > 0)
-      .map((c) => c.i),
-    pages = Math.ceil(ids.length / 12),
-    cells = ids.slice(
-      Math.min(page, pages - 1) * 12,
-      (Math.min(page, pages - 1) + 1) * 12,
-    );
-  useEffect(() => {
-    if (!open || !ref.current) return;
-    const ro = new ResizeObserver(() => {
-      setCols(ref.current!.clientWidth < 500 ? 2 : 3);
-      setVersion((v) => v + 1);
-    });
-    ro.observe(ref.current);
-    return () => ro.disconnect();
-  }, [open]);
-  useEffect(() => {
-    if (open && ref.current)
-      return drawWaveOverview(ref.current, data, cells, cols);
-  }, [data, open, page, cols, version]);
-  return (
-    <div className="panel overview-panel">
-      <div className="panel-heading">
-        <button className="overview-toggle" onClick={() => setOpen(!open)}>
-          <span>{open ? "▾" : "▸"}</span> Cell overview{" "}
-          <small>{ids.length} groups · sampled waveforms</small>
-        </button>
-        {open && (
-          <div className="overview-pages">
-            <button
-              disabled={page <= 0}
-              aria-label="Previous cell page"
-              onClick={() => setPage((p) => p - 1)}
-            >
-              ←
-            </button>
-            <small>
-              {page + 1} / {pages}
-            </small>
-            <button
-              disabled={page >= pages - 1}
-              aria-label="Next cell page"
-              onClick={() => setPage((p) => p + 1)}
-            >
-              →
-            </button>
-          </div>
-        )}
-      </div>
-      {open && (
-        <div
-          className="wave-overview"
-          style={{ height: Math.ceil(cells.length / cols) * 120 }}
-        >
-          <canvas
-            ref={ref}
-            aria-label="Waveform overview rendered in one WebGL2 context"
-          />
-          <div
-            className="wave-overview-labels"
-            style={{ gridTemplateColumns: `repeat(${cols},1fr)` }}
-          >
-            {cells.map((c) => (
-              <button
-                key={c}
-                className={c === selected ? "selected" : ""}
-                onClick={() => onSelect(c)}
-                aria-label={`Inspect overview cell ${c}`}
-              >
-                <b style={{ color: color(c) }}>
-                  Cell {String(c).padStart(2, "0")}
-                </b>
-                <small>{data.counts[c].toLocaleString()} spikes</small>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 export function AnalysisPlot({
   data,

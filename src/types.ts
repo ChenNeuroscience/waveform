@@ -88,9 +88,13 @@ export interface ViewData {
   times: Float32Array;
   labels: Uint16Array;
   indices: Uint32Array;
-  waves: Int8Array;
-  waveLabels: Uint16Array;
-  waveIndices: Uint32Array;
+  /** Resident (GPU) waveform records: all spikes up to 1M, else evenly sampled. */
+  waveSlots: number;
+  /** Resident slots grouped by cell; cell c occupies waveStarts[c]..waveStarts[c+1]. */
+  waveOrder: Uint32Array;
+  waveStarts: Uint32Array;
+  /** Two u32 halves per cell of a hash of its resident slot set. */
+  waveHashes: Uint32Array;
   headers: Record<string, Header>;
   undo: HistoryEntry[];
   redo: HistoryEntry[];

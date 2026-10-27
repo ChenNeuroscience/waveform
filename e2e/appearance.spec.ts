@@ -8,7 +8,7 @@ async function demo(page: Page) {
   await ready(page);
 }
 
-test("hover preserves waveform pixels, aligns the badge and displays the sampling warning above the toolbar", async ({
+test("hover preserves waveform pixels, aligns the badge and shows the sampling warning only for sampled plots", async ({
   page,
 }) => {
   await page.goto("/?demo=quick");
@@ -35,8 +35,13 @@ test("hover preserves waveform pixels, aligns the badge and displays the samplin
   const clip = { x: bounds.x + 25, y: bounds.y + 20, width: 400, height: 65 };
   const before = await page.screenshot({ clip });
   await tile.hover({ position: { x: 45, y: 45 } });
-  await expect(warning).toHaveText("WARNING: using sampled rendering");
-  await expect(warning).toBeVisible();
+  // Demo tetrodes are under 1M spikes, so waveforms are complete; only a sampled
+  // autocorrelogram can still mark the tile as sampled.
+  const sampled = (await tile.getAttribute("data-sampled")) === "true";
+  if (sampled) {
+    await expect(warning).toHaveText("WARNING: using sampled rendering");
+    await expect(warning).toBeVisible();
+  } else await expect(warning).toHaveCount(0);
   expect(await page.screenshot({ clip })).toEqual(before);
   expect(await badge.boundingBox()).toEqual(beforeBadge);
   const glow = page.locator("body > .tile-hover-glow");
@@ -67,7 +72,7 @@ test("hover preserves waveform pixels, aligns the badge and displays the samplin
   await page.keyboard.up("Space");
   const copy = page.locator(".tile-copy");
   await copy.hover();
-  await expect(copy.locator(".sampling-warning")).toBeVisible();
+  await expect(copy.locator(".sampling-warning")).toHaveCount(sampled ? 1 : 0);
   const cb = (await copy.boundingBox())!,
     sticker = (await copy.locator(".tile-copy-badge").boundingBox())!;
   expect(sticker.y - cb.y).toBe(3);

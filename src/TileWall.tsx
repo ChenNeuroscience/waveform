@@ -1,7 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { drawWaveOverview } from "./gpu";
-import { drawDensity } from "./density-gpu";
+import { WaveGPU } from "./wave-gpu";
 import { AnalysisPlot } from "./plots";
 import { CellStats } from "./CellStats";
 import { request } from "./client";
@@ -74,11 +73,9 @@ export function TileWall({
     analysisScope = useRef(""),
     [height, setHeight] = useState(800),
     [width, setWidth] = useState(800),
-    [density, setDensity] = useState<{
-      key: string;
-      texture: Uint16Array;
-      samples: Uint32Array;
-    } | null>(null);
+    gpu = useRef<WaveGPU | null>(null),
+    [gpuGeneration, setGpuGeneration] = useState(0),
+    [wavesDone, setWavesDone] = useState("");
   const all = Array.from(data.counts, (n, i) => ({ n, i }))
     .filter(
       (c) =>
@@ -121,6 +118,8 @@ export function TileWall({
     },
     signature = visible.join(","),
     waveScope = `${data.session}|${data.revision}`,
+    waveKey = `${waveScope}|${signature}|${settings.density}|${waveFrameWidth}`,
+    wavesReady = wavesDone === waveKey,
     scope = `${data.session}|${data.revision}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}|${settings.speedMax}`;
   const gestures = useTileGestures({
     splitSource: splitPoint?.source,
@@ -139,11 +138,6 @@ export function TileWall({
         transparentBadge: true,
       })?.toDataURL(),
   });
-  const waveCounts = useMemo(() => {
-    const counts = new Uint32Array(data.counts.length);
-    for (const cell of data.waveLabels) counts[cell]++;
-    return counts;
-  }, [data.waveLabels]);
   // The scroller clips ordinary shadows. Paint only the halo in the page layer,
   // above the toolbar, while leaving the shared waveform canvas unobstructed.
   useLayoutEffect(() => {
@@ -224,46 +218,33 @@ export function TileWall({
     };
   }, [scope, signature]);
   useEffect(() => {
-    let live = true;
-    if (settings.density && shown.waveforms && visible.length)
-      request<{ texture: Uint16Array; samples: Uint32Array }>("wave_density", {
-        session: data.session,
-        cells: visible,
-      })
-        .then((r) => {
-          if (live)
-            setDensity({
-              key: waveScope + "|" + signature,
-              texture: r.texture,
-              samples: r.samples,
-            });
-        })
-        .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [waveScope, signature, settings.density, shown.waveforms]);
-  useEffect(() => {
     if (!shown.waveforms || !waveCanvas.current) return;
-    if (settings.density && density?.key === waveScope + "|" + signature)
-      return drawDensity(
-        waveCanvas.current,
-        density.texture,
-        visible.length,
-        layout,
-        density.samples,
-      );
-    return drawWaveOverview(waveCanvas.current, data, visible, columns, layout);
-  }, [
-    data,
-    signature,
-    columns,
-    tileStride,
-    waveFrameWidth,
-    shown.waveforms,
-    settings.density,
-    density,
-  ]);
+    const g = new WaveGPU(
+      waveCanvas.current,
+      (asset, first, count) =>
+        request<{ waves: Uint8Array }>("wave_batch", {
+          asset,
+          first,
+          count,
+        }).then((r) => r.waves),
+      setWavesDone,
+    );
+    gpu.current = g;
+    setGpuGeneration((n) => n + 1);
+    return () => {
+      g.dispose();
+      gpu.current = null;
+    };
+  }, [shown.waveforms]);
+  useEffect(() => {
+    gpu.current?.update({
+      data,
+      cells: visible,
+      layout,
+      density: settings.density,
+      readyKey: waveKey,
+    });
+  }, [data, waveKey, columns, tileStride, gpuGeneration]);
   const waveWidth = shown.waveforms ? `${ROW * 4}px` : "0px";
   useEffect(() => {
     setJiggles([]);
@@ -275,9 +256,7 @@ export function TileWall({
       feedback.session !== data.session ||
       feedback.revision !== data.revision ||
       analysisScope.current !== scope ||
-      (shown.waveforms &&
-        settings.density &&
-        density?.key !== waveScope + "|" + signature)
+      (shown.waveforms && !wavesReady)
     )
       return;
     // Capture only the updated, visible result tiles after their cached plots
@@ -319,7 +298,7 @@ export function TileWall({
     feedback,
     data,
     maps,
-    density,
+    wavesReady,
     scope,
     signature,
     selected,
@@ -351,10 +330,9 @@ export function TileWall({
           {shown.waveforms && (
             <canvas
               data-density={
-                settings.density && density?.key === waveScope + "|" + signature
-                  ? "ready"
-                  : "pending"
+                settings.density && wavesReady ? "ready" : "pending"
               }
+              data-waves={wavesReady ? "ready" : "pending"}
               ref={waveCanvas}
               className="tile-wave-canvas"
               style={{ width: columns * tileStride }}
@@ -363,9 +341,7 @@ export function TileWall({
           )}
           {visible.map((cell, i) => {
             const a = maps.get(cell),
-              renderedWaves = settings.density
-                ? waveCounts[cell]
-                : Math.min(waveCounts[cell], 256),
+              renderedWaves = data.waveStarts[cell + 1] - data.waveStarts[cell],
               sampled =
                 (shown.waveforms && data.counts[cell] > renderedWaves) ||
                 (shown.ac && !!a?.sampledPairs),
