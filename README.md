@@ -2,7 +2,7 @@
 
 [![Waveform video introduction](img/demo_youtube.png)](https://www.youtube.com/watch?v=36o69CPu-1E)
 
-Waveform is a browser app for manually cutting (spike sorting) tetrode recordings in the Axona format. Drop in a folder of `.set`, `.pos`, tetrode and cut files to see every cell's waveforms, feature-space projections, rate maps, tuning and autocorrelograms, then merge, split, paint and relabel cells and export the cut. Recordings stay on your computer: nothing is uploaded.
+Waveform is a browser app for manually cutting (spike sorting) LTX tetrode recordings. Drop in a folder of `.set`, `.pos`, tetrode and cut files to see every cell's waveforms, feature-space projections, rate maps, tuning and autocorrelograms, then merge, split, paint and relabel cells and export the cut. Recordings stay on your computer: nothing is uploaded.
 
 **[Open Waveform](https://chenneuroscience.github.io/waveform/)**, or try it with the simulated data on its start screen.
 
