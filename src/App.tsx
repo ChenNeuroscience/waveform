@@ -11,8 +11,7 @@ import { useRecordingHistory, type RecordingSelection } from "./navigation";
 import { organiseFiles } from "./files";
 import { request } from "./client";
 import {
-  color,
-  groupTextColor,
+  badgeStyle,
   fileId,
   defaultSettings,
   type Settings,
@@ -56,14 +55,138 @@ function download(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 type Pane = PanelName | null;
+
+/** A floating copy of a cell's tile or of a plot (path or feature grid). */
+interface PlotCopy {
+  id: string;
+  title: string;
+  image: string;
+  cell?: number;
+  stats?: CellStat[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** The worker session key for a tetrode and cut. */
+function sessionKey(tet: Tetrode, cutId: string) {
+  return `${tet.id}|${fileId(tet.file!)}|${cutId || "unsorted"}`;
+}
+
+/** The worker key for a trial's position file, or "" without one. */
+function positionKey(trial: Trial | undefined) {
+  return trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : "";
+}
+
+/** Plot visibility showing only `mode` (as in v1, without Shift). */
+function onlyPlot(mode: PlotMode): VisiblePlots {
+  return {
+    waveforms: false,
+    spatial: false,
+    direction: false,
+    speed: false,
+    ac: false,
+    [mode]: true,
+  };
+}
+
+/** The painting sources after clicking `group`: replace, or toggle with Shift. */
+function nextSources(current: number[], group: number, toggle: boolean) {
+  if (!toggle) {
+    return [group];
+  }
+  return current.includes(group) ? current.filter((n) => n !== group) : [...current, group];
+}
+
+/** A cut file name for a new local cut that doesn't clash with existing cuts. */
+function editedCutName(trial: Trial, tet: Tetrode) {
+  for (let n = 1; ; n++) {
+    const name = `${trial.name}_${tet.number} edited${n > 1 ? ` ${n}` : ""}.cut`;
+    if (!tet.cuts.some((c) => c.name === name)) {
+      return name;
+    }
+  }
+}
+
+/** The trials with a local cut added (or replaced) on one tetrode. */
+function withLocalCut(
+  trials: Trial[],
+  trialId: string | undefined,
+  tetId: string | undefined,
+  cut: { id: string; name: string },
+  revision: number,
+): Trial[] {
+  const local: CutFile = { ...cut, file: new File([], cut.name), local: true, revision };
+  return trials.map((t) =>
+    t.id !== trialId
+      ? t
+      : {
+          ...t,
+          tetrodes: t.tetrodes.map((e) =>
+            e.id !== tetId ? e : { ...e, cuts: [...e.cuts.filter((c) => c.id !== cut.id), local] },
+          ),
+        },
+  );
+}
+
+/** Every file in a drop, walking dropped folders and keeping relative paths. */
+async function droppedFiles(transfer: DataTransfer) {
+  const entries = Array.from(transfer.items)
+    .map((i) => i.webkitGetAsEntry?.())
+    .filter(Boolean);
+  if (!entries.length) {
+    return Array.from(transfer.files);
+  }
+  const files: File[] = [];
+  const walk = async (entry: any, prefix = ""): Promise<void> => {
+    if (entry.isFile) {
+      const file: File = await new Promise((resolve, reject) => entry.file(resolve, reject));
+      Object.defineProperty(file, "webkitRelativePath", { value: prefix + file.name });
+      files.push(file);
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      for (;;) {
+        const batch: any[] = await new Promise((resolve, reject) =>
+          reader.readEntries(resolve, reject),
+        );
+        if (!batch.length) {
+          break;
+        }
+        for (const child of batch) {
+          await walk(child, `${prefix}${entry.name}/`);
+        }
+      }
+    }
+  };
+  for (const entry of entries) {
+    await walk(entry);
+  }
+  return files;
+}
+
+/** Keep a window of the given size inside the viewport. */
+function clampToWindow(x: number, y: number, width: number, height: number) {
+  return {
+    x: Math.max(0, Math.min(innerWidth - width - 8, x)),
+    y: Math.max(0, Math.min(innerHeight - height - 8, y)),
+  };
+}
+
 export default function App() {
+  // Imported files, and the selected trial → tetrode → cut.
   const [trials, setTrials] = useState<Trial[]>([]);
   const [trialId, setTrialId] = useState("");
   const [tetNum, setTetNum] = useState(1);
   const [cutId, setCutId] = useState("");
+
+  // The loaded recording (from the worker) and what the position pane shows.
   const [data, setData] = useState<ViewData | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
   const [trajectory, setTrajectory] = useState<Trajectory | null>(null);
+
+  // Settings, the selected cell, and the feature-space painting tool
+  // (destination ← sources), plus which plots each tile shows.
   const [settings, setSettings] = useState<Settings>(readSettings);
   const [cell, setCell] = useState(1);
   const [sources, setSources] = useState<number[]>([1]);
@@ -77,23 +200,16 @@ export default function App() {
     speed: true,
     ac: true,
   });
-  // As in v1: show only the chosen plot; with Shift, toggle it among the others.
-  const showPlot = (mode: PlotMode, multiple: boolean) =>
-    setShown((s) =>
-      multiple
-        ? { ...s, [mode]: !s[mode] }
-        : {
-            waveforms: false,
-            spatial: false,
-            direction: false,
-            speed: false,
-            ac: false,
-            [mode]: true,
-          },
-    );
+
+  // Tool windows (the focused one is `pane`) and floating plot copies.
   const [pane, setPane] = useState<Pane>(null);
   const [panels, setPanels] = useState<PanelName[]>([]);
+  const [copies, setCopies] = useState<PlotCopy[]>([]);
+  // Space held: clicking a plot copies it.
   const [grabMode, setGrabMode] = useState(false);
+
+  // Tile interactions: hover, drag-to-compare (with the target's analysis),
+  // an open waveform split, a pending swap, and the jiggle after an edit.
   const [hoverCell, setHoverCell] = useState<number | null>(null);
   const [dragComparison, setDragComparison] = useState<DragComparison | null>(null);
   const [compareAnalysis, setCompareAnalysis] = useState<{
@@ -103,51 +219,47 @@ export default function App() {
   const [splitPoint, setSplitPoint] = useState<SplitPoint | null>(null);
   const [swap, setSwap] = useState<SwapState | null>(null);
   const [tileFeedback, setTileFeedback] = useState<TileFeedback | null>(null);
-  const [copies, setCopies] = useState<
-    {
-      id: string;
-      title: string;
-      image: string;
-      cell?: number;
-      stats?: CellStat[];
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    }[]
-  >([]);
-  const [downloadVersion, setDownloadVersion] = useState(0);
+
+  // Status: busy/progress for worker operations, error and notice banners,
+  // files dragged over the page, and a counter that re-renders prepared cuts.
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [drag, setDrag] = useState(false);
+  const [downloadVersion, setDownloadVersion] = useState(0);
+
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   // Bumped per recording load; async edits, loads and progress updates compare
   // their captured value so replies for a previous recording are ignored.
   const loadGen = useRef(0);
+  // The last cut chosen on each tetrode, restored when returning to it.
   const lastCuts = useRef(new Map<string, string>());
+  // Sessions with unexported edits, for the leave-page warning.
   const dirtySessions = useRef(new Set<string>());
+  // The split finish/cancel in flight, so repeated clicks share one request.
   const finishingSplit = useRef(false);
   const splitCompletion = useRef<Promise<void> | null>(null);
   const cutDownloads = useRef(new CutDownloads());
+  // The tile under the pointer (for S to swap), without re-rendering on hover.
   const hoveredTile = useRef<number | null>(null);
-  useEffect(() => () => cutDownloads.current.dispose(), []);
-  useEffect(() => {
-    document.title = trials.find((t) => t.id === trialId)?.name
-      ? `${trials.find((t) => t.id === trialId)!.name} [Waveform]`
-      : "Waveform";
-  }, [trialId, trials]);
+
+  // As in v1: show only the chosen plot; with Shift, toggle it among the others.
+  const showPlot = (mode: PlotMode, multiple: boolean) => {
+    setShown((s) => (multiple ? { ...s, [mode]: !s[mode] } : onlyPlot(mode)));
+  };
   const trial = trials.find((t) => t.id === trialId);
   const tet = trial?.tetrodes.find((t) => t.number === tetNum);
   const cut = tet?.cuts.find((c) => c.id === cutId);
-  const ready =
-    !!data &&
-    !busy &&
-    !!tet?.file &&
-    data.session === `${tet.id}|${fileId(tet.file)}|${cutId || "unsorted"}`;
+  // The loaded data matches the selection and no operation is running.
+  const ready = !!data && !busy && !!tet?.file && data.session === sessionKey(tet, cutId);
+
+  useEffect(() => () => cutDownloads.current.dispose(), []);
+  useEffect(() => {
+    document.title = trial ? `${trial.name} [Waveform]` : "Waveform";
+  }, [trial]);
   useEffect(() => {
     localStorage.setItem("waveform-desktop-settings", JSON.stringify(settings));
   }, [settings]);
@@ -245,7 +357,7 @@ export default function App() {
     if (!tet?.file) {
       return;
     }
-    if (data?.session === `${tet.id}|${fileId(tet.file)}|${cutId || "unsorted"}`) {
+    if (data?.session === sessionKey(tet, cutId)) {
       return;
     }
     const gen = ++loadGen.current;
@@ -307,7 +419,7 @@ export default function App() {
     }
     request("trajectory", {
       pos: trial.pos,
-      posKey: `${trial.id}|${fileId(trial.pos)}`,
+      posKey: positionKey(trial),
       settings,
     })
       .then((t) => {
@@ -335,7 +447,7 @@ export default function App() {
           session: data.session,
           cell: target,
           pos: trial?.pos,
-          posKey: trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : "",
+          posKey: positionKey(trial),
           settings,
         })
           .then((a) => {
@@ -386,7 +498,7 @@ export default function App() {
           session: data.session,
           cell: displayCell,
           pos: trial?.pos,
-          posKey: trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : "",
+          posKey: positionKey(trial),
           settings,
         })
           .then((a) => {
@@ -421,45 +533,14 @@ export default function App() {
     settings.speedMax,
     busy,
   ]);
-  const newCut = () => {
-    let n = 1;
-    let name: string;
-    do {
-      name = `${trial!.name}_${tetNum} edited${n > 1 ? ` ${n}` : ""}.cut`;
-      n++;
-    } while (tet!.cuts.some((c) => c.name === name));
-    return { id: crypto.randomUUID(), name };
-  };
+  const newCut = () => ({ id: crypto.randomUUID(), name: editedCutName(trial!, tet!) });
+  // Show a worker view; an edit that created a local cut also adds and selects it.
   const adopt = (d: ViewData) => {
     setData(d);
     if (d.localCut) {
-      const metadata = d.localCut;
-      setTrials((ts) =>
-        ts.map((t) =>
-          t.id === trial?.id
-            ? {
-                ...t,
-                tetrodes: t.tetrodes.map((e) =>
-                  e.id === tet?.id
-                    ? {
-                        ...e,
-                        cuts: [
-                          ...e.cuts.filter((c) => c.id !== metadata.id),
-                          {
-                            ...metadata,
-                            file: new File([], metadata.name),
-                            local: true,
-                            revision: d.revision,
-                          },
-                        ],
-                      }
-                    : e,
-                ),
-              }
-            : t,
-        ),
-      );
-      setCutId(metadata.id);
+      const localCut = d.localCut;
+      setTrials((ts) => withLocalCut(ts, trial?.id, tet?.id, localCut, d.revision));
+      setCutId(localCut.id);
     }
   };
   const prepareCut = async (t: Trial, e: Tetrode, c: CutFile) => {
@@ -643,13 +724,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- listeners are re-registered per split point; finishSplit reads only values fixed for the split
   }, [splitPoint]);
   const selectSource = (group: number, toggle = false) => {
-    setSources((current) =>
-      toggle
-        ? current.includes(group)
-          ? current.filter((n) => n !== group)
-          : [...current, group]
-        : [group],
-    );
+    setSources((current) => nextSources(current, group, toggle));
   };
   const selectDest = (group: number) => {
     setDest(group);
@@ -719,9 +794,6 @@ export default function App() {
       setError(String(e));
     }
   };
-  const selectCell = (c: number) => {
-    setCell(c);
-  };
   const snapshot = () =>
     captureTile(
       cell,
@@ -749,8 +821,7 @@ export default function App() {
         cell: n,
         stats,
         image: canvas.toDataURL(),
-        x: Math.max(0, Math.min(innerWidth - width - 8, x + 15)),
-        y: Math.max(0, Math.min(innerHeight - height - 8, y + 15)),
+        ...clampToWindow(x + 15, y + 15, width, height),
         width,
         height,
       },
@@ -774,8 +845,7 @@ export default function App() {
         id: crypto.randomUUID(),
         title: `${trial?.name} · T${tetNum} · ${kind}`,
         image: source.toDataURL(),
-        x: Math.max(0, Math.min(innerWidth - width - 8, x)),
-        y: Math.max(0, Math.min(innerHeight - height - 8, y)),
+        ...clampToWindow(x, y, width, height),
         width,
         height,
       },
@@ -871,45 +941,61 @@ export default function App() {
   const drop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDrag(false);
+    // Cut files dragged out of the organiser are not imports.
     if (e.dataTransfer.types.includes("application/x-waveform-cut")) {
       return;
     }
-    const entries = Array.from(e.dataTransfer.items)
-      .map((i) => i.webkitGetAsEntry?.())
-      .filter(Boolean);
-    const files: File[] = [];
-    const walk = async (entry: any, prefix = ""): Promise<void> => {
-      if (entry.isFile) {
-        const file: File = await new Promise((resolve, reject) => entry.file(resolve, reject));
-        Object.defineProperty(file, "webkitRelativePath", {
-          value: prefix + file.name,
-        });
-        files.push(file);
-      } else if (entry.isDirectory) {
-        const reader = entry.createReader();
-        for (;;) {
-          const batch: any[] = await new Promise((resolve, reject) =>
-            reader.readEntries(resolve, reject),
-          );
-          if (!batch.length) {
-            break;
-          }
-          for (const child of batch) {
-            await walk(child, `${prefix}${entry.name}/`);
-          }
-        }
-      }
-    };
-    if (entries.length) {
-      for (const entry of entries) {
-        await walk(entry);
-      }
-    } else {
-      files.push(...Array.from(e.dataTransfer.files));
-    }
+    const files = await droppedFiles(e.dataTransfer);
     if (files.length) {
       await importFiles(files);
     }
+  };
+  const mergeCells = async (a: number, b: number) => {
+    const source = Math.max(a, b);
+    const dest = Math.min(a, b);
+    const result = await operation("edit", {
+      action: "merge",
+      source,
+      dest,
+      description: `Merge cells ${a} and ${b}`,
+    });
+    if (result) {
+      setCell(dest);
+      setSources([dest]);
+      setTileFeedback({
+        id: crypto.randomUUID(),
+        session: result.session,
+        revision: result.revision,
+        cells: [dest],
+      });
+    }
+  };
+  // Pick a tetrode in a trial; without an explicit cut, restore its last one.
+  const chooseRecording = (t: Trial, n: number, c?: string) => {
+    const target = t.tetrodes.find((e) => e.number === n && e.file);
+    if (target) {
+      navigateTo({ trialId: t.id, tetNum: n, cutId: c ?? rememberedCut(target) });
+    }
+  };
+  // Dragging a cut out needs its file ready; start preparing it otherwise.
+  const dragCut = (event: React.DragEvent, t: Trial, e: Tetrode, c: CutFile) => {
+    event.stopPropagation();
+    const prepared = cutDownloads.current.entries.get(cutDownloadKey(e, c));
+    if (!prepared) {
+      event.preventDefault();
+      prepareCut(t, e, c);
+      setNotice(`Preparing ${c.name}. Drag it once it is ready.`);
+      return;
+    }
+    writeCutDrag(event.dataTransfer, prepared);
+  };
+  const hoverTile = (group: number | null) => {
+    hoveredTile.current = group;
+    setHoverCell(group);
+  };
+  const closePanel = (name: PanelName) => {
+    setPanels((ps) => ps.filter((p) => p !== name));
+    setPane(null);
   };
   const panelContext: PanelContext = {
     settings,
@@ -930,96 +1016,29 @@ export default function App() {
   };
   return (
     <DesktopShell
-      trials={trials}
-      trial={trial}
-      tetNum={tetNum}
-      cutId={cutId}
-      data={data}
-      analysis={analysis}
-      trajectory={trajectory}
-      settings={settings}
-      cell={cell}
-      sources={sources}
-      dest={dest}
-      tool={tool}
-      isolate={isolate}
-      shown={shown}
-      grabMode={grabMode}
-      hoverCell={hoverCell}
-      dragComparison={dragComparison}
+      {...{ trials, trial, tetNum, cutId, data, analysis, trajectory, settings }}
+      {...{ cell, sources, dest, tool, isolate, shown, grabMode, hoverCell, dragComparison }}
+      {...{ splitPoint, swap, tileFeedback, ready, busy, progress, message, error, notice, drag }}
+      {...{ fileInput, folderInput, downloadVersion }}
       comparisonAnalysis={compareAnalysis?.key === comparisonKey ? compareAnalysis.data : null}
+      cutDownloads={cutDownloads.current}
       onCompare={setDragComparison}
       onHover={setHoverCell}
-      onTileHover={(group) => {
-        hoveredTile.current = group;
-        setHoverCell(group);
-      }}
-      tileFeedback={tileFeedback}
+      onTileHover={hoverTile}
       onPopOut={popOut}
       onPopPlot={popPlot}
-      onMerge={async (a, b) => {
-        const source = Math.max(a, b);
-        const dest = Math.min(a, b);
-        const result = await operation("edit", {
-          action: "merge",
-          source,
-          dest,
-          description: `Merge cells ${a} and ${b}`,
-        });
-        if (result) {
-          setCell(dest);
-          setSources([dest]);
-          setTileFeedback({
-            id: crypto.randomUUID(),
-            session: result.session,
-            revision: result.revision,
-            cells: [dest],
-          });
-        }
-      }}
-      splitPoint={splitPoint}
-      swap={swap}
+      onMerge={mergeCells}
       onSwapGroup={swapGroup}
       onCancelSwap={() => setSwap(null)}
       onWaveSplit={previewSplit}
-      ready={ready}
-      busy={busy}
-      progress={progress}
-      message={message}
-      error={error}
-      notice={notice}
-      drag={drag}
-      fileInput={fileInput}
-      folderInput={folderInput}
       onImport={importFiles}
       onTrial={chooseTrial}
       onTet={chooseTet}
-      onRecording={(t, n, c) => {
-        const target = t.tetrodes.find((e) => e.number === n && e.file);
-        if (target) {
-          navigateTo({
-            trialId: t.id,
-            tetNum: n,
-            cutId: c ?? rememberedCut(target),
-          });
-        }
-      }}
+      onRecording={chooseRecording}
       onCut={(id) => navigateTo({ trialId, tetNum, cutId: id })}
-      downloadVersion={downloadVersion}
-      cutDownloads={cutDownloads.current}
       onPrepareCut={prepareCut}
-      onCutDrag={(event, t, e, c) => {
-        event.stopPropagation();
-        const prepared = cutDownloads.current.entries.get(cutDownloadKey(e, c));
-        if (!prepared) {
-          event.preventDefault();
-          prepareCut(t, e, c);
-          setNotice(`Preparing ${c.name}. Drag it once it is ready.`);
-          return;
-        }
-        writeCutDrag(event.dataTransfer, prepared);
-      }}
-      onCell={selectCell}
+      onCutDrag={dragCut}
+      onCell={setCell}
       onSource={selectSource}
       onDest={selectDest}
       onNewGroup={newDestination}
@@ -1047,10 +1066,7 @@ export default function App() {
             y={panel.y}
             height={panel.height}
             onFocus={() => setPane(name)}
-            onClose={() => {
-              setPanels((ps) => ps.filter((p) => p !== name));
-              setPane(null);
-            }}
+            onClose={() => closePanel(name)}
           >
             <div className="drawer-content">{panel.render(panelContext)}</div>
           </FloatingWindow>
@@ -1071,13 +1087,7 @@ export default function App() {
           {c.cell !== undefined ? (
             <div className="tile-copy">
               <img className="plot-copy" src={c.image} alt="Copied cell plots" draggable={false} />
-              <span
-                className="tile-copy-badge"
-                style={{
-                  background: color(c.cell),
-                  color: groupTextColor(c.cell),
-                }}
-              >
+              <span className="tile-copy-badge" style={badgeStyle(c.cell)}>
                 {c.cell}
               </span>
               <CellStats

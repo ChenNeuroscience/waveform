@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Plus } from "lucide-react";
-import { color, groupTextColor } from "./types";
+import { badgeStyle } from "./types";
 
 export function GroupSelector({
   children,
@@ -45,7 +45,7 @@ export function GroupSelector({
       className={selected === group ? "active" : ""}
       aria-label={`${role}${role === "Group" ? "" : " group"} ${group}`}
       title={`Group ${group} · ${(counts?.[group] || 0).toLocaleString()} spikes. Left: destination [E]. Right: source [F]. Shift-right: toggle source [Shift-F].`}
-      style={{ background: color(group), color: groupTextColor(group) }}
+      style={badgeStyle(group)}
       disabled={disabled}
       onMouseEnter={() => onHover(group)}
       onMouseLeave={() => onHover(null)}

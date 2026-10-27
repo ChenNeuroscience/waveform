@@ -7,8 +7,7 @@ import { request } from "./client";
 import { waveX, waveY, type WaveLayout } from "./plot-geometry";
 import { useTileGestures, type DragComparison } from "./tile-gestures";
 import {
-  color,
-  groupTextColor,
+  badgeStyle,
   type ViewData,
   type AnalysisData,
   membershipKey,
@@ -21,6 +20,72 @@ import {
 export type VisiblePlots = Record<PlotMode, boolean>;
 const ROW = 124;
 const STRIDE = ROW + 2;
+
+/** Cells with tiles: populated cells, plus both halves of an open split. */
+function tileCells(counts: Uint32Array, splitPoint: SplitPoint | null) {
+  const split = splitPoint ? [splitPoint.source, splitPoint.source + 1] : [];
+  const cells: number[] = [];
+  counts.forEach((n, cell) => {
+    if (n > 0 || split.includes(cell)) {
+      cells.push(cell);
+    }
+  });
+  return cells;
+}
+
+/** Tile widths from the shown plots, and the waveform frame within a tile. */
+function tileSizes(shown: VisiblePlots) {
+  const wavePixels = shown.waveforms ? ROW * 4 : 0;
+  const tuningWidth = shown.ac ? 128 : (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0);
+  const numericWidth = (shown.spatial ? 128 : 0) + tuningWidth;
+  const tileWidth = wavePixels + numericWidth + 3;
+  // Without numeric plots the badge sits over the waveforms' right edge.
+  const waveFrameWidth = numericWidth ? wavePixels : Math.max(0, wavePixels - 24);
+  const waveFrameHeight = waveFrameWidth / 4;
+  return {
+    tuningWidth,
+    numericWidth,
+    tileWidth,
+    tileStride: tileWidth + 2,
+    waveFrameWidth,
+    waveFrameHeight,
+    waveFrameTop: (ROW - waveFrameHeight) / 2,
+  };
+}
+
+/** The settings that change a cell's analysis (cache key). */
+function analysisSettingsKey(s: Settings) {
+  return [
+    s.binCm,
+    s.smooth,
+    s.acWindow,
+    s.leds,
+    s.maxSpeed,
+    s.posSmooth,
+    s.dirBin,
+    s.speedBin,
+    s.speedMax,
+  ].join("|");
+}
+
+/** The hover stats for a tile: peak rates (with position data) and spike count. */
+function cellStatEntries(a: AnalysisData | undefined, hasPos: boolean, spikes: number) {
+  const entries = [];
+  if (a && hasPos && a.peak > 0) {
+    entries.push({ label: "spa max", value: `${a.peak.toFixed(1)}Hz` });
+  }
+  const direction = a && hasPos ? Math.max(...a.direction) : 0;
+  if (direction > 0) {
+    entries.push({ label: "dir max", value: `${direction.toFixed(1)}Hz` });
+  }
+  entries.push({ label: "n spikes", value: spikes.toLocaleString() });
+  return entries;
+}
+
+/** Join the class names whose flags are set. */
+function classNames(base: string, flags: Record<string, boolean>) {
+  return [base, ...Object.keys(flags).filter((name) => flags[name])].join(" ");
+}
 export function TileWall({
   data,
   settings,
@@ -62,36 +127,42 @@ export function TileWall({
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const waveCanvas = useRef<HTMLCanvasElement>(null);
+
+  // The scroller's size and scroll position, which decide the visible rows.
+  const [scroll, setScroll] = useState(0);
+  const [height, setHeight] = useState(800);
+  const [width, setWidth] = useState(800);
+
   // Tile analyses keyed by cell membership, so edits only refetch cells whose
-  // spikes changed and renumbered cells keep theirs.
+  // spikes changed and renumbered cells keep theirs; the version re-renders.
   const cache = useRef(new Map<string, AnalysisData>());
   const [analysisVersion, setAnalysisVersion] = useState(0);
-  const [scroll, setScroll] = useState(0);
+
+  // Hover glow and post-edit jiggle overlays, drawn in the page layer.
   const [hovered, setHovered] = useState<number | null>(null);
   const [glows, setGlows] = useState<{ cell: number; rect: DOMRect }[]>([]);
   const [jiggles, setJiggles] = useState<{ cell: number; image: string; rect: DOMRect }[]>([]);
   const playedFeedback = useRef("");
-  const [height, setHeight] = useState(800);
-  const [width, setWidth] = useState(800);
+
+  // The waveform renderer, recreated when waveforms are toggled, and the
+  // render key it last completed (for "ready" and the jiggle capture).
   const gpu = useRef<WaveGPU | null>(null);
   const [gpuGeneration, setGpuGeneration] = useState(0);
   const [wavesDone, setWavesDone] = useState("");
-  const all = Array.from(data.counts, (n, i) => ({ n, i }))
-    .filter(
-      (c) => c.n > 0 || (splitPoint && [splitPoint.source, splitPoint.source + 1].includes(c.i)),
-    )
-    .sort((a, b) => a.i - b.i)
-    .map((c) => c.i);
-  const wavePixels = shown.waveforms ? ROW * 4 : 0;
-  const tuningWidth = shown.ac ? 128 : (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0);
-  const numericWidth = (shown.spatial ? 128 : 0) + tuningWidth;
-  const tileWidth = wavePixels + numericWidth + 3;
-  const waveFrameWidth = numericWidth ? wavePixels : Math.max(0, wavePixels - 24);
-  const waveFrameHeight = waveFrameWidth / 4;
-  const waveFrameTop = (ROW - waveFrameHeight) / 2;
-  const tileStride = tileWidth + 2;
+
+  const all = tileCells(data.counts, splitPoint);
+  const {
+    tuningWidth,
+    numericWidth,
+    tileWidth,
+    tileStride,
+    waveFrameWidth,
+    waveFrameHeight,
+    waveFrameTop,
+  } = tileSizes(shown);
   const columns = Math.max(1, Math.floor((width - 4) / tileStride));
   const totalRows = Math.ceil(all.length / columns);
+  // Render one row above and a few below the viewport.
   const startRow = Math.max(0, Math.min(totalRows - 1, Math.floor(scroll / STRIDE) - 1));
   const start = startRow * columns;
   const visible = all.slice(start, start + (Math.ceil(height / STRIDE) + 3) * columns);
@@ -109,7 +180,7 @@ export function TileWall({
   const waveScope = `${data.session}|${data.revision}`;
   const waveKey = `${waveScope}|${signature}|${settings.density}|${settings.drift}|${waveFrameWidth}`;
   const wavesReady = wavesDone === waveKey;
-  const analysisKey = `${data.key}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}|${settings.speedMax}`;
+  const analysisKey = `${data.key}|${posKey}|${analysisSettingsKey(settings)}`;
   // Cancels in-flight tile gestures whenever the cut or analyses change.
   const scope = `${data.session}|${data.revision}|${analysisKey}`;
   const analysisFor = (cell: number) => cache.current.get(membershipKey(data, cell));
@@ -312,6 +383,53 @@ export function TileWall({
     settings.density,
     shown.waveforms,
   ]);
+  const isSplitTile = (cell: number) =>
+    !!splitPoint && [splitPoint.source, splitPoint.source + 1].includes(cell);
+  // The split gate to mark on a tile: the open split (or its live drag) on both
+  // halves, or a right-drag starting a split on this tile.
+  const splitMarker = (cell: number) => {
+    const point = isSplitTile(cell)
+      ? gestures.split || splitPoint!
+      : gestures.split?.cell === cell
+        ? gestures.split
+        : null;
+    if (!point) {
+      return null;
+    }
+    return {
+      ...point,
+      x: waveX(point.channel, point.sample) * waveFrameWidth,
+      y: waveFrameTop + waveY(point.threshold) * waveFrameHeight,
+    };
+  };
+  // While a swap is pending, tiles choose the swap partner instead of acting.
+  const pressTile = (e: React.PointerEvent<HTMLElement>, cell: number) => {
+    if (swap) {
+      e.preventDefault();
+      return;
+    }
+    gestures.begin(e, cell);
+  };
+  const clickTileCapture = (e: React.MouseEvent, cell: number) => {
+    if (!swap) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    onSwapGroup(cell);
+  };
+  const enterTile = (cell: number) => {
+    setHovered(cell);
+    if (gestures.dragging === null && !grabMode && (!splitPoint || isSplitTile(cell))) {
+      onHover(cell);
+    }
+  };
+  const leaveTile = () => {
+    setHovered(null);
+    if (gestures.dragging === null) {
+      onHover(null);
+    }
+  };
   return (
     <div
       className="tile-wall"
@@ -343,27 +461,20 @@ export function TileWall({
           )}
           {visible.map((cell, i) => {
             const a = analysisFor(cell);
-            const paired =
-              !!splitPoint && [splitPoint.source, splitPoint.source + 1].includes(cell);
-            const point = paired
-              ? gestures.split || {
-                  channel: splitPoint!.channel,
-                  sample: splitPoint!.sample,
-                  threshold: splitPoint!.threshold,
-                }
-              : gestures.split?.cell === cell
-                ? gestures.split
-                : null;
-            const marker = point
-              ? {
-                  x: waveX(point.channel, point.sample) * waveFrameWidth,
-                  y: waveFrameTop + waveY(point.threshold) * waveFrameHeight,
-                }
-              : null;
+            const paired = isSplitTile(cell);
+            const marker = splitMarker(cell);
+            const dragOrigin = gestures.dragging === cell || gestures.settling?.source === cell;
             return (
               <section
                 key={cell}
-                className={`cell-tile ${selected === cell ? "selected" : ""} ${swap?.source === cell ? "swap-source" : ""} ${gestures.target === cell ? "merge-target" : ""} ${splitPoint && !paired ? "split-muted" : ""} ${paired ? "split-pair" : ""} ${gestures.dragging === cell || gestures.settling?.source === cell ? "drag-origin" : ""}`}
+                className={classNames("cell-tile", {
+                  selected: selected === cell,
+                  "swap-source": swap?.source === cell,
+                  "merge-target": gestures.target === cell,
+                  "split-muted": !!splitPoint && !paired,
+                  "split-pair": paired,
+                  "drag-origin": dragOrigin,
+                })}
                 data-cell={cell}
                 style={{
                   top: Math.floor(i / columns) * STRIDE,
@@ -371,38 +482,16 @@ export function TileWall({
                   width: tileWidth,
                   height: ROW,
                 }}
-                onPointerDown={(e) => {
-                  if (swap) {
-                    e.preventDefault();
-                    return;
-                  }
-                  gestures.begin(e, cell);
-                }}
-                onClickCapture={(e) => {
-                  if (!swap) {
-                    return;
-                  }
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onSwapGroup(cell);
-                }}
+                onPointerDown={(e) => pressTile(e, cell)}
+                onClickCapture={(e) => clickTileCapture(e, cell)}
                 onContextMenu={(e) => {
+                  // Right-drag on waveforms starts a split, not the context menu.
                   if ((e.target as HTMLElement).closest(".tile-waves")) {
                     e.preventDefault();
                   }
                 }}
-                onPointerEnter={() => {
-                  setHovered(cell);
-                  if (gestures.dragging === null && !grabMode && (!splitPoint || paired)) {
-                    onHover(cell);
-                  }
-                }}
-                onPointerLeave={() => {
-                  setHovered(null);
-                  if (gestures.dragging === null) {
-                    onHover(null);
-                  }
-                }}
+                onPointerEnter={() => enterTile(cell)}
+                onPointerLeave={leaveTile}
               >
                 <div
                   className="tile-waves"
@@ -411,19 +500,14 @@ export function TileWall({
                   data-plot-top={waveFrameTop}
                   style={{ width: waveWidth }}
                 >
-                  {shown.waveforms && (
-                    <>
-                      {marker && (
-                        <svg className="wave-split-marker">
-                          <line x1={marker.x} x2={marker.x} y1="0" y2="100%" />
-                          <line x1="0" x2="100%" y1={marker.y} y2={marker.y} />
-                          <text
-                            x="4"
-                            y="14"
-                          >{`Ch ${point!.channel + 1} · sample ${point!.sample} · ${point!.threshold}`}</text>
-                        </svg>
-                      )}
-                    </>
+                  {shown.waveforms && marker && (
+                    <svg className="wave-split-marker">
+                      <line x1={marker.x} x2={marker.x} y1="0" y2="100%" />
+                      <line x1="0" x2="100%" y1={marker.y} y2={marker.y} />
+                      <text x="4" y="14">
+                        {`Ch ${marker.channel + 1} · sample ${marker.sample} · ${marker.threshold}`}
+                      </text>
+                    </svg>
                   )}
                 </div>
                 <div className="tile-numeric-plots" style={{ width: numericWidth }}>
@@ -471,10 +555,7 @@ export function TileWall({
                   <button
                     aria-label={`Select cell ${cell}`}
                     title={`Cell ${cell}${cell === 0 ? " (noise)" : ""}`}
-                    style={{
-                      background: color(cell),
-                      color: groupTextColor(cell),
-                    }}
+                    style={badgeStyle(cell)}
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelect(cell);
@@ -483,7 +564,7 @@ export function TileWall({
                     {cell}
                   </button>
                 </div>
-                {(gestures.dragging === cell || gestures.settling?.source === cell) && (
+                {dragOrigin && (
                   <div
                     className="tile-drag-placeholder"
                     aria-label={`Original location of cell ${cell}`}
@@ -492,25 +573,7 @@ export function TileWall({
                   </div>
                 )}
                 {jiggles.some((tile) => tile.cell === cell) && <div className="tile-edit-cover" />}
-                <CellStats
-                  entries={[
-                    ...(a && pos && a.peak > 0
-                      ? [{ label: "spa max", value: `${a.peak.toFixed(1)}Hz` }]
-                      : []),
-                    ...(a && pos && Math.max(...a.direction) > 0
-                      ? [
-                          {
-                            label: "dir max",
-                            value: `${Math.max(...a.direction).toFixed(1)}Hz`,
-                          },
-                        ]
-                      : []),
-                    {
-                      label: "n spikes",
-                      value: data.counts[cell].toLocaleString(),
-                    },
-                  ]}
-                />
+                <CellStats entries={cellStatEntries(a, !!pos, data.counts[cell])} />
               </section>
             );
           })}
@@ -552,13 +615,7 @@ export function TileWall({
             }}
           >
             <img src={tile.image} alt="" />
-            <span
-              className="tile-drag-badge"
-              style={{
-                background: color(tile.cell),
-                color: groupTextColor(tile.cell),
-              }}
-            >
+            <span className="tile-drag-badge" style={badgeStyle(tile.cell)}>
               {tile.cell}
             </span>
           </div>,
@@ -586,13 +643,7 @@ export function TileWall({
               }}
             >
               <img className="tile-drag-image" alt="" src={tile.image} draggable={false} />
-              <span
-                className="tile-drag-badge"
-                style={{
-                  background: color(tile.source),
-                  color: groupTextColor(tile.source),
-                }}
-              >
+              <span className="tile-drag-badge" style={badgeStyle(tile.source)}>
                 {tile.source}
               </span>
             </div>
