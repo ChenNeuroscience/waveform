@@ -1,14 +1,6 @@
-//! Full-population parsing, display preparation, history and export.
+//! Full-population parsing, view preparation, history and export.
 use crate::{Engine, MAX_CELLS, RECORD};
 use std::{fmt::Write, slice};
-#[derive(Default)]
-pub(crate) struct Display {
-    budget: usize,
-    amps: Vec<u8>,
-    times: Vec<f32>,
-    labels: Vec<u16>,
-    indices: Vec<u32>,
-}
 #[derive(Default)]
 pub(crate) struct Gate {
     channel: usize,
@@ -110,30 +102,9 @@ impl CutParser {
     }
 }
 impl Engine {
-    fn prepare_view(&mut self, budget: usize) {
-        let n = self.labels.len();
-        let m = budget.min(n);
-        if self.display.budget != budget || self.display.indices.len() != m {
-            self.display = Display {
-                budget,
-                amps: Vec::with_capacity(m * 4),
-                times: Vec::with_capacity(m),
-                labels: vec![0; m],
-                indices: Vec::with_capacity(m),
-            };
-            let max = self.times.last().copied().unwrap_or(1).max(1) as f32;
-            for j in 0..m {
-                let i = j * n / m;
-                self.display.indices.push(i as u32);
-                self.display
-                    .amps
-                    .extend_from_slice(&self.amplitudes[i * 4..i * 4 + 4]);
-                self.display.times.push(self.times[i] as f32 / max);
-            }
-        }
-        for (j, &i) in self.display.indices.iter().enumerate() {
-            self.display.labels[j] = self.labels[i as usize];
-        }
+    /// The feature view uses the population arrays directly; only the waveform
+    /// slot order is derived per view.
+    fn prepare_view(&mut self) {
         self.wave_order();
     }
     fn finish_edit(&mut self) -> usize {
@@ -243,28 +214,9 @@ pub unsafe extern "C" fn engine_cut_finish(e: *mut Engine) -> i32 {
     status
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_prepare_view(e: *mut Engine, budget: usize) {
-    (*e).prepare_view(budget);
+pub unsafe extern "C" fn engine_prepare_view(e: *mut Engine) {
+    (*e).prepare_view();
 }
-getter!(engine_view_amps, engine_view_amps_len, [display.amps], u8);
-getter!(
-    engine_view_times,
-    engine_view_times_len,
-    [display.times],
-    f32
-);
-getter!(
-    engine_view_labels,
-    engine_view_labels_len,
-    [display.labels],
-    u16
-);
-getter!(
-    engine_view_indices,
-    engine_view_indices_len,
-    [display.indices],
-    u32
-);
 getter!(engine_patch, engine_patch_len, [edit.patch], u8);
 getter!(engine_output, engine_output_len, [output], u8);
 #[no_mangle]
@@ -518,10 +470,6 @@ pub unsafe extern "C" fn engine_resident_bytes(e: *mut Engine) -> usize {
         + e.amplitudes.capacity()
         + e.labels.capacity() * 2
         + e.wave_bytes()
-        + e.display.amps.capacity()
-        + e.display.times.capacity() * 4
-        + e.display.indices.capacity() * 4
-        + e.display.labels.capacity() * 2
         + e.edit
             .preview
             .as_ref()

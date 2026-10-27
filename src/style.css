@@ -2081,22 +2081,6 @@ kbd {
   z-index: 90;
   box-shadow: 0 0 5px 3px #fc0;
 }
-.sampling-warning {
-  position: absolute;
-  left: 4px;
-  bottom: 4px;
-  max-width: calc(100% - 72px);
-  padding: 3px 5px;
-  font: bold 12px/16px Arial;
-  color: #a00;
-  background: #fff5b8f0;
-  pointer-events: none;
-  visibility: hidden;
-  z-index: 5;
-}
-.clusters:hover > .sampling-warning {
-  visibility: visible;
-}
 
 .other-files {
   display: inline-flex;

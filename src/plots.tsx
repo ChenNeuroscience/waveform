@@ -80,12 +80,14 @@ export function Clusters({
       const [ax, ay] = axes[plot];
       let group: number | null = null,
         best = 25;
+      const timeScale = 1 / Math.max(1, data.times[data.times.length - 1] || 0);
       for (let i = 0; i < data.labels.length; i++) {
-        const label = data.labels[i];
+        const label = data.labels[i],
+          time = data.times[i] * timeScale;
         if (
           (isolate && label !== selected) ||
-          data.times[i] < range[0] ||
-          data.times[i] > range[1]
+          time < range[0] ||
+          time > range[1]
         )
           continue;
         const x =
@@ -249,11 +251,6 @@ export function Clusters({
           </div>
         ))}
       </div>
-      {data.features.length / 4 < data.n && (
-        <span className="sampling-warning">
-          WARNING: using sampled rendering
-        </span>
-      )}
       {stroke.length > 0 && (
         <svg className="lasso-overlay">
           <polyline

@@ -3,7 +3,7 @@
 // every loop over spike, label, waveform and position records.
 import { demoFiles, recordingSource } from "./demo";
 import { parseHeader, textHeader, readCut } from "./files";
-import type { Settings, Header, HistoryEntry, ViewData } from "./types";
+import type { Settings, Header, HistoryEntry, ViewMessage } from "./types";
 import { parsePosition, analyse, type Position } from "./position";
 import { openStore, put, get } from "./history";
 import {
@@ -11,7 +11,6 @@ import {
   copyU8,
   copyU16,
   copyU32,
-  copyF32,
   withU16,
   withF32,
   type Core,
@@ -51,7 +50,9 @@ let splitState:
   | { source: number; channel: number; sample: number; threshold: number }
   | undefined;
 let currentHeaders: Record<string, Header> = {},
-  budget = 250000;
+  // Amplitudes and timestamps never change for a recording, so they are sent only
+  // when the recording changes; client.ts reattaches them to later views.
+  populationSent = "";
 const labels = (a: Asset) =>
   new Uint16Array(a.wasm.memory.buffer, a.wasm.engine_labels(a.e), a.n);
 const times = (a: Asset) =>
@@ -211,10 +212,18 @@ async function loadAsset(
     throw error;
   }
 }
-function view(a: Asset, s: Session, cached: boolean): ViewData {
+function view(a: Asset, s: Session, cached: boolean): ViewMessage {
   const w = a.wasm,
     e = a.e;
-  w.engine_prepare_view(e, budget);
+  w.engine_prepare_view(e);
+  const population =
+    populationSent === a.key
+      ? {}
+      : {
+          features: copyU8(w, w.engine_amps(e), a.n * 4),
+          times: copyU32(w, w.engine_times(e), a.n),
+        };
+  populationSent = a.key;
   return {
     key: a.key,
     session: s.key,
@@ -227,10 +236,8 @@ function view(a: Asset, s: Session, cached: boolean): ViewData {
       (times(a)[a.n - 1] || 0) / parseFloat(a.header.timebase),
     timebase: parseFloat(a.header.timebase),
     counts: counts(a).slice(),
-    features: copyU8(w, w.engine_view_amps(e), w.engine_view_amps_len(e)),
-    times: copyF32(w, w.engine_view_times(e), w.engine_view_times_len(e)),
-    labels: copyU16(w, w.engine_view_labels(e), w.engine_view_labels_len(e)),
-    indices: copyU32(w, w.engine_view_indices(e), w.engine_view_indices_len(e)),
+    ...population,
+    labels: copyU16(w, w.engine_labels(e), a.n),
     waveSlots: w.engine_wave_slots(e),
     waveOrder: copyU32(w, w.engine_wave_order(e), w.engine_wave_order_len(e)),
     waveStarts: copyU32(
@@ -331,7 +338,6 @@ async function handle(m: any): Promise<any> {
       sessionKey = `${key}|${m.cut ? m.cutKey : "unsorted"}`,
       cached = assets.has(key),
       existing = sessions.get(sessionKey);
-    budget = m.budget;
     const a = await loadAsset(
       recordingSource(await wasmPromise, m.file),
       existing?.localCut ? undefined : m.cut,
@@ -515,8 +521,7 @@ async function handle(m: any): Promise<any> {
       throw error;
     }
   }
-  if (m.type === "budget") {
-    budget = m.budget;
+  if (m.type === "view") {
     return view(a, s, true);
   }
   if (m.type === "edit") {

@@ -346,11 +346,6 @@ export function DesktopShell(p: Props) {
               className="toolbar-status"
               role="group"
               aria-label="Recording details"
-              title={
-                p.data
-                  ? `Feature display: ${Math.min(p.data.n, p.settings.budget).toLocaleString()} of ${p.data.n.toLocaleString()} spikes; edits use all spikes.`
-                  : undefined
-              }
             >
               {p.data && (
                 <span>

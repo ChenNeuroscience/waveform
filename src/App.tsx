@@ -259,7 +259,6 @@ export default function App() {
         cutKey: cut?.id,
         set: trial?.set,
         pos: trial?.pos,
-        budget: settings.budget,
       },
       (p, m) => {
         if (gen === loadGen.current) {
@@ -489,12 +488,7 @@ export default function App() {
       setData(d);
     } catch (error) {
       setError(String(error));
-      setData(
-        await request("budget", {
-          session: data!.session,
-          budget: settings.budget,
-        }),
-      );
+      setData(await request("view", { session: data!.session }));
       setSplitPoint(null);
     } finally {
       if (!finishingSplit.current) setBusy(false);
@@ -517,12 +511,7 @@ export default function App() {
         );
       } catch (error) {
         setError(String(error));
-        setData(
-          await request("budget", {
-            session: data!.session,
-            budget: settings.budget,
-          }),
-        );
+        setData(await request("view", { session: data!.session }));
       } finally {
         splitCompletion.current = null;
         setSplitPoint(null);
@@ -910,24 +899,6 @@ export default function App() {
         unit="px"
         onChange={(v) => update("pointSize", v)}
       />
-      <label className="field">
-        Display budget
-        <select
-          aria-label="Display budget"
-          value={settings.budget}
-          onChange={async (e) => {
-            const v = +e.target.value;
-            update("budget", v);
-            if (ready) await operation("budget", { budget: v });
-          }}
-        >
-          {[50000, 100000, 250000, 500000, 1000000].map((n) => (
-            <option key={n} value={n}>
-              {fmt(n)} points / projection
-            </option>
-          ))}
-        </select>
-      </label>
       <Toggle
         label="Isolate selected cell"
         checked={isolate}

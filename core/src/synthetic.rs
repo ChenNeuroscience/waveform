@@ -174,6 +174,10 @@ pub struct Synthetic {
     starts: Vec<u32>,
     waves: Vec<i8>,
     drift: Vec<f32>,
+    /// Per-channel fractional amplitude change over the whole session. Non-zero for
+    /// one or two cells per tetrode, as when the electrode moves relative to a cell;
+    /// unequal channels move the cluster across the feature projections.
+    trend: Vec<[f32; 4]>,
 }
 fn tuning(seed: u32, cell: usize) -> Tuning {
     let r = |k: u32| {
@@ -269,6 +273,21 @@ impl Synthetic {
         let drift = (0..=cells)
             .map(|cell| unit(hash(seed ^ 0xd1f7 ^ cell as u32)) * std::f32::consts::TAU)
             .collect();
+        let mut trend = vec![[0f32; 4]; cells + 1];
+        for k in 0..1 + (hash(seed ^ 0xd21f) & 1) {
+            let cell = 1 + hash(seed ^ 0xd220 ^ k) as usize % cells;
+            for (channel, t) in trend[cell].iter_mut().enumerate() {
+                *t = (unit(hash(seed ^ 0xd230 ^ (k * 4 + channel as u32))) - 0.5) * 0.5;
+            }
+            // One channel changes strongly (±35-55%), so the drift is easy to see.
+            let strong = hash(seed ^ 0xd240 ^ k) as usize % 4;
+            let size = 0.35 + 0.2 * unit(hash(seed ^ 0xd250 ^ k));
+            trend[cell][strong] = if hash(seed ^ 0xd260 ^ k) & 1 == 0 {
+                size
+            } else {
+                -size
+            };
+        }
         noise_table();
         let mut synthetic = Self {
             seed,
@@ -292,6 +311,7 @@ impl Synthetic {
             starts: vec![],
             waves,
             drift,
+            trend,
         };
         synthetic.spike_counts();
         synthetic
@@ -419,6 +439,7 @@ impl Synthetic {
                 let p = channel * 54;
                 record[p..p + 4].copy_from_slice(&ticks.to_be_bytes());
                 let wave = &template[channel * PADDED..][..PADDED];
+                let gain = gain * (1. + self.trend[cell][channel] * (phase - 0.5));
                 overlay.fill(0.);
                 if let Some((other, offset, amp)) = overlap {
                     for (t, o) in overlay.iter_mut().enumerate() {
@@ -639,6 +660,44 @@ mod tests {
             }
         }
         assert!(best.0 > 3. && best.1 > 2., "in-field rate ratios {best:?}");
+    }
+    #[test]
+    fn one_or_two_cells_drift_in_amplitude_across_the_session() {
+        let s = Synthetic::new(31, 24, 50000, 1200, 3);
+        let drifting: Vec<usize> = (1..=24).filter(|&c| s.trend[c] != [0.; 4]).collect();
+        assert!((1..=2).contains(&drifting.len()), "{drifting:?}");
+        let cell = drifting[0];
+        let channel = (0..4)
+            .max_by(|&a, &b| s.trend[cell][a].abs().total_cmp(&s.trend[cell][b].abs()))
+            .unwrap();
+        let mut raw = vec![0u8; s.total * 216];
+        s.records(0, &mut raw);
+        let cells = spikes(&s);
+        // Mean peak-to-peak amplitude on the strongly drifting channel, first vs last
+        // tenth of the session.
+        let amplitude = |range: std::ops::Range<usize>| {
+            let values: Vec<f32> = range
+                .filter(|&i| cells[i].0 == cell)
+                .map(|i| {
+                    let w = &raw[i * 216 + channel * 54 + 4..][..50];
+                    let (lo, hi) = w.iter().fold((127i8, -128i8), |(lo, hi), &b| {
+                        (lo.min(b as i8), hi.max(b as i8))
+                    });
+                    (hi as f32 - lo as f32).max(0.)
+                })
+                .collect();
+            values.iter().sum::<f32>() / values.len().max(1) as f32
+        };
+        let (early, late) = (
+            amplitude(0..s.total / 10),
+            amplitude(s.total * 9 / 10..s.total),
+        );
+        let change = late / early - 1.;
+        assert!(
+            change.abs() > 0.15 && change.signum() == s.trend[cell][channel].signum(),
+            "amplitude {early} -> {late}, trend {:?}",
+            s.trend[cell]
+        );
     }
     #[test]
     fn noise_is_band_limited_and_its_level_varies_between_spikes() {

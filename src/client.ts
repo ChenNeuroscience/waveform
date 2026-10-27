@@ -1,4 +1,4 @@
-import type { ViewData } from "./types";
+import type { ViewData, ViewMessage } from "./types";
 import wasmUrl from "./generated/waveform_core.wasm?url";
 const worker = new Worker(new URL("./engine.worker.ts", import.meta.url), {
   type: "module",
@@ -8,7 +8,23 @@ worker.postMessage({
   type: "init",
   url: new URL(wasmUrl, document.baseURI).href,
 });
-let id = 0;
+let id = 0,
+  // The latest recording's per-spike amplitudes and times, which the worker sends
+  // only when the recording changes.
+  population: Pick<ViewData, "key" | "features" | "times"> | null = null;
+function complete(data: any) {
+  if (!data || typeof data !== "object" || !("labels" in data && "key" in data))
+    return data;
+  const view = data as ViewMessage;
+  if (view.features && view.times)
+    population = { key: view.key, features: view.features, times: view.times };
+  else if (population?.key === view.key)
+    Object.assign(view, {
+      features: population.features,
+      times: population.times,
+    });
+  return view;
+}
 const pending = new Map<
   number,
   {
@@ -27,7 +43,7 @@ worker.onmessage = (e) => {
   }
   pending.delete(m.id);
   if (m.error) p.reject(new Error(m.error));
-  else p.resolve(m.data);
+  else p.resolve(complete(m.data));
 };
 worker.onerror = (e) => {
   for (const p of pending.values())
