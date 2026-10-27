@@ -30,7 +30,7 @@ Browser scenarios:
 13. Import two folders with identical trial/tetrode/cut basenames and timestamps. Verify separate assignments, undo histories, and separate edited cuts without creating a spurious trial.
 
 14. Verify collapsed/expanded inline cuts, automatic blue cut creation, independent imported/edited undo and redo, and inactive-cut drag payloads and label contents without changing the active recording.
-15. Compare every pixel in the waveform region before/after hover; verify transparent wave hit targets, original bottom-right stats, badge positions and speed clearance, the prominent sampling warning, and a page-layer halo above both the toolbar and snapped fade. Verify frozen copies retain the same badge/warning behaviour.
+15. Compare every pixel in the waveform region before/after hover; verify transparent wave hit targets, original bottom-right stats, badge positions and speed clearance, the absence of per-tile sampling warnings, and a page-layer halo above both the toolbar and snapped fade. Verify frozen copies retain the same badge behaviour.
 16. Switch flag → density → flag three times, require the exact original flag pixels each time, and check for non-flat waveforms and no WebGL errors.
 17. Check the centred feature grid has no footer, numeric split form or feature-pane checkboxes; recording details fit in the toolbar. Verify A1–A4 corner labels are baked into Space-copy PNGs, square feature viewports after resizing, and settings/divider/tool-window restoration on a smaller screen.
 18. Check the original drop-title animation has 11 keyframes and an 800 ms cycle, stops on drag leave, and ignores internal cut drags.

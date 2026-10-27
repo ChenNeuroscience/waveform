@@ -103,7 +103,6 @@ export default function App() {
         image: string;
         cell?: number;
         stats?: CellStat[];
-        sampled?: boolean;
         x: number;
         y: number;
         width: number;
@@ -679,10 +678,6 @@ export default function App() {
         title: `${trial?.name} · T${tetNum} · cell ${n} (copy)`,
         cell: n,
         stats,
-        sampled:
-          document
-            .querySelector(`.cell-tile[data-cell="${n}"]`)
-            ?.getAttribute("data-sampled") === "true",
         image: canvas.toDataURL(),
         x: Math.max(0, Math.min(innerWidth - width - 8, x + 15)),
         y: Math.max(0, Math.min(innerHeight - height - 8, y + 15)),
@@ -1382,11 +1377,6 @@ export default function App() {
               >
                 {c.cell}
               </span>
-              {c.sampled && (
-                <span className="sampling-warning">
-                  WARNING: using sampled rendering
-                </span>
-              )}
               <CellStats
                 entries={c.stats || []}
                 className="tile-copy-stats"

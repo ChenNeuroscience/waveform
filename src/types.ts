@@ -119,7 +119,6 @@ export interface AnalysisData {
   ac: Float32Array;
   refractory: number;
   rate: number;
-  sampledPairs: boolean;
 }
 export const fileId = (f: File) =>
   `${f.webkitRelativePath || f.name}:${f.size}:${f.lastModified}`;

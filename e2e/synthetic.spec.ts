@@ -50,6 +50,9 @@ test("the stress demo generates nine million spikes and 100 cells; merge/undo pr
   await expect(page.locator(".toolbar-status")).toContainText(
     /\b(8,99\d|9,00\d),\d{3}\b/,
   );
+  await expect(page.locator(".toolbar-warning")).toContainText(
+    "waveforms sampled",
+  );
   await expect(page.locator(".trial-block")).toHaveCount(5);
   await expect(page.locator('.group-selector [data-group="100"]')).toHaveCount(
     1,

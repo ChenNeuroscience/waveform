@@ -52,7 +52,7 @@ The Rust core has no dependencies and uses a small explicit Wasm ABI, so neither
 
 The target workload is approximately **9 million spikes and 100 cells per tetrode**. Tetrodes are read in 32,768-spike chunks (about 6.75 MiB). Retained population features require **10 bytes per spike**: 32-bit timestamp, four 8-bit amplitudes, and a 16-bit cell label. The original 1.94 GB of waveform records is not retained or expanded into float vertices.
 
-Counts, assignments, lasso/paint/gate edits and cut exports use the **full spike population**. GPU feature views use an evenly spaced sample. Waveform tiles draw every spike for tetrodes of up to 1M spikes and an evenly spaced 1M otherwise. Hovering sampled plots shows **WARNING: using sampled rendering**. Large/bursty autocorrelograms use bounded reference/pair sampling and are labelled accordingly. Cuts operate across the complete recording.
+Counts, assignments, lasso/paint/gate edits and cut exports use the **full spike population**. GPU feature views use an evenly spaced sample. Waveform tiles draw every spike for tetrodes of up to 1M spikes and an evenly spaced 1M otherwise; the toolbar then shows **WARNING: waveforms sampled**. Analyses (rate maps, tuning, autocorrelograms) and the position path/spike overlays use every spike. Cuts operate across the complete recording.
 
 A local Chromium test loaded a synthetic 9-million-spike recording with 100 cells in about **3.3–5.8 seconds**, then merged, undid and exported it. The Wasm-only decoder benchmark processed the same population in about **1.31 seconds**, with about **94 MiB** of Wasm memory. These are measurements on one development machine, not cross-device performance guarantees. See `docs/VALIDATION.md` for commands and scope.
 

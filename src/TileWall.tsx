@@ -341,10 +341,6 @@ export function TileWall({
           )}
           {visible.map((cell, i) => {
             const a = maps.get(cell),
-              renderedWaves = data.waveStarts[cell + 1] - data.waveStarts[cell],
-              sampled =
-                (shown.waveforms && data.counts[cell] > renderedWaves) ||
-                (shown.ac && !!a?.sampledPairs),
               paired =
                 !!splitPoint &&
                 [splitPoint.source, splitPoint.source + 1].includes(cell),
@@ -373,7 +369,6 @@ export function TileWall({
                 key={cell}
                 className={`cell-tile ${selected === cell ? "selected" : ""} ${swap?.source === cell ? "swap-source" : ""} ${gestures.target === cell ? "merge-target" : ""} ${splitPoint && !paired ? "split-muted" : ""} ${paired ? "split-pair" : ""} ${gestures.dragging === cell || gestures.settling?.source === cell ? "drag-origin" : ""}`}
                 data-cell={cell}
-                data-sampled={sampled ? "true" : "false"}
                 style={{
                   top: Math.floor(i / columns) * STRIDE,
                   left: (i % columns) * tileStride,
@@ -527,11 +522,6 @@ export function TileWall({
                   >
                     {gestures.dragging === cell ? `[group ${cell}]` : ""}
                   </div>
-                )}
-                {sampled && (
-                  <span className="sampling-warning">
-                    WARNING: using sampled rendering
-                  </span>
                 )}
                 {jiggles.some((tile) => tile.cell === cell) && (
                   <div className="tile-edit-cover" />

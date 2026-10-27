@@ -356,6 +356,15 @@ export function DesktopShell(p: Props) {
                 <span>
                   Spikes: <b>{p.data.n.toLocaleString()}</b> ·{" "}
                   {timing.durationText}
+                  {p.data.waveSlots < p.data.n && (
+                    <strong
+                      className="toolbar-warning"
+                      title={`Waveform tiles draw ${p.data.waveSlots.toLocaleString()} evenly spaced spikes of ${p.data.n.toLocaleString()}. Counts, edits and exports use every spike.`}
+                    >
+                      {" "}
+                      · WARNING: waveforms sampled
+                    </strong>
+                  )}
                 </span>
               )}
               <span>

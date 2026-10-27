@@ -2094,13 +2094,8 @@ kbd {
   visibility: hidden;
   z-index: 5;
 }
-.cell-tile:hover > .sampling-warning,
-.tile-copy:hover > .sampling-warning,
 .clusters:hover > .sampling-warning {
   visibility: visible;
-}
-.tile-wall[data-dragging] .sampling-warning {
-  visibility: hidden;
 }
 
 .other-files {
@@ -2130,6 +2125,9 @@ kbd {
 }
 .toolbar-status b {
   font-weight: normal;
+}
+.toolbar-warning {
+  color: #a00;
 }
 .toolbar-status progress {
   width: 55px;

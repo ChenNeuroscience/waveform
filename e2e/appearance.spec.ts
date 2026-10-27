@@ -8,7 +8,7 @@ async function demo(page: Page) {
   await ready(page);
 }
 
-test("hover preserves waveform pixels, aligns the badge and shows the sampling warning only for sampled plots", async ({
+test("hover preserves waveform pixels and aligns the badge; tiles carry no sampling warning", async ({
   page,
 }) => {
   await page.goto("/?demo=quick");
@@ -26,22 +26,17 @@ test("hover preserves waveform pixels, aligns the badge and shows the sampling w
     "ready",
   );
   const tile = page.locator('.cell-tile[data-cell="0"]'),
-    warning = tile.locator(".sampling-warning"),
     badge = tile.locator(".tile-badge button"),
     bounds = (await tile.boundingBox())!;
   await page.locator(".desktop-toolbar").hover();
-  await expect(warning).toBeHidden();
   const beforeBadge = await badge.boundingBox();
   const clip = { x: bounds.x + 25, y: bounds.y + 20, width: 400, height: 65 };
   const before = await page.screenshot({ clip });
   await tile.hover({ position: { x: 45, y: 45 } });
-  // Demo tetrodes are under 1M spikes, so waveforms are complete; only a sampled
-  // autocorrelogram can still mark the tile as sampled.
-  const sampled = (await tile.getAttribute("data-sampled")) === "true";
-  if (sampled) {
-    await expect(warning).toHaveText("WARNING: using sampled rendering");
-    await expect(warning).toBeVisible();
-  } else await expect(warning).toHaveCount(0);
+  // Only waveforms of tetrodes over 1M spikes are sampled, and that is flagged
+  // once in the toolbar rather than on tiles.
+  await expect(tile.locator(".sampling-warning")).toHaveCount(0);
+  await expect(page.locator(".toolbar-warning")).toHaveCount(0);
   expect(await page.screenshot({ clip })).toEqual(before);
   expect(await badge.boundingBox()).toEqual(beforeBadge);
   const glow = page.locator("body > .tile-hover-glow");
@@ -72,7 +67,7 @@ test("hover preserves waveform pixels, aligns the badge and shows the sampling w
   await page.keyboard.up("Space");
   const copy = page.locator(".tile-copy");
   await copy.hover();
-  await expect(copy.locator(".sampling-warning")).toHaveCount(sampled ? 1 : 0);
+  await expect(copy.locator(".sampling-warning")).toHaveCount(0);
   const cb = (await copy.boundingBox())!,
     sticker = (await copy.locator(".tile-copy-badge").boundingBox())!;
   expect(sticker.y - cb.y).toBe(3);
