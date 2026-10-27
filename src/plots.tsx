@@ -512,6 +512,9 @@ export function PathPlot({
             ...fitGrid(w, h, trajectory.arenaWidth, trajectory.arenaHeight),
             y: 0,
           };
+        // Hidden or not yet laid out: nothing to draw (and a 0×0 offscreen
+        // canvas cannot be copied with drawImage).
+        if (!w || !h) return;
         if (
           base.current?.key !== key ||
           base.current.trajectory !== trajectory
