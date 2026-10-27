@@ -28,7 +28,7 @@ import {
   type SwapState,
   type TileFeedback,
 } from "./types";
-import type { EditRequest } from "./protocol";
+import { Superseded, type EditRequest } from "./protocol";
 const fmt = (n: number) => n.toLocaleString("en-GB");
 const compact = (n: number) =>
   n >= 1e6
@@ -136,8 +136,9 @@ export default function App() {
     [demo, setDemo] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null),
     folderInput = useRef<HTMLInputElement>(null),
+    // Bumped per recording load; async edits, loads and progress updates compare
+    // their captured value so replies for a previous recording are ignored.
     loadGen = useRef(0),
-    analysisGen = useRef(0),
     lastCuts = useRef(new Map<string, string>()),
     dirtySessions = useRef(new Set<string>()),
     finishingSplit = useRef(false),
@@ -378,7 +379,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!data || busy) return;
-    const gen = ++analysisGen.current;
+    let live = true;
     const t = setTimeout(
       () =>
         request("analysis", {
@@ -389,16 +390,16 @@ export default function App() {
           settings,
         })
           .then((a) => {
-            if (gen === analysisGen.current) setAnalysis(a);
+            if (live) setAnalysis(a);
           })
           .catch((e) => {
-            if (gen === analysisGen.current) setError(e.message);
+            if (live && !(e instanceof Superseded)) setError(e.message);
           }),
       25,
     );
     return () => {
+      live = false;
       clearTimeout(t);
-      analysisGen.current++;
     };
   }, [
     data,
@@ -461,7 +462,7 @@ export default function App() {
       await cutDownloads.current.prepare(t, e, c);
       setDownloadVersion((v) => v + 1);
     } catch (error) {
-      if (!String(error).includes("Superseded"))
+      if (!(error instanceof Superseded))
         setNotice(`Could not prepare ${c.name}: ${String(error)}`);
     }
   };

@@ -1,5 +1,10 @@
 import type { ViewData, ViewMessage } from "./types";
-import type { Payload, RequestType, Result } from "./protocol";
+import {
+  Superseded,
+  type Payload,
+  type RequestType,
+  type Result,
+} from "./protocol";
 import wasmUrl from "./generated/waveform_core.wasm?url";
 const worker = new Worker(new URL("./engine.worker.ts", import.meta.url), {
   type: "module",
@@ -43,7 +48,8 @@ worker.onmessage = (e) => {
     return;
   }
   pending.delete(m.id);
-  if (m.error) p.reject(new Error(m.error));
+  if (m.error)
+    p.reject(m.superseded ? new Superseded(m.error) : new Error(m.error));
   else p.resolve(complete(m.data));
 };
 worker.onerror = (e) => {

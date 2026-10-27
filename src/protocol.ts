@@ -9,6 +9,11 @@ import type {
   ViewMessage,
 } from "./types";
 
+/** A request dropped because a newer one replaced it (another recording, a newer
+ * analysis batch, an outdated export). Callers ignore these rather than report them. */
+export class Superseded extends Error {
+  name = "Superseded";
+}
 /** A new local cut created by the first edit of an original. */
 export interface NewCut {
   id: string;

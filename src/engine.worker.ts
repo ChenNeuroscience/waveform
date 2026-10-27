@@ -21,6 +21,7 @@ import {
   withF32,
   type Core,
 } from "./wasm";
+import { Superseded } from "./protocol";
 import type {
   PositionRequest,
   RequestType,
@@ -205,7 +206,7 @@ async function loadAsset(
       32768 * 216,
       (p, bytes) => {
         if (id !== latestLoad)
-          throw new Error("Superseded by another recording.");
+          throw new Superseded("Superseded by another recording.");
         wasm.engine_push(e, p, bytes);
       },
       (fraction) =>
@@ -435,7 +436,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     const target = sessions.get(m.session);
     if (!target) throw new Error("Cut state is unavailable.");
     if (m.revision !== undefined && target.revision !== m.revision)
-      throw new Error("Superseded cut export.");
+      throw new Superseded("Superseded cut export.");
     if (active?.key === target.key && activeAsset)
       return exportLabels(
         activeAsset.wasm,
@@ -629,7 +630,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     return view(a, s, true);
   }
   if (m.type === "wave_batch") {
-    if (m.asset !== a.key) throw new Error("Superseded waveform batch.");
+    if (m.asset !== a.key) throw new Superseded("Superseded waveform batch.");
     return { waves: await waveBatch(a, m.first, m.count) };
   }
   if (m.type === "trajectory") {
@@ -691,9 +692,9 @@ self.onmessage = (event: MessageEvent) => {
   queue = queue.then(async () => {
     try {
       if (m.type === "load" && m.id !== latestLoad)
-        throw new Error("Superseded by another recording.");
+        throw new Superseded("Superseded by another recording.");
       if (m.type === "analysis" && m.batch && m.batch !== latestAnalysisBatch)
-        throw new Error("Superseded analysis.");
+        throw new Superseded("Superseded analysis.");
       const data = await handle(m),
         transfer: Transferable[] = [];
       if (data && m.type !== "analysis")
@@ -705,6 +706,7 @@ self.onmessage = (event: MessageEvent) => {
       self.postMessage({
         id: m.id,
         error: error instanceof Error ? error.message : String(error),
+        superseded: error instanceof Superseded,
       });
     }
   });
