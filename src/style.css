@@ -160,7 +160,6 @@ small {
   background: #ffe6e4;
   color: #c02f2f;
 }
-
 .desktop-workspace {
   display: grid;
   flex: 1;
@@ -280,7 +279,6 @@ small {
   background: #ddd;
   color: #bbb;
 }
-
 .pane-splitter,
 .desktop-splitter {
   display: flex;
@@ -334,7 +332,6 @@ small {
   flex-direction: column;
   overflow: hidden;
 }
-
 .position-content {
   display: flex;
   position: relative;
@@ -447,8 +444,6 @@ small {
   align-items: flex-start;
   gap: 2px;
   max-width: 100%;
-}
-.painting-set {
   flex: 1;
   min-width: 0;
 }
@@ -616,7 +611,6 @@ small {
   min-height: 16px;
   height: 16px;
 }
-
 .lasso-overlay {
   position: absolute;
   inset: 0;
@@ -640,15 +634,11 @@ small {
   min-width: 0;
   background: #f7f7f7;
 }
-
 .tile-wall {
   position: relative;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: #bcbcbc #eee;
   background: white;
 }
 .tile-spacer {
@@ -682,15 +672,12 @@ small {
   overflow: hidden;
 }
 .cell-tile.selected {
-  border-left-color: #2e66a3;
   box-shadow: inset 0 0 0 1px #9bb4d0;
 }
 .tile-waves {
   position: relative;
-  flex-shrink: 0;
   pointer-events: none;
 }
-
 .tile-numeric-plots {
   flex: 1;
   min-width: 0;
@@ -803,7 +790,6 @@ small {
   color: #777;
   text-align: center;
 }
-
 .desktop-notice {
   position: fixed;
   left: 10px;
@@ -843,7 +829,6 @@ small {
 .start-drop {
   max-width: 540px;
   width: 100%;
-  text-align: center;
   margin: 12vh auto 30px;
 }
 .start-drop h1 {
@@ -907,7 +892,6 @@ small {
   color: #777;
   text-decoration: underline;
 }
-
 .start-drop > small {
   display: block;
   margin-top: 23px;
@@ -935,7 +919,6 @@ small {
   font-size: 13px;
   color: #777;
 }
-
 .drawer {
   width: 365px;
   max-width: 100vw;
@@ -945,7 +928,6 @@ small {
   flex-direction: column;
   box-shadow: -3px 0 15px #0002;
 }
-
 .drawer-content {
   padding: 5px 11px 18px;
   overflow: auto;
@@ -1198,6 +1180,7 @@ kbd {
 }
 /* Original desktop interactions */
 .tile-waves {
+  flex-shrink: 0;
   pointer-events: auto;
 }
 .cell-tile.merge-target {
@@ -1357,15 +1340,8 @@ kbd {
   color: white;
 }
 .trial-tetrodes {
-  flex-wrap: nowrap;
   overflow-x: auto;
   align-items: flex-start;
-  min-height: 19px;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
-}
-.trial-block {
-  padding-bottom: 4px;
 }
 .start-screen {
   position: relative;
@@ -1380,6 +1356,7 @@ kbd {
   pointer-events: none;
 }
 .start-drop {
+  text-align: center;
   max-width: 600px;
   margin: 0 auto;
   color: #888;
@@ -1418,7 +1395,6 @@ kbd {
 .start-drop .supported-formats code {
   font-weight: bold;
 }
-
 .desktop-workspace {
   min-width: 577px;
 }
@@ -1453,10 +1429,10 @@ kbd {
 
 /* The waveform data grid is 4 × 128 by 128; all axes share one scale. */
 .tile-wall {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #bcbcbc #eee;
   overflow-x: auto;
-}
-.tile-spacer {
-  min-width: 792px;
 }
 .tile-numeric-plots {
   flex: none;
@@ -1510,7 +1486,6 @@ kbd {
 .plot-copy {
   object-fit: contain;
 }
-
 .position-speed {
   bottom: auto;
   height: 141px;
@@ -1519,7 +1494,6 @@ kbd {
   height: 128px;
   flex: none;
 }
-
 .splitting .desktop-toolbar,
 .splitting .floating-window {
   filter: grayscale(1);
@@ -1547,20 +1521,6 @@ kbd {
   height: 81px;
 }
 .tile-caption {
-  left: auto;
-  right: 26px;
-  top: 5px;
-  bottom: auto;
-  height: auto;
-  width: max-content;
-  max-width: calc(100% - 30px);
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0;
-  padding: 4px 7px;
-  font: 14px/18px Arial;
-  color: #222;
-  background: #fffffff0;
   visibility: hidden;
   z-index: 4;
 }
@@ -1570,18 +1530,28 @@ kbd {
 .tile-caption span:first-child {
   min-width: 0;
 }
-
-.cell-tile {
-  overflow: visible;
-}
 .cell-tile:hover {
   z-index: 2;
 }
 .tile-caption {
+  left: auto;
+  right: 26px;
+  top: 5px;
+  bottom: auto;
+  height: auto;
+  width: max-content;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  padding: 4px 7px;
+  font: 14px/18px Arial;
+  color: #222;
+  background: #fffffff0;
   max-width: none;
 }
 /* A drag keeps its layout slot and compares cached plot images at one scale. */
 .cell-tile {
+  overflow: visible;
   touch-action: none;
   user-select: none;
 }
@@ -1672,11 +1642,9 @@ kbd {
     transform: translateX(-1px);
   }
 }
-
 .tile-wall[data-dragging] .tile-caption {
   visibility: hidden;
 }
-
 .tile-copy {
   position: relative;
   background: white;
@@ -1715,6 +1683,9 @@ kbd {
 
 /* Every tetrode and its cuts form one inline file group, including collapsed groups. */
 .trial-tetrodes {
+  min-height: 19px;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
   flex-wrap: wrap;
   overflow: visible;
 }
@@ -1777,7 +1748,6 @@ kbd {
 .tetrode-file-block > button.local-cut.active:hover {
   background: #227;
 }
-
 .tetrode-file-block.expanded {
   flex-wrap: wrap;
   max-width: 100%;
@@ -1822,6 +1792,7 @@ kbd {
   opacity: 0.45;
 }
 .trial-block {
+  padding-bottom: 4px;
   cursor: pointer;
 }
 .trial-heading .trial-name,
@@ -1903,7 +1874,6 @@ kbd {
   font-size: 52px;
   font-weight: normal;
 }
-
 .tile-wave-canvas,
 .tile-waves {
   border: 0;
@@ -1972,7 +1942,6 @@ kbd {
   z-index: 90;
   box-shadow: 0 0 5px 3px #fc0;
 }
-
 .other-files {
   display: inline-flex;
   align-items: center;
@@ -1981,7 +1950,6 @@ kbd {
   color: #666;
   white-space: nowrap;
 }
-
 .toolbar-status {
   margin-left: auto;
   padding: 0 4px 0 12px;
@@ -2017,7 +1985,6 @@ kbd {
 .comparison-window .floating-content {
   cursor: move;
 }
-
 .demo-files {
   display: flex;
   align-items: center;
