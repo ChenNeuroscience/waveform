@@ -118,7 +118,7 @@ export function TileWall({
     },
     signature = visible.join(","),
     waveScope = `${data.session}|${data.revision}`,
-    waveKey = `${waveScope}|${signature}|${settings.density}|${waveFrameWidth}`,
+    waveKey = `${waveScope}|${signature}|${settings.density}|${settings.drift}|${waveFrameWidth}`,
     wavesReady = wavesDone === waveKey,
     scope = `${data.session}|${data.revision}|${posKey}|${settings.binCm}|${settings.smooth}|${settings.acWindow}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${settings.dirBin}|${settings.speedBin}|${settings.speedMax}`;
   const gestures = useTileGestures({
@@ -242,6 +242,7 @@ export function TileWall({
       cells: visible,
       layout,
       density: settings.density,
+      drift: settings.drift,
       readyKey: waveKey,
     });
   }, [data, waveKey, columns, tileStride, gpuGeneration]);

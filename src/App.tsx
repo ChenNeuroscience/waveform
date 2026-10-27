@@ -1298,7 +1298,10 @@ export default function App() {
                   keys="W / R / C / V / T"
                   text="Waves / spatial / direction / speed / autocorrelation"
                 />
-                <Shortcut keys="D / P" text="Time colours / waveform density" />
+                <Shortcut
+                  keys="D / P"
+                  text="Time colours (features and waveforms) / waveform density"
+                />
                 <Shortcut keys="Esc" text="Close panel, return to paint" />
                 <h3>Reading the plots</h3>
                 <p className="muted">

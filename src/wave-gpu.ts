@@ -14,23 +14,33 @@ const RECORD = 216,
   CACHE_BYTES = 192 << 20;
 const lineVertex = `#version 300 es
 precision highp float;precision highp int;precision highp isampler2DArray;precision highp usampler2D;
-uniform isampler2DArray waves;uniform usampler2D order;uniform int base;uniform int channel;
+uniform isampler2DArray waves;uniform usampler2D order;uniform int base;uniform int channel;uniform float timeScale;
+flat out float time;
 void main(){
  int k=base+gl_InstanceID;int s=int(texelFetch(order,ivec2(k%${ORDER_WIDTH},k/${ORDER_WIDTH}),0).r);int r=s%${PER_LAYER};
- float v=float(texelFetch(waves,ivec3((r%${PER_ROW})*${RECORD}+channel*54+4+gl_VertexID,r/${PER_ROW},s/${PER_LAYER}),0).r)/128.;
+ ivec3 at=ivec3((r%${PER_ROW})*${RECORD}+channel*54,r/${PER_ROW},s/${PER_LAYER});
+ // Each channel block starts with the record's big-endian u32 timestamp.
+ uint ticks=0u;for(int b=0;b<4;b++)ticks=ticks<<8|uint(texelFetch(waves,at+ivec3(b,0,0),0).r&255);
+ time=float(ticks)*timeScale;
+ float v=float(texelFetch(waves,at+ivec3(4+gl_VertexID,0,0),0).r)/128.;
  float x=(float(channel)+(float(gl_VertexID)/49.)*.84+.08)/4.;gl_Position=vec4(x*2.-1.,v*.78,0.,1.);}`;
 const lineFragment = `#version 300 es
-precision highp float;uniform float unit;out vec4 c;void main(){c=vec4(unit);}`;
+precision highp float;uniform float unit;flat in float time;out vec4 c;void main(){c=vec4(unit,time*unit,0.,0.);}`;
 const quadVertex = `#version 300 es
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0.,1.);}`;
-// Per-pixel line counts become flag colour (any count) or the original density palette.
+// Per-pixel (line count, summed spike time) becomes flag colour (any count), the
+// original density palette, or drift: mean spike time, red (start) to green (end).
+const FLAG = 0,
+  DENSITY = 1,
+  DRIFT = 2;
 const quadFragment = `#version 300 es
-precision highp float;uniform sampler2D counts;uniform vec2 origin;uniform vec3 rgb;uniform float unit;uniform float total;uniform bool density;out vec4 c;
+precision highp float;uniform sampler2D counts;uniform vec2 origin;uniform vec3 rgb;uniform float unit;uniform float total;uniform int mode;out vec4 c;
 vec3 palette(float count){return vec3(count>.5?(count>.75?4.-4.*count:4.*count-2.):(count>.25?2.-4.*count:4.*count),count<.5?2.*count:2.-2.*count,count);}
 void main(){
- float n=texelFetch(counts,ivec2(gl_FragCoord.xy-origin),0).r/unit;
- if(n<.5){c=vec4(1.);return;}
- c=vec4(density?palette(sqrt(n/max(1.,total)*10.)):rgb,1.);}`;
+ vec2 s=texelFetch(counts,ivec2(gl_FragCoord.xy-origin),0).rg/unit;
+ if(s.x<.5){c=vec4(1.);return;}
+ float t=s.y/s.x;
+ c=vec4(mode==${DRIFT}?vec3(1.-t,t,0.):mode==${DENSITY}?palette(sqrt(s.x/max(1.,total)*10.)):rgb,1.);}`;
 interface Entry {
   texture: WebGLTexture;
   fbo: WebGLFramebuffer;
@@ -44,10 +54,13 @@ interface Scene {
     waveOrder: Uint32Array;
     waveStarts: Uint32Array;
     waveHashes: Uint32Array;
+    times: Uint32Array;
   };
   cells: number[];
   layout: WaveLayout;
   density: boolean;
+  /** Mean spike time per pixel; drawn only where float blending is available. */
+  drift: boolean;
   readyKey: string;
 }
 export type LoadBatch = (
@@ -67,6 +80,9 @@ export class WaveGPU {
   order: WebGLTexture | null = null;
   unit = 1;
   countFormat: number = 0;
+  bytesPerPixel = 4;
+  /** Whether cache textures hold summed spike times (needed for drift). */
+  timed = false;
   asset = "";
   loaded = false;
   loading = 0;
@@ -101,13 +117,21 @@ export class WaveGPU {
     this.lines = program(gl, lineVertex, lineFragment);
     this.quad = program(gl, quadVertex, quadFragment);
     this.vao = gl.createVertexArray()!;
-    // Exact float counts need float blending; otherwise counts saturate earlier
-    // (half float at 2048, bytes at 255). Flag colouring only needs count > 0.
+    // Exact float counts and summed times need float blending; otherwise counts
+    // saturate earlier (half float at 2048, bytes at 255) and drift is not drawn.
+    // Flag colouring only needs count > 0.
     const float = gl.getExtension("EXT_color_buffer_float");
-    if (float && gl.getExtension("EXT_float_blend"))
-      [this.countFormat, this.unit] = [gl.R32F, 1];
-    else if (float) [this.countFormat, this.unit] = [gl.R16F, 1];
-    else [this.countFormat, this.unit] = [gl.RGBA8, 1 / 255];
+    this.timed = !!(float && gl.getExtension("EXT_float_blend"));
+    if (this.timed)
+      [this.countFormat, this.unit, this.bytesPerPixel] = [gl.RG32F, 1, 8];
+    else if (float)
+      [this.countFormat, this.unit, this.bytesPerPixel] = [gl.R16F, 1, 2];
+    else
+      [this.countFormat, this.unit, this.bytesPerPixel] = [
+        gl.RGBA8,
+        1 / 255,
+        4,
+      ];
   }
   private lost = (e: Event) => {
     e.preventDefault();
@@ -277,7 +301,10 @@ export class WaveGPU {
     return entry;
   }
   private evict(keep: Set<string>, [w, h]: number[]) {
-    const limit = Math.max(keep.size, Math.floor(CACHE_BYTES / (w * h * 4)));
+    const limit = Math.max(
+      keep.size,
+      Math.floor(CACHE_BYTES / (w * h * this.bytesPerPixel)),
+    );
     for (const [key, entry] of this.cache) {
       if (this.cache.size <= limit) break;
       if (keep.has(key)) continue;
@@ -325,6 +352,10 @@ export class WaveGPU {
       gl.uniform1i(u("waves"), 0);
       gl.uniform1i(u("order"), 1);
       gl.uniform1f(u("unit"), this.unit);
+      gl.uniform1f(
+        u("timeScale"),
+        1 / Math.max(1, data.times[data.times.length - 1] || 0),
+      );
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE);
       gl.viewport(0, 0, size[0], size[1]);
@@ -360,7 +391,10 @@ export class WaveGPU {
     const u = (n: string) => gl.getUniformLocation(this.quad, n);
     gl.uniform1i(u("counts"), 0);
     gl.uniform1f(u("unit"), this.unit);
-    gl.uniform1i(u("density"), scene.density ? 1 : 0);
+    gl.uniform1i(
+      u("mode"),
+      scene.drift && this.timed ? DRIFT : scene.density ? DENSITY : FLAG,
+    );
     cells.forEach((cell, i) => {
       const entry = keys[i] && this.cache.get(keys[i]);
       if (!entry) return;
