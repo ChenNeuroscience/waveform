@@ -1,15 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  FolderOpen,
-  Folder,
-  Undo2,
-  Redo2,
-  Keyboard,
-  Settings2,
-  History,
-  List,
-  HelpCircle,
-} from "lucide-react";
+import { FolderOpen, Folder, Undo2, Redo2, Keyboard, Settings2, History, List } from "lucide-react";
 import type { PlotMode, ViewData } from "../types";
 import type { VisiblePlots } from "../tiles/TileWall";
 import type { PanelName } from "./panels";
@@ -45,9 +35,6 @@ export function Toolbar(p: {
         <Folder size={16} />
       </button>
       <span className="tool-separator" />
-      <button title="Help / original video" aria-label="Help" onClick={() => p.onPanel("help")}>
-        <HelpCircle size={17} />
-      </button>
       <button
         title="Keyboard shortcuts [K]"
         aria-label="Keyboard shortcuts"
