@@ -14,6 +14,7 @@ export interface ShortcutContext {
   hoveredTile: RefObject<number | null>;
   settings: Settings;
   tetNum: number;
+  cutId: string;
   trial: Trial | undefined;
   trials: Trial[];
   setGrabMode: (on: boolean) => void;
@@ -32,8 +33,52 @@ export interface ShortcutContext {
   newDestination: () => void;
   chooseTet: (n: number) => void;
   chooseTrial: (t: Trial) => void;
+  /** Choose a cut of the current tetrode ("" for no cut). */
+  chooseCut: (cutId: string) => void;
   showPlot: (mode: PlotMode, multiple: boolean) => void;
 }
+/** The item `delta` steps from `current` in `items`, or undefined past either end. */
+function step<T>(items: T[], current: T, delta: number) {
+  const i = items.indexOf(current);
+  return i < 0 ? undefined : items[i + delta];
+}
+
+/** Arrow keys: up/down step through trials; left/right through the trial's
+ * tetrodes (each restores its last cut); Shift-left/right through the current
+ * tetrode's options, no cut first and then each cut file. */
+function navigateByArrow(c: ShortcutContext, key: string, shift: boolean) {
+  const delta = key === "ArrowUp" || key === "ArrowLeft" ? -1 : 1;
+  if (!c.trial) {
+    return;
+  }
+  if (key === "ArrowUp" || key === "ArrowDown") {
+    const next = step(c.trials, c.trial, delta);
+    if (next) {
+      c.chooseTrial(next);
+    }
+    return;
+  }
+  if (shift) {
+    const tet = c.trial.tetrodes.find((t) => t.number === c.tetNum);
+    const options = ["", ...(tet?.cuts.map((cut) => cut.id) ?? [])];
+    const next = step(options, c.cutId, delta);
+    if (next !== undefined) {
+      c.chooseCut(next);
+    }
+    return;
+  }
+  const numbers = c.trial.tetrodes
+    .filter((t) => t.file)
+    .map((t) => t.number)
+    .sort((a, b) => a - b);
+  const next = step(numbers, c.tetNum, delta);
+  if (next !== undefined) {
+    c.chooseTet(next);
+  }
+}
+
+const ARROWS = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
+
 const plotKeys: Record<string, PlotMode> = {
   w: "waveforms",
   r: "spatial",
@@ -152,11 +197,10 @@ export function useShortcuts(context: ShortcutContext) {
       if (mode) {
         c.showPlot(mode, e.shiftKey);
       }
-      if (c.trial && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
-        const i = c.trials.indexOf(c.trial) + (e.key === "ArrowLeft" ? -1 : 1);
-        if (c.trials[i]) {
-          c.chooseTrial(c.trials[i]);
-        }
+      if (ARROWS.includes(e.key)) {
+        // Arrows navigate recordings rather than scrolling the page.
+        e.preventDefault();
+        navigateByArrow(c, e.key, e.shiftKey);
       }
     };
     addEventListener("keydown", key);

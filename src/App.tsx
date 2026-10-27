@@ -590,6 +590,7 @@ export default function App() {
     hoveredTile,
     settings,
     tetNum,
+    cutId,
     trial,
     trials,
     setGrabMode,
@@ -618,6 +619,7 @@ export default function App() {
     newDestination: () => newDestination(),
     chooseTet: (n) => chooseTet(n),
     chooseTrial: (t) => chooseTrial(t),
+    chooseCut: (id) => navigateTo({ trialId, tetNum, cutId: id }),
     showPlot,
   });
   const startDemo = async () => {

@@ -271,7 +271,9 @@ export function HelpPanel() {
       <h3>Navigation</h3>
       <Shortcut keys="0–9" text="Jump to tetrode (ones digit)" />
       <Shortcut keys="O" text="Toggle tetrode tens digit" />
-      <Shortcut keys="← / →" text="Previous / next trial" />
+      <Shortcut keys="↑ / ↓" text="Previous / next trial" />
+      <Shortcut keys="← / →" text="Previous / next tetrode (restores its last cut)" />
+      <Shortcut keys="⇧ ← / →" text="Previous / next cut of the tetrode (first: no cut)" />
       <Shortcut keys="H" text="Inspect file headers" />
       <Shortcut keys="K / ?" text="Keyboard shortcuts" />
       <h3>Cut editing</h3>
