@@ -88,6 +88,16 @@ export function FloatingWindow({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", end);
   };
+  // Space-click (grab mode) closes a window; any other press brings it to front.
+  const pressWindow = (event: React.PointerEvent) => {
+    if (grabMode && event.button === 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    } else {
+      focus();
+    }
+  };
   return (
     <section
       ref={root}
@@ -103,15 +113,7 @@ export function FloatingWindow({
         height: position.height,
         zIndex: z,
       }}
-      onPointerDownCapture={(event) => {
-        if (grabMode && event.button === 0) {
-          event.preventDefault();
-          event.stopPropagation();
-          onClose();
-        } else {
-          focus();
-        }
-      }}
+      onPointerDownCapture={pressWindow}
     >
       <header className="floating-titlebar" onPointerDown={comparison ? undefined : drag}>
         <span>{title}</span>

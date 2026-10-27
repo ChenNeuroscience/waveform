@@ -16,6 +16,64 @@ import {
   type PlotMode,
   type Trajectory,
 } from "./types";
+// Feature axes span the middle FEATURE_SPAN of each square projection frame
+// (FEATURE_MARGIN either side), matching the cluster shader's x*1.86-.93.
+const FEATURE_MARGIN = 0.035;
+const FEATURE_SPAN = 0.93;
+
+/** The projection index under a point in the grid, or null over a gap or edge. */
+function plotUnder([x, y]: number[], columns: number) {
+  const col = Math.floor(x / FEATURE_STRIDE);
+  const plot = Math.floor(y / FEATURE_STRIDE) * columns + col;
+  const inFrame = x % FEATURE_STRIDE < FEATURE_PLOT && y % FEATURE_STRIDE < FEATURE_PLOT;
+  return col < columns && plot < projections.length && inFrame ? plot : null;
+}
+
+/** The group of the displayed spike nearest a point (within 5 px), preferring the
+ * focused group on ties and skipping hidden spikes. */
+function nearestGroup(
+  data: ViewData,
+  [px, py]: number[],
+  plot: number,
+  columns: number,
+  { selected, isolate, range }: { selected: number; isolate: boolean; range: number[] },
+) {
+  const [ax, ay] = projections[plot];
+  const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
+  const origin = featurePlotOrigin(plot, columns);
+  const timeScale = 1 / Math.max(1, data.times[data.times.length - 1] || 0);
+  let group: number | null = null;
+  let best = 25;
+  for (let i = 0; i < data.labels.length; i++) {
+    const label = data.labels[i];
+    const time = data.times[i] * timeScale;
+    if ((isolate && label !== selected) || time < range[0] || time > range[1]) {
+      continue;
+    }
+    const fx = FEATURE_MARGIN + (FEATURE_SPAN * data.features[i * 4 + ax]) / 255;
+    const fy = 1 - FEATURE_MARGIN - (FEATURE_SPAN * data.features[i * 4 + ay]) / 255;
+    const x = origin.x + frame.x + fx * frame.width;
+    const y = origin.y + frame.y + fy * frame.height;
+    const distance = (px - x) ** 2 + (py - y) ** 2;
+    if (distance < best || (distance === best && label === selected)) {
+      group = label;
+      best = distance;
+    }
+  }
+  return group;
+}
+
+/** Stroke points (pixels in the grid) as normalised feature values in one plot. */
+function toFeatureSpace(points: number[][], plot: number, columns: number) {
+  const origin = featurePlotOrigin(plot, columns);
+  const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
+  const clamp = (v: number) => Math.max(0, Math.min(1, v));
+  return points.flatMap(([x, y]) => [
+    clamp(((x - origin.x - frame.x) / frame.width - FEATURE_MARGIN) / FEATURE_SPAN),
+    clamp(1 - ((y - origin.y - frame.y) / frame.height - FEATURE_MARGIN) / FEATURE_SPAN),
+  ]);
+}
+
 export function Clusters({
   data,
   settings,
@@ -36,69 +94,43 @@ export function Clusters({
   onPick: (group: number, source: boolean, toggle: boolean) => void;
 }) {
   const wrapper = useRef<HTMLDivElement>(null);
-  const [columns, setColumns] = useState(2);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const axes = projections;
+
+  // Projections per row (from the pane width), and a counter that forces a
+  // redraw after resizes or a restored WebGL context.
+  const [columns, setColumns] = useState(2);
+  const [version, setVersion] = useState(0);
   const gpu = useRef<ClusterGPU | null>(null);
   const [error, setError] = useState("");
-  const axes = projections;
+
+  // The brush/lasso stroke being drawn (state for the overlay, ref for events),
+  // and the last pointer position for E/F picking.
   const [stroke, setStroke] = useState<number[][]>([]);
   const drawing = useRef<{ plot: number; points: number[][] } | null>(null);
   const pointer = useRef<number[] | null>(null);
-  const [version, setVersion] = useState(0);
+
   useEffect(() => {
-    // Resolve the sampled cloud only when E/F is pressed, never on every move.
+    // Find the nearest spike only when E/F is pressed, never on every move.
     // Picking respects the focused group's foreground and displayed time range.
     const pick = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
       const p = pointer.current;
-      if (
-        !p ||
-        drawing.current ||
-        event.repeat ||
-        tool === "disabled" ||
-        !["e", "f"].includes(key) ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.altKey ||
-        (event.target as HTMLElement).matches("input,select,textarea")
-      ) {
+      const modified = event.ctrlKey || event.metaKey || event.altKey;
+      const typing = (event.target as HTMLElement).matches("input,select,textarea");
+      if (!p || drawing.current || event.repeat || tool === "disabled") {
+        return;
+      }
+      if (!["e", "f"].includes(key) || modified || typing) {
         return;
       }
       event.preventDefault();
       event.stopImmediatePropagation();
-      const col = Math.floor(p[0] / FEATURE_STRIDE);
-      const row = Math.floor(p[1] / FEATURE_STRIDE);
-      const plot = row * columns + col;
-      const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
-      const origin = featurePlotOrigin(plot, columns);
-      if (
-        col >= columns ||
-        plot >= axes.length ||
-        p[0] % FEATURE_STRIDE >= FEATURE_PLOT ||
-        p[1] % FEATURE_STRIDE >= FEATURE_PLOT
-      ) {
+      const plot = plotUnder(p, columns);
+      if (plot === null) {
         return;
       }
-      const [ax, ay] = axes[plot];
-      let group: number | null = null;
-      let best = 25;
-      const timeScale = 1 / Math.max(1, data.times[data.times.length - 1] || 0);
-      for (let i = 0; i < data.labels.length; i++) {
-        const label = data.labels[i];
-        const time = data.times[i] * timeScale;
-        if ((isolate && label !== selected) || time < range[0] || time > range[1]) {
-          continue;
-        }
-        const x =
-          origin.x + frame.x + (0.035 + (0.93 * data.features[i * 4 + ax]) / 255) * frame.width;
-        const y =
-          origin.y + frame.y + (0.965 - (0.93 * data.features[i * 4 + ay]) / 255) * frame.height;
-        const distance = (p[0] - x) ** 2 + (p[1] - y) ** 2;
-        if (distance < best || (distance === best && label === selected)) {
-          group = label;
-          best = distance;
-        }
-      }
+      const group = nearestGroup(data, p, plot, columns, { selected, isolate, range });
       if (group !== null) {
         onPick(group, key === "f", event.shiftKey);
       }
@@ -121,17 +153,8 @@ export function Clusters({
       setError(String(e));
     }
     const ro = new ResizeObserver(() => {
-      setColumns(
-        Math.max(
-          1,
-          Math.min(
-            6,
-            Math.floor(
-              (wrapper.current!.parentElement!.clientWidth + FEATURE_GAP) / FEATURE_STRIDE,
-            ),
-          ),
-        ),
-      );
+      const width = wrapper.current!.parentElement!.clientWidth;
+      setColumns(Math.max(1, Math.min(6, Math.floor((width + FEATURE_GAP) / FEATURE_STRIDE))));
       setVersion((v) => v + 1);
     });
     ro.observe(wrapper.current!.parentElement!);
@@ -160,63 +183,48 @@ export function Clusters({
     const b = e.currentTarget.getBoundingClientRect();
     return [e.clientX - b.left, e.clientY - b.top];
   };
+  const startStroke = (e: React.PointerEvent) => {
+    if (e.button !== 0 || (tool !== "lasso" && tool !== "brush")) {
+      return;
+    }
+    const p = point(e);
+    const plot = plotUnder(p, columns);
+    if (plot === null || p[0] >= grid.width || p[1] >= grid.height) {
+      return;
+    }
+    drawing.current = { plot, points: [p] };
+    setStroke([p]);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const extendStroke = (e: React.PointerEvent) => {
+    pointer.current = point(e);
+    if (drawing.current) {
+      drawing.current.points.push(pointer.current);
+      setStroke([...drawing.current.points]);
+    }
+  };
+  // A lasso needs at least a triangle; a brush can be a single dab.
+  const finishStroke = () => {
+    const d = drawing.current;
+    drawing.current = null;
+    setStroke([]);
+    if (!d || (tool !== "brush" && d.points.length < 3)) {
+      return;
+    }
+    onPolygon(toFeatureSpace(d.points, d.plot, columns), axes[d.plot][0], axes[d.plot][1]);
+  };
   return (
     <div
       className="clusters"
       ref={wrapper}
       data-columns={columns}
       style={grid}
-      onPointerDown={(e) => {
-        if (e.button !== 0 || (tool !== "lasso" && tool !== "brush")) {
-          return;
-        }
-        const p = point(e);
-        const plot =
-          Math.floor(p[1] / FEATURE_STRIDE) * columns + Math.floor(p[0] / FEATURE_STRIDE);
-        if (
-          p[0] >= grid.width ||
-          p[1] >= grid.height ||
-          p[0] % FEATURE_STRIDE >= FEATURE_PLOT ||
-          p[1] % FEATURE_STRIDE >= FEATURE_PLOT ||
-          plot >= 6
-        ) {
-          return;
-        }
-        drawing.current = { plot, points: [p] };
-        setStroke([p]);
-        e.currentTarget.setPointerCapture(e.pointerId);
-      }}
-      onPointerMove={(e) => {
-        pointer.current = point(e);
-        if (!drawing.current) {
-          return;
-        }
-        const p = point(e);
-        drawing.current.points.push(p);
-        setStroke([...drawing.current.points]);
-      }}
+      onPointerDown={startStroke}
+      onPointerMove={extendStroke}
       onPointerLeave={() => {
         pointer.current = null;
       }}
-      onPointerUp={(e) => {
-        const d = drawing.current;
-        drawing.current = null;
-        setStroke([]);
-        if (!d) {
-          return;
-        }
-        const origin = featurePlotOrigin(d.plot, columns);
-        const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
-        const points = d.points;
-        if (tool !== "brush" && points.length < 3) {
-          return;
-        }
-        const poly = points.flatMap(([x, y]) => [
-          Math.max(0, Math.min(1, ((x - origin.x - frame.x) / frame.width - 0.035) / 0.93)),
-          Math.max(0, Math.min(1, 1 - ((y - origin.y - frame.y) / frame.height - 0.035) / 0.93)),
-        ]);
-        onPolygon(poly, axes[d.plot][0], axes[d.plot][1]);
-      }}
+      onPointerUp={finishStroke}
     >
       <canvas ref={canvas} style={grid} aria-label="Six WebGL2 spike feature projections" />
       <div
