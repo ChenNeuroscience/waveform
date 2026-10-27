@@ -1,7 +1,7 @@
 /** Floating copies of plots: a cell's tile (pop-out), the path or feature grid
  * (Space-click), and copying the selected cell's tile to the clipboard. */
 import { useState } from "react";
-import { captureTile } from "../tiles/TileWall";
+import { captureTile, captureTilePlots } from "../tiles/TileWall";
 import { captureFeatureGrid } from "../plots/FeatureView";
 import { downloadBlob } from "../files";
 import type { CellStat } from "../tiles/CellStats";
@@ -35,6 +35,11 @@ function tileStats(cell: number): CellStat[] {
     label: el.querySelector(".stat-label")?.textContent || "",
     value: el.querySelector(".stat-value")?.textContent || "",
   }));
+}
+
+/** Escape text for inclusion in clipboard HTML. */
+function escapeHtml(text: string) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 export function useCopies({
@@ -97,25 +102,39 @@ export function useCopies({
     });
   };
 
-  /** Copy the selected cell's tile to the clipboard (or download it). */
-  const copyToClipboard = () => {
+  /** Copy the selected cell to the clipboard as text plus one image per plot
+   * (or download the tile if the clipboard is unavailable). */
+  const copyToClipboard = async () => {
     const spikes = (data?.counts[cell] || 0).toLocaleString("en-GB");
-    const canvas = captureTile(
-      cell,
-      `${trial?.name} · T${tetNum} · cell ${cell} · ${spikes} spikes`,
+    const title = `${trial?.name} · T${tetNum} · cell ${cell}`;
+    const stats = tileStats(cell).filter((s) => s.label !== "n spikes");
+    const details = [`${spikes} spikes`, ...stats.map((s) => `${s.label}: ${s.value}`)].join(" · ");
+    const plots = captureTilePlots(cell);
+    const ratio = Math.min(2, devicePixelRatio || 1);
+    const images = plots.map(
+      ({ name, canvas }) =>
+        `<img src="${canvas.toDataURL()}" alt="${name}" width="${Math.round(canvas.width / ratio)}" height="${Math.round(canvas.height / ratio)}">`,
     );
-    canvas?.toBlob(async (blob) => {
-      if (!blob) {
-        return;
-      }
-      try {
-        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-        onNotice("Cell plot copied to clipboard.");
-      } catch {
-        downloadBlob(blob, `cell-${cell}.png`);
-        onNotice("Clipboard unavailable; the plot was downloaded.");
-      }
-    });
+    const html = [
+      `<p style="margin:0"><b>${escapeHtml(title)}</b> · ${escapeHtml(details)}</p>`,
+      `<p style="margin:0">${images.join(" ")}</p>`,
+    ].join("");
+    const text = `${title} · ${details}`;
+    try {
+      const item = new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([text], { type: "text/plain" }),
+      });
+      await navigator.clipboard.write([item]);
+      onNotice(`Cell ${cell}: text and ${plots.length} plots copied to clipboard.`);
+    } catch {
+      captureTile(cell, text)?.toBlob((blob) => {
+        if (blob) {
+          downloadBlob(blob, `cell-${cell}.png`);
+        }
+      });
+      onNotice("Clipboard unavailable; the plot was downloaded.");
+    }
   };
 
   const close = (id: string) => setCopies((cs) => cs.filter((c) => c.id !== id));

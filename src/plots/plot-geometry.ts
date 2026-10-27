@@ -22,8 +22,8 @@ export function projectionFrame(width: number, height: number) {
  * Coordinates are fractions of the frame: x from the left, y from the top.
  */
 export const WAVE_SAMPLES = 50;
-export const WAVE_MARGIN = 0.08;
-export const WAVE_SPAN = 0.84;
+export const WAVE_MARGIN = 0.01;
+export const WAVE_SPAN = 1 - 2 * WAVE_MARGIN;
 export const WAVE_GAIN = 0.78;
 export const waveX = (channel: number, sample: number) =>
   (channel + WAVE_MARGIN + (WAVE_SPAN * sample) / (WAVE_SAMPLES - 1)) / 4;

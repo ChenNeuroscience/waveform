@@ -92,3 +92,32 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
   }
   expect(errors).toEqual([]);
 });
+
+test("Copying a cell puts its text and each plot separately on the clipboard", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/?demo=quick");
+  await page.getByText("Try it now with simulated data").click();
+  await ready(page);
+  await page.locator('.cell-tile[data-cell="1"] .tile-badge button').click();
+  await page.keyboard.press("ControlOrMeta+c");
+  await expect(page.getByText(/Cell 1: text and \d plots copied/)).toBeVisible();
+  const clipboard = await page.evaluate(async () => {
+    const [item] = await navigator.clipboard.read();
+    const html = await (await item.getType("text/html")).text();
+    const text = await (await item.getType("text/plain")).text();
+    return { html, text, types: item.types };
+  });
+  expect(clipboard.types).not.toContain("image/png");
+  expect(clipboard.text).toMatch(/T\d+ · cell 1 · [\d,]+ spikes/);
+  const alts = [...clipboard.html.matchAll(/<img[^>]*alt="([^"]+)"/g)].map((m) => m[1]);
+  expect(alts).toEqual([
+    "Waveforms",
+    "Spatial rate map",
+    "Head direction",
+    "Speed",
+    "Autocorrelation",
+  ]);
+});

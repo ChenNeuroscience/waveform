@@ -726,3 +726,60 @@ export function captureTile(
   }
   return canvas;
 }
+
+/** Each plot shown on a cell's tile, rendered separately on white. */
+export function captureTilePlots(cell: number): { name: string; canvas: HTMLCanvasElement }[] {
+  const row = document.querySelector<HTMLElement>(`.cell-tile[data-cell="${cell}"]`);
+  if (!row) {
+    return [];
+  }
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  const blank = (width: number, height: number) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    const ctx = canvas.getContext("2d")!;
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = "white";
+    ctx.fillRect(0, 0, width, height);
+    return { canvas, ctx };
+  };
+  const plots = [];
+  const waves = document.querySelector<HTMLCanvasElement>(".tile-wave-canvas");
+  const waveRegion = row.querySelector<HTMLElement>(".tile-waves");
+  if (waves && waveRegion?.clientWidth) {
+    const w = waves.getBoundingClientRect();
+    const region = waveRegion.getBoundingClientRect();
+    const sx = waves.width / w.width;
+    const sy = waves.height / w.height;
+    const { canvas, ctx } = blank(region.width, region.height);
+    ctx.drawImage(
+      waves,
+      (region.left - w.left) * sx,
+      (region.top - w.top) * sy,
+      region.width * sx,
+      region.height * sy,
+      0,
+      0,
+      region.width,
+      region.height,
+    );
+    plots.push({ name: "Waveforms", canvas });
+  }
+  const analyses = [
+    { selector: ".tile-spatial", name: "Spatial rate map" },
+    { selector: ".tile-direction", name: "Head direction" },
+    { selector: ".tile-speed", name: "Speed" },
+    { selector: ".tile-ac", name: "Autocorrelation" },
+  ];
+  for (const { selector, name } of analyses) {
+    const source = row.querySelector<HTMLCanvasElement>(`${selector} canvas`);
+    if (!source?.clientWidth) {
+      continue;
+    }
+    const { canvas, ctx } = blank(source.clientWidth, source.clientHeight);
+    ctx.drawImage(source, 0, 0, source.clientWidth, source.clientHeight);
+    plots.push({ name, canvas });
+  }
+  return plots;
+}
