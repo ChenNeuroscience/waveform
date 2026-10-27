@@ -306,7 +306,7 @@ export function HelpPanel() {
       <Shortcut keys="D / P" text="Time colours (features and waveforms) / waveform density" />
       <Shortcut keys="Esc" text="Close panel, return to paint" />
       <a href="https://github.com/ChenNeuroscience/waveform" target="_blank" rel="noreferrer">
-        Original project & source ↗
+        Project and source on GitHub ↗
       </a>
     </>
   );

@@ -38,7 +38,7 @@ precision highp float;uniform float unit;flat in float time;out vec4 c;void main
 const quadVertex = `#version 300 es
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0.,1.);}`;
 // Per-pixel (line count, summed spike time) becomes flag colour (any count), the
-// original density palette, or drift: mean spike time, red (start) to green (end).
+// density palette, or drift: mean spike time, red (start) to green (end).
 const FLAG = 0;
 const DENSITY = 1;
 const DRIFT = 2;

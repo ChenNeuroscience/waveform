@@ -165,8 +165,8 @@ impl Position {
                     .rem_euclid(2. * std::f32::consts::PI)
                     - std::f32::consts::PI
             };
-            // LTX coordinates are already relative to the tracked window, as in
-            // the original parser (need_to_subtract_mins=false).
+            // LTX coordinates are already relative to the tracked window, so the
+            // window minimum is not subtracted.
             self.x.push(x);
             self.y.push(y);
             self.dir.push(dir);

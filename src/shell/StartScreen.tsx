@@ -39,13 +39,13 @@ export function StartScreen(p: {
           </a>
         </p>
         <a
-          className="original-video"
+          className="intro-video"
           href="https://www.youtube.com/watch?v=36o69CPu-1E"
           target="_blank"
           rel="noreferrer"
         >
-          <img src={video} alt="Watch the original Waveform introduction" />
-          <span>Original video introduction ↗</span>
+          <img src={video} alt="Watch the Waveform video introduction" />
+          <span>Video introduction ↗</span>
         </a>
         <button
           className="demo-files"

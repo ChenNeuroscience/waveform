@@ -132,7 +132,7 @@ small {
   background: #d9dce1;
   margin: 0 5px;
 }
-/* Plot toggles: rounded pills; the original red marks plots that are shown. */
+/* Plot toggles: rounded pills; red marks plots that are shown. */
 .desktop-toolbar > .plot-toggle {
   font-size: 10px;
   font-weight: 600;
@@ -901,20 +901,20 @@ small {
   margin: 0 6px;
   color: #aaa;
 }
-.original-video {
+.intro-video {
   display: block;
   width: 320px;
   max-width: 100%;
   margin: 0 auto 13px;
   font-size: 11px;
 }
-.original-video img {
+.intro-video img {
   display: block;
   width: 100%;
   border: 1px solid #ccc;
   margin: 0 auto 7px;
 }
-.original-video > span {
+.intro-video > span {
   color: #777;
   text-decoration: underline;
 }
@@ -1187,7 +1187,7 @@ kbd {
   .start-actions span {
     margin: 0 3px;
   }
-  .original-video {
+  .intro-video {
     width: 280px;
   }
   .desktop-status {
@@ -1204,7 +1204,7 @@ kbd {
     width: 340px;
   }
 }
-/* Original desktop interactions */
+/* Desktop interactions */
 .tile-waves {
   flex-shrink: 0;
   pointer-events: auto;
@@ -1406,7 +1406,7 @@ kbd {
 .start-actions {
   margin: 16px 0 19px;
 }
-.original-video {
+.intro-video {
   width: 560px;
   max-width: 100%;
   margin-bottom: 12px;
@@ -1439,7 +1439,7 @@ kbd {
   .start-drop .drop-extra {
     font-size: 10px !important;
   }
-  .original-video {
+  .intro-video {
     width: 360px;
   }
   .start-actions {
@@ -1852,7 +1852,7 @@ kbd {
   bottom: 2px;
   right: 2px;
 }
-/* The original drop-zone's spaceboots motion, with its original 0.8 s timing. */
+/* The drop title's wobble, on a 0.8 s cycle. */
 @keyframes spaceboots {
   0% {
     transform: translate(2px, 1px) rotate(0deg);
@@ -1961,7 +1961,7 @@ kbd {
   outline: 0;
 }
 
-/* Outside the scrolling wall, the original halo can extend over the toolbar. */
+/* Outside the scrolling wall, the hover halo can extend over the toolbar. */
 .tile-hover-glow {
   position: fixed;
   pointer-events: none;

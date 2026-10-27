@@ -50,7 +50,7 @@ test("hover preserves waveform pixels and aligns the badge; tiles carry no sampl
   expect(speed.y - square.y - square.height).toBe(5);
   await expect(tile.locator(".stat-label").last()).toHaveText("n spikes");
   await expect(tile.locator(".tile-caption")).not.toContainText(/ISI|mean rate/i);
-  await page.screenshot({ path: "test-results/original-hover-style.png" });
+  await page.screenshot({ path: "test-results/hover-style.png" });
   await page.keyboard.down("Space");
   await tile.click({ position: { x: 45, y: 45 } });
   await page.keyboard.up("Space");
@@ -157,7 +157,7 @@ test("feature corner labels survive Space copies; settings and divider positions
   expect(restored.y + restored.height).toBeLessThanOrEqual(650);
 });
 
-test("external file readiness uses the original 800 ms pivot animation; internal cut drags do not", async ({
+test("external file drags show the 800 ms pivot animation; internal cut drags do not", async ({
   page,
 }) => {
   await page.goto("/?demo=quick");
@@ -216,7 +216,7 @@ test("browser reload/close modifiers do not toggle plots before the leave warnin
     ),
   ).toBe(false);
   await page.getByRole("button", { name: "Settings", exact: true }).focus();
-  // Shift toggles one plot; a plain key shows only that plot, as in v1.
+  // Shift toggles one plot; a plain key shows only that plot.
   await page.keyboard.press("Shift+R");
   await expect(rate).toHaveAttribute("aria-pressed", "false");
   await page.keyboard.press("Shift+R");

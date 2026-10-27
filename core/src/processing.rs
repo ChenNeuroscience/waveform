@@ -277,8 +277,8 @@ pub unsafe extern "C" fn engine_gate_feed(e: *mut Engine, first: usize, p: *cons
         g.column[first + i] = r[g.channel * 54 + 4 + g.sample] as i8;
     }
 }
-/// Insert the new half immediately after its source, matching the original tile
-/// split. Higher cell numbers move up together in the same undoable operation.
+/// Insert the new half immediately after its source (so the two tiles sit side by
+/// side). Higher cell numbers move up together in the same undoable operation.
 #[no_mangle]
 pub unsafe extern "C" fn engine_split_gate(
     e: *mut Engine,

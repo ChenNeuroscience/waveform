@@ -1,5 +1,5 @@
-// Byte-for-byte group colours and text contrast from waveform-v1 palettes.html.
-// Unassigned entries in the original 256-entry palette are intentionally black.
+// Cell group colours, and which groups need black badge text for contrast.
+// Groups beyond the listed colours are black.
 export const groupPalette = [
   [190, 190, 190],
   [0, 0, 200],
