@@ -88,11 +88,11 @@ test("browser back cancels a split preview before restoring the recording", asyn
   await page
     .locator('.cell-tile[data-cell="1"] .tile-waves')
     .click({ button: "right", position: { x: 30, y: 60 } });
-  await expect(page.locator(".split-pair")).toHaveCount(2);
+  await expect(page.locator(".tile-marked")).toHaveCount(2);
   await page.goBack();
   await ready(page);
   expect(await selection(page)).toEqual(first);
-  await expect(page.locator(".split-pair")).toHaveCount(0);
+  await expect(page.locator(".tile-marked")).toHaveCount(0);
   await page.goForward();
   await ready(page);
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();

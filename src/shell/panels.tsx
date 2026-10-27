@@ -295,7 +295,11 @@ export function HelpPanel() {
       <Shortcut keys="⌘ / Ctrl Z" text="Undo" />
       <Shortcut keys="⌘ / Ctrl ⇧ Z" text="Redo" />
       <Shortcut keys="⌘ / Ctrl S" text="Export .cut" />
-      <Shortcut keys="⌘ / Ctrl C" text="Copy active cell plots" />
+      <Shortcut keys="⌘ / Ctrl C" text="Copy the selected cell's stats and plots" />
+      <Shortcut
+        keys="Hold ⌘ / Ctrl C"
+        text="Copy mode: click tiles to pick several, or select all; Esc finishes"
+      />
       <h3>Views</h3>
       <Shortcut keys="Hover tile" text="Show cell spikes on the position path" />
       <Shortcut keys="Hold Space" text="Click a plot to copy it; click a window to close it" />
@@ -304,7 +308,10 @@ export function HelpPanel() {
         text="Show only waves / spatial / direction / speed / autocorrelation; Shift adds or removes"
       />
       <Shortcut keys="D / P" text="Time colours (features and waveforms) / waveform density" />
-      <Shortcut keys="Esc" text="Close panel, return to paint" />
+      <Shortcut
+        keys="Esc"
+        text="Close panel or leave the lasso; otherwise hide / show the toolbar"
+      />
       <a href="https://github.com/ChenNeuroscience/waveform" target="_blank" rel="noreferrer">
         Project and source on GitHub ↗
       </a>

@@ -337,42 +337,16 @@ export class WaveGPU {
           ? this.entry(keys[i], data.waveStarts[cell + 1] - data.waveStarts[cell], size)
           : null,
       );
-      gl.useProgram(this.lines);
-      gl.bindVertexArray(this.vao);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.waves);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, this.order);
-      const u = (n: string) => gl.getUniformLocation(this.lines, n);
-      gl.uniform1i(u("waves"), 0);
-      gl.uniform1i(u("order"), 1);
-      gl.uniform1f(u("unit"), this.unit);
-      gl.uniform1f(u("timeScale"), 1 / Math.max(1, data.times[data.times.length - 1] || 0));
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.ONE, gl.ONE);
-      gl.viewport(0, 0, size[0], size[1]);
+      this.useLines(scene);
       cells.forEach((cell, i) => {
         const entry = entries[i];
         if (!entry) {
           return;
         }
-        const total = entry.total;
-        if (entry.drawn >= total) {
-          return;
+        if (budget > 0 && entry.drawn < entry.total) {
+          budget -= this.drawLines(scene, cell, entry, budget, size);
         }
-        if (budget > 0) {
-          const n = Math.min(budget, total - entry.drawn);
-          gl.bindFramebuffer(gl.FRAMEBUFFER, entry.fbo);
-          gl.viewport(0, 0, size[0], size[1]);
-          gl.uniform1i(u("base"), data.waveStarts[cell] + entry.drawn);
-          for (let c = 0; c < 4; c++) {
-            gl.uniform1i(u("channel"), c);
-            gl.drawArraysInstanced(gl.LINE_STRIP, 0, 50, n);
-          }
-          entry.drawn += n;
-          budget -= n;
-        }
-        if (entry.drawn < total) {
+        if (entry.drawn < entry.total) {
           complete = false;
         }
       });
@@ -383,13 +357,7 @@ export class WaveGPU {
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(1, 1, 1, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.useProgram(this.quad);
-    gl.bindVertexArray(this.vao);
-    gl.activeTexture(gl.TEXTURE0);
-    const u = (n: string) => gl.getUniformLocation(this.quad, n);
-    gl.uniform1i(u("counts"), 0);
-    gl.uniform1f(u("unit"), this.unit);
-    gl.uniform1i(u("mode"), scene.drift && this.timed ? DRIFT : scene.density ? DENSITY : FLAG);
+    this.useQuad(scene);
     cells.forEach((cell, i) => {
       const entry = keys[i] && this.cache.get(keys[i]);
       if (!entry) {
@@ -400,12 +368,7 @@ export class WaveGPU {
         this.canvas.height -
         Math.round((Math.floor(i / layout.columns) * layout.rowStride + (layout.top || 0)) * dpr) -
         size[1];
-      gl.viewport(x, y, size[0], size[1]);
-      gl.bindTexture(gl.TEXTURE_2D, entry.texture);
-      gl.uniform2f(u("origin"), x, y);
-      gl.uniform3fv(u("rgb"), cellRgb(cell));
-      gl.uniform1f(u("total"), entry.drawn);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      this.composite(cell, entry, x, y, size);
     });
     // While records are still loading, the loader's final tick resumes rendering.
     if (!complete) {
@@ -415,6 +378,109 @@ export class WaveGPU {
     } else if (this.done !== scene.readyKey) {
       this.onReady((this.done = scene.readyKey));
     }
+  }
+  /** A cell's waveform frame as a 2D canvas (device pixels), drawing any of its
+   * spikes not yet rendered; null until the records have loaded. */
+  capture(cell: number): HTMLCanvasElement | null {
+    const gl = this.gl;
+    const scene = this.scene;
+    const size = this.cacheSize.split("x").map(Number);
+    const [w, h] = size;
+    if (!scene || !this.loaded || gl.isContextLost() || !(w > 0 && h > 0)) {
+      return null;
+    }
+    const key = this.key(cell);
+    const { waveStarts } = scene.data;
+    const entry = key ? this.entry(key, waveStarts[cell + 1] - waveStarts[cell], size) : null;
+    const target = texture(gl, gl.TEXTURE_2D);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+    if (entry && entry.drawn < entry.total) {
+      this.useLines(scene);
+      this.drawLines(scene, cell, entry, entry.total, size);
+      gl.disable(gl.BLEND);
+    }
+    const fbo = gl.createFramebuffer()!;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0);
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(1, 1, 1, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (entry) {
+      this.useQuad(scene);
+      this.composite(cell, entry, 0, 0, size);
+    }
+    const pixels = new Uint8ClampedArray(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    gl.deleteTexture(target);
+    // GL rows run bottom-up.
+    const image = new ImageData(w, h);
+    for (let row = 0; row < h; row++) {
+      image.data.set(pixels.subarray((h - 1 - row) * w * 4, (h - row) * w * 4), row * w * 4);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d")!.putImageData(image, 0, 0);
+    // The visible tiles are redrawn on the next frame, evicting what isn't shown.
+    this.schedule();
+    return canvas;
+  }
+  /** Bind the line program, record textures and additive blending. */
+  private useLines(scene: Scene) {
+    const gl = this.gl;
+    const { times } = scene.data;
+    gl.useProgram(this.lines);
+    gl.bindVertexArray(this.vao);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.waves);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.order);
+    const u = (n: string) => gl.getUniformLocation(this.lines, n);
+    gl.uniform1i(u("waves"), 0);
+    gl.uniform1i(u("order"), 1);
+    gl.uniform1f(u("unit"), this.unit);
+    gl.uniform1f(u("timeScale"), 1 / Math.max(1, times[times.length - 1] || 0));
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+  }
+  /** Add up to `limit` more of a cell's spikes to its cache entry; returns how many. */
+  private drawLines(scene: Scene, cell: number, entry: Entry, limit: number, [w, h]: number[]) {
+    const gl = this.gl;
+    const n = Math.min(limit, entry.total - entry.drawn);
+    const u = (name: string) => gl.getUniformLocation(this.lines, name);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, entry.fbo);
+    gl.viewport(0, 0, w, h);
+    gl.uniform1i(u("base"), scene.data.waveStarts[cell] + entry.drawn);
+    for (let c = 0; c < 4; c++) {
+      gl.uniform1i(u("channel"), c);
+      gl.drawArraysInstanced(gl.LINE_STRIP, 0, 50, n);
+    }
+    entry.drawn += n;
+    return n;
+  }
+  /** Bind the quad program that colours cached counts. */
+  private useQuad(scene: Scene) {
+    const gl = this.gl;
+    gl.useProgram(this.quad);
+    gl.bindVertexArray(this.vao);
+    gl.activeTexture(gl.TEXTURE0);
+    const u = (n: string) => gl.getUniformLocation(this.quad, n);
+    gl.uniform1i(u("counts"), 0);
+    gl.uniform1f(u("unit"), this.unit);
+    gl.uniform1i(u("mode"), scene.drift && this.timed ? DRIFT : scene.density ? DENSITY : FLAG);
+  }
+  /** Colour a cell's cached counts into the bound framebuffer at (x, y). */
+  private composite(cell: number, entry: Entry, x: number, y: number, [w, h]: number[]) {
+    const gl = this.gl;
+    const u = (n: string) => gl.getUniformLocation(this.quad, n);
+    gl.viewport(x, y, w, h);
+    gl.bindTexture(gl.TEXTURE_2D, entry.texture);
+    gl.uniform2f(u("origin"), x, y);
+    gl.uniform3fv(u("rgb"), cellRgb(cell));
+    gl.uniform1f(u("total"), entry.drawn);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }
 function texture(gl: WebGL2RenderingContext, target: number) {

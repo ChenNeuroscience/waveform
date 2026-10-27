@@ -1,7 +1,8 @@
 /** Floating copies of plots: a cell's tile (pop-out), the path or feature grid
- * (Space-click), and copying the selected cell's tile to the clipboard. */
-import { useState } from "react";
-import { captureTile, captureTilePlots } from "../tiles/TileWall";
+ * (Space-click), and copying cells to the clipboard: the selected cell, or in copy
+ * mode a set of cells picked on the tile wall, rewritten after every change. */
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { captureTile, type CellCapture, type TileWallHandle } from "../tiles/TileWall";
 import { captureFeatureGrid } from "../plots/FeatureView";
 import { downloadBlob } from "../files";
 import type { CellStat } from "../tiles/CellStats";
@@ -42,20 +43,58 @@ function escapeHtml(text: string) {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Clipboard HTML and plain text for captured cells: per cell, a line with its
+ * bold title and stats, then (HTML only) one image per plot. */
+function clipboardContent(captures: CellCapture[], prefix: string, counts: Uint32Array) {
+  const ratio = Math.min(2, devicePixelRatio || 1);
+  const html: string[] = [];
+  const text: string[] = [];
+  for (const { cell, stats, plots } of captures) {
+    const title = `${prefix} · cell ${cell}`;
+    const spikes = `${(counts[cell] || 0).toLocaleString("en-GB")} spikes`;
+    const rates = stats.filter((s) => s.label !== "n spikes").map((s) => `${s.label}: ${s.value}`);
+    const details = [spikes, ...rates].join(" · ");
+    const images = plots.map(
+      ({ name, canvas }) =>
+        `<img src="${canvas.toDataURL()}" alt="${name}" width="${Math.round(canvas.width / ratio)}" height="${Math.round(canvas.height / ratio)}">`,
+    );
+    html.push(
+      `<p style="margin:0"><b>${escapeHtml(title)}</b> · ${escapeHtml(details)}</p>`,
+      `<p style="margin:0">${images.join(" ")}</p>`,
+    );
+    text.push(`${title} · ${details}`);
+  }
+  return { html: html.join(""), text: text.join("\n") };
+}
+
+/** Thrown when a newer clipboard write replaces one still capturing. */
+class StaleCopy extends Error {}
+
 export function useCopies({
   trial,
   tetNum,
   cell,
   data,
+  tileWall,
   onNotice,
 }: {
   trial: Trial | undefined;
   tetNum: number;
   cell: number;
   data: ViewData | null;
+  tileWall: RefObject<TileWallHandle | null>;
   onNotice: (message: string) => void;
 }) {
   const [copies, setCopies] = useState<PlotCopy[]>([]);
+  // Copy mode's selected cells (null outside copy mode), and the latest write.
+  const [copying, setCopying] = useState<number[] | null>(null);
+  const latestWrite = useRef(0);
+  // Copy mode ends when the window loses focus (its keys no longer reach it).
+  useEffect(() => {
+    const blur = () => setCopying(null);
+    addEventListener("blur", blur);
+    return () => removeEventListener("blur", blur);
+  }, []);
   const add = (copy: Omit<PlotCopy, "id">) => {
     setCopies((cs) => [...cs, { ...copy, id: crypto.randomUUID() }]);
   };
@@ -102,33 +141,45 @@ export function useCopies({
     });
   };
 
-  /** Copy the selected cell to the clipboard as text plus one image per plot
-   * (or download the tile if the clipboard is unavailable). */
-  const copyToClipboard = async () => {
-    const spikes = (data?.counts[cell] || 0).toLocaleString("en-GB");
-    const title = `${trial?.name} · T${tetNum} · cell ${cell}`;
-    const stats = tileStats(cell).filter((s) => s.label !== "n spikes");
-    const details = [`${spikes} spikes`, ...stats.map((s) => `${s.label}: ${s.value}`)].join(" · ");
-    const plots = captureTilePlots(cell);
-    const ratio = Math.min(2, devicePixelRatio || 1);
-    const images = plots.map(
-      ({ name, canvas }) =>
-        `<img src="${canvas.toDataURL()}" alt="${name}" width="${Math.round(canvas.width / ratio)}" height="${Math.round(canvas.height / ratio)}">`,
-    );
-    const html = [
-      `<p style="margin:0"><b>${escapeHtml(title)}</b> · ${escapeHtml(details)}</p>`,
-      `<p style="margin:0">${images.join(" ")}</p>`,
-    ].join("");
-    const text = `${title} · ${details}`;
+  /** Put cells on the clipboard. The item is handed over at once (keeping the key
+   * press or click that allows it) and filled when the plots are captured; a
+   * newer write makes an older one fail quietly. Resolves whether it succeeded. */
+  const writeClipboard = async (cells: number[]) => {
+    const wall = tileWall.current;
+    if (!wall || !data) {
+      return false;
+    }
+    const id = ++latestWrite.current;
+    const counts = data.counts;
+    const content = wall.capture(cells).then((captures) => {
+      if (id !== latestWrite.current) {
+        throw new StaleCopy();
+      }
+      return clipboardContent(captures, `${trial?.name} · T${tetNum}`, counts);
+    });
     try {
       const item = new ClipboardItem({
-        "text/html": new Blob([html], { type: "text/html" }),
-        "text/plain": new Blob([text], { type: "text/plain" }),
+        "text/html": content.then(({ html }) => new Blob([html], { type: "text/html" })),
+        "text/plain": content.then(({ text }) => new Blob([text], { type: "text/plain" })),
       });
       await navigator.clipboard.write([item]);
-      onNotice(`Cell ${cell}: text and ${plots.length} plots copied to clipboard.`);
+      return true;
+    } catch (error) {
+      if (id === latestWrite.current && !(error instanceof StaleCopy)) {
+        throw error;
+      }
+      return false;
+    }
+  };
+
+  /** Copy the selected cell (or download its tile if the clipboard is unavailable). */
+  const copyToClipboard = async () => {
+    try {
+      if (await writeClipboard([cell])) {
+        onNotice(`Cell ${cell} copied to clipboard.`);
+      }
     } catch {
-      captureTile(cell, text)?.toBlob((blob) => {
+      captureTile(cell, `${trial?.name} · T${tetNum} · cell ${cell}`)?.toBlob((blob) => {
         if (blob) {
           downloadBlob(blob, `cell-${cell}.png`);
         }
@@ -137,6 +188,34 @@ export function useCopies({
     }
   };
 
+  /** Set the copy-mode selection and put it on the clipboard. */
+  const copyCells = (cells: number[]) => {
+    const sorted = [...cells].sort((a, b) => a - b);
+    setCopying(sorted);
+    if (sorted.length) {
+      writeClipboard(sorted).catch(() => onNotice("Clipboard unavailable."));
+    }
+  };
+  const copyMode = {
+    cells: copying,
+    /** Enter copy mode, starting with the hovered cell if there is one. */
+    start: (hovered: number | null) => copyCells(hovered === null ? [] : [hovered]),
+    toggle: (n: number) => {
+      const current = copying ?? [];
+      copyCells(current.includes(n) ? current.filter((c) => c !== n) : [...current, n]);
+    },
+    selectAll: () => {
+      const all: number[] = [];
+      data?.counts.forEach((count, n) => {
+        if (count > 0) {
+          all.push(n);
+        }
+      });
+      copyCells(all);
+    },
+    end: () => setCopying(null),
+  };
+
   const close = (id: string) => setCopies((cs) => cs.filter((c) => c.id !== id));
-  return { copies, popOut, popPlot, copyToClipboard, close };
+  return { copies, popOut, popPlot, copyToClipboard, copyMode, close };
 }

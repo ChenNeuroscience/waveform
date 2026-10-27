@@ -42,13 +42,13 @@ export function SwapPrompt({
   };
   return (
     <form
-      className="swap-prompt"
+      className="tile-prompt"
       role="region"
       aria-label="Swap groups"
       onKeyDown={cancelOnEscape}
       onSubmit={submit}
     >
-      <div className="swap-instructions" role="status">
+      <div className="tile-prompt-instructions" role="status">
         Swap group {source}: click or type a group to swap with. Esc to cancel.
       </div>
       <input

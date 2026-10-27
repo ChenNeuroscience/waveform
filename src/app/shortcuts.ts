@@ -9,7 +9,11 @@ export interface ShortcutContext {
   dragging: boolean;
   swap: SwapState | null;
   splitPoint: SplitPoint | null;
+  /** Copy mode is open: Escape ends it, Cmd/Ctrl A selects every cell. */
+  copying: boolean;
   pane: string | null;
+  /** The feature-space tool; Escape returns from lasso to the brush. */
+  tool: string;
   hoverCell: number | null;
   hoveredTile: RefObject<number | null>;
   settings: Settings;
@@ -21,6 +25,11 @@ export interface ShortcutContext {
   openFiles: () => void;
   operation: (type: "undo" | "redo") => void;
   copyPlot: () => void;
+  /** Holding Cmd/Ctrl C for a second opens copy mode. */
+  startCopyMode: (hovered: number | null) => void;
+  selectAllCopies: () => void;
+  endCopyMode: () => void;
+  toggleToolbar: () => void;
   exportCut: () => void;
   cancelSwap: () => void;
   startSwap: (cell: number) => void;
@@ -86,10 +95,15 @@ const plotKeys: Record<string, PlotMode> = {
   v: "speed",
   t: "ac",
 };
+/** How long Cmd/Ctrl C is held (through key repeats) to open copy mode. */
+const COPY_HOLD_MS = 1000;
+
 export function useShortcuts(context: ShortcutContext) {
   const latest = useRef(context);
   latest.current = context;
   useEffect(() => {
+    // When the current Cmd/Ctrl C press started.
+    let copyPressed = 0;
     const key = (e: KeyboardEvent) => {
       const c = latest.current;
       if ((e.target as HTMLElement).matches("input,select,textarea")) {
@@ -97,6 +111,17 @@ export function useShortcuts(context: ShortcutContext) {
       }
       if (c.dragging) {
         e.preventDefault();
+        return;
+      }
+      const cmd = e.ctrlKey || e.metaKey;
+      if (c.copying) {
+        e.preventDefault();
+        if (e.key === "Escape") {
+          c.endCopyMode();
+        }
+        if (cmd && e.key === "a") {
+          c.selectAllCopies();
+        }
         return;
       }
       if (e.code === "Space" && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -110,7 +135,6 @@ export function useShortcuts(context: ShortcutContext) {
         e.preventDefault();
         return;
       }
-      const cmd = e.ctrlKey || e.metaKey;
       if (cmd && e.key === "o") {
         e.preventDefault();
         c.openFiles();
@@ -128,7 +152,14 @@ export function useShortcuts(context: ShortcutContext) {
       }
       if (cmd && e.key === "c" && c.ready) {
         e.preventDefault();
-        c.copyPlot();
+        if (!e.repeat) {
+          copyPressed = performance.now();
+          c.copyPlot();
+        } else if (performance.now() - copyPressed >= COPY_HOLD_MS) {
+          // Repeats can arrive before copy mode renders; start it once per press.
+          copyPressed = Infinity;
+          c.startCopyMode(c.hoveredTile.current);
+        }
         return;
       }
       if (cmd && e.key === "s") {
@@ -154,8 +185,14 @@ export function useShortcuts(context: ShortcutContext) {
         c.startSwap(hovered);
         return;
       }
+      // Escape closes the focused panel or leaves the lasso; otherwise it hides
+      // or shows the toolbar.
       if (e.key === "Escape") {
-        c.closePane();
+        if (c.pane || c.tool !== "brush") {
+          c.closePane();
+        } else {
+          c.toggleToolbar();
+        }
         return;
       }
       if (e.key === "k" || e.key === "?") {

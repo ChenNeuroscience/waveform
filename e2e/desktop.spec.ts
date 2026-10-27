@@ -119,8 +119,8 @@ test("tile drag merge and right-button waveform split preserve exact undo labels
   await page.mouse.up({ button: "right" });
   await expect(page.getByRole("button", { name: "Select cell 3", exact: true })).toBeVisible();
   await expect(page.locator(".tile-wall")).toHaveAttribute("data-splitting", "1");
-  await expect(page.locator(".split-pair")).toHaveCount(2);
-  await expect(page.locator(".split-muted")).toHaveCount(1);
+  await expect(page.locator(".tile-marked")).toHaveCount(2);
+  await expect(page.locator(".tile-muted")).toHaveCount(1);
   await expect(page.locator(".wave-split-marker")).toHaveCount(2);
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   await ready(page);
@@ -146,14 +146,14 @@ test("tile drag merge and right-button waveform split preserve exact undo labels
   await page.mouse.move(xx, yy, { steps: 4 });
   await page.mouse.up();
   await ready(page);
-  await expect(page.locator(".split-pair")).toHaveCount(2);
+  await expect(page.locator(".tile-marked")).toHaveCount(2);
   await expect(page.locator(".tile-wall")).toHaveAttribute("data-splitting", "1");
   await expect(
     page.locator('.cell-tile[data-cell="2"] .tile-caption .stat-value').last(),
   ).toHaveText("1");
   await page.screenshot({ path: "test-results/split-mode.png" });
   await page.mouse.click(1050, 15); // Any left click completes; this click is consumed.
-  await expect(page.locator(".split-pair")).toHaveCount(0);
+  await expect(page.locator(".tile-marked")).toHaveCount(0);
   expect(await assignments(page)).toEqual([1, 1, 1, 2, 3]);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   expect(await assignments(page)).toEqual([1, 1, 1, 1, 2]);
@@ -161,9 +161,9 @@ test("tile drag merge and right-button waveform split preserve exact undo labels
   await page.getByRole("button", { name: "Redo", exact: true }).click();
   expect(await assignments(page)).toEqual([1, 1, 1, 2, 3]);
   await wave(1).click({ button: "right" });
-  await expect(page.locator(".split-pair")).toHaveCount(2);
+  await expect(page.locator(".tile-marked")).toHaveCount(2);
   await page.keyboard.press("Escape");
-  await expect(page.locator(".split-pair")).toHaveCount(0);
+  await expect(page.locator(".tile-marked")).toHaveCount(0);
   expect(await assignments(page)).toEqual([1, 1, 1, 2, 3]);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   expect(await assignments(page)).toEqual([1, 1, 1, 1, 2]);
