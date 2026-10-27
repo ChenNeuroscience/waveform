@@ -8,6 +8,8 @@ import { waveX, waveY, type WaveLayout } from "../plots/plot-geometry";
 import { useTileGestures, type DragComparison } from "./tile-gestures";
 import {
   badgeStyle,
+  positionKey,
+  type Trial,
   type ViewData,
   type AnalysisData,
   membershipKey,
@@ -86,45 +88,46 @@ function cellStatEntries(a: AnalysisData | undefined, hasPos: boolean, spikes: n
 function classNames(base: string, flags: Record<string, boolean>) {
   return [base, ...Object.keys(flags).filter((name) => flags[name])].join(" ");
 }
-export function TileWall({
-  data,
-  settings,
-  pos,
-  posKey,
-  selected,
-  shown,
-  onSelect,
-  splitPoint,
-  swap,
-  feedback,
-  onSwapGroup,
-  grabMode,
-  busy,
-  onCompare,
-  onHover,
-  onMerge,
-  onWaveSplit,
-  onPopOut,
-}: {
-  data: ViewData;
-  settings: Settings;
-  pos?: File;
-  posKey: string;
-  selected: number;
-  shown: VisiblePlots;
+/** What tile gestures do: select, hover, drag-compare and merge, start or adjust
+ * a waveform split, pop a tile out, or pick the partner of a pending swap. */
+export interface TileActions {
   onSelect: (n: number) => void;
-  splitPoint: SplitPoint | null;
-  swap: SwapState | null;
-  feedback: TileFeedback | null;
-  onSwapGroup: (group: number) => void;
-  grabMode: boolean;
-  busy: boolean;
-  onCompare: (pair: DragComparison | null) => void;
   onHover: (n: number | null) => void;
+  onCompare: (pair: DragComparison | null) => void;
   onMerge: (a: number, b: number) => void;
   onWaveSplit: (n: number, ch: number, t: number, v: number) => void;
   onPopOut: (n: number, x: number, y: number) => void;
+  onSwapGroup: (group: number) => void;
+}
+
+export function TileWall({
+  data,
+  settings,
+  trial,
+  selected,
+  shown,
+  splitPoint,
+  swap,
+  feedback,
+  grabMode,
+  busy,
+  actions: { onSelect, onHover, onCompare, onMerge, onWaveSplit, onPopOut, onSwapGroup },
+}: {
+  data: ViewData;
+  settings: Settings;
+  /** The trial, for its position file (tile rate maps and tuning). */
+  trial: Trial | undefined;
+  selected: number;
+  shown: VisiblePlots;
+  splitPoint: SplitPoint | null;
+  swap: SwapState | null;
+  feedback: TileFeedback | null;
+  grabMode: boolean;
+  busy: boolean;
+  actions: TileActions;
 }) {
+  const pos = trial?.pos;
+  const posKey = positionKey(trial);
   const scroller = useRef<HTMLDivElement>(null);
   const waveCanvas = useRef<HTMLCanvasElement>(null);
 

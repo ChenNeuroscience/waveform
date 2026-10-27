@@ -134,6 +134,9 @@ export interface AnalysisData {
   rate: number;
 }
 export const fileId = (f: File) => `${f.webkitRelativePath || f.name}:${f.size}:${f.lastModified}`;
+/** The worker cache key for a trial's position file, or "" without one. */
+export const positionKey = (trial: Trial | undefined) =>
+  trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : "";
 export { groupTextColor } from "./palette";
 import { groupRgb8, groupTextColor } from "./palette";
 export const cellRgb = (cell: number) => groupRgb8(cell).map((value) => value / 255);

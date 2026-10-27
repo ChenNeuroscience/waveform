@@ -1,13 +1,15 @@
 import video from "../../img/demo_youtube.png";
-import type { ShellProps } from "./props";
 
 /** Shown before any files are imported. */
-export function StartScreen(
-  p: Pick<
-    ShellProps,
-    "busy" | "drag" | "fileInput" | "folderInput" | "message" | "onDemo" | "progress"
-  >,
-) {
+export function StartScreen(p: {
+  busy: boolean;
+  drag: boolean;
+  message: string;
+  onDemo: () => void;
+  progress: number;
+  onOpenFiles: () => void;
+  onOpenFolder: () => void;
+}) {
   return (
     <main className="start-screen">
       <div className="start-drop">
@@ -26,11 +28,11 @@ export function StartScreen(
           Other file types will be ignored.
         </p>
         <p className="start-actions">
-          <button aria-label="Browse files" onClick={() => p.fileInput.current?.click()}>
+          <button aria-label="Browse files" onClick={() => p.onOpenFiles()}>
             Choose files
           </button>
           <span> · </span>
-          <button onClick={() => p.folderInput.current?.click()}>Choose folder</button>
+          <button onClick={() => p.onOpenFolder()}>Choose folder</button>
           <span> · </span>
           <a href="https://github.com/ChenNeuroscience/waveform" target="_blank" rel="noreferrer">
             GitHub / more information

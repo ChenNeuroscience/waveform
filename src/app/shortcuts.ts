@@ -1,7 +1,7 @@
 /** Global keyboard shortcuts. The listener is registered once and reads the
  * latest state and actions through a ref, so it never acts on a stale render. */
 import { useEffect, useRef, type RefObject } from "react";
-import type { PlotMode, Settings, SwapState, SplitPoint, Trial } from "./types";
+import type { PlotMode, Settings, SwapState, SplitPoint, Trial } from "../types";
 
 export interface ShortcutContext {
   ready: boolean;

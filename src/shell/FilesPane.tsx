@@ -1,22 +1,27 @@
-import { cutDownloadKey } from "../cut-downloads";
-import type { ShellProps } from "./props";
+import { cutDownloadKey, type CutDownloads } from "../app/cut-downloads";
+import type { CutFile, Tetrode, Trial } from "../types";
+import { useEffect, useRef } from "react";
 
 /** Tetrode navigation and the trials with their tetrode and cut files. */
-export function FilesPane(
-  p: Pick<
-    ShellProps,
-    | "cutDownloads"
-    | "cutId"
-    | "onCutDrag"
-    | "onPrepareCut"
-    | "onRecording"
-    | "onTet"
-    | "onTrial"
-    | "tetNum"
-    | "trial"
-    | "trials"
-  >,
-) {
+export function FilesPane(p: {
+  cutDownloads: CutDownloads;
+  cutId: string;
+  onCutDrag: (event: React.DragEvent, t: Trial, e: Tetrode, c: CutFile) => void;
+  onPrepareCut: (t: Trial, e: Tetrode, c: CutFile) => void;
+  onRecording: (t: Trial, n: number, c?: string) => void;
+  onTet: (n: number) => void;
+  onTrial: (t: Trial) => void;
+  tetNum: number;
+  trial?: Trial;
+  trials: Trial[];
+}) {
+  const list = useRef<HTMLDivElement>(null);
+  // Keep the selected trial in view when it changes.
+  useEffect(() => {
+    list.current
+      ?.querySelector<HTMLElement>(".trial-block.selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [p.trial?.id]);
   const numbers = [...new Set(p.trials.flatMap((t) => t.tetrodes.map((t) => t.number)))].sort(
     (a, b) => a - b,
   );
@@ -36,7 +41,7 @@ export function FilesPane(
           </button>
         ))}
       </div>
-      <div className="trial-list">
+      <div className="trial-list" ref={list}>
         {p.trials.map((t) => (
           <div
             key={t.id}

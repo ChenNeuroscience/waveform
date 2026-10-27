@@ -210,3 +210,13 @@ export async function readCut(
     wasm.free_bytes(p, chunk);
   }
 }
+
+/** Save a blob as a file through a temporary download link. */
+export function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}

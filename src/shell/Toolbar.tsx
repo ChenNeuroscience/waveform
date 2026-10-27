@@ -9,42 +9,36 @@ import {
   List,
   HelpCircle,
 } from "lucide-react";
-import type { PlotMode } from "../types";
-import type { ShellProps } from "./props";
-import type { Timing } from "./position-info";
+import type { PlotMode, ViewData } from "../types";
+import type { VisiblePlots } from "../tiles/TileWall";
+import type { PanelName } from "./panels";
+import { experimentTiming } from "./position-info";
 
 /** Open files, undo/redo, panels, plot toggles and the recording status line. */
-export function Toolbar({
-  timing,
-  ...p
-}: Pick<
-  ShellProps,
-  | "busy"
-  | "data"
-  | "fileInput"
-  | "folderInput"
-  | "message"
-  | "onOperation"
-  | "onPanel"
-  | "onToggle"
-  | "progress"
-  | "ready"
-  | "shown"
-> & { timing: Timing }) {
+export function Toolbar(p: {
+  busy: boolean;
+  data: ViewData | null;
+  message: string;
+  onOperation: (type: "undo" | "redo") => void;
+  onPanel: (panel: PanelName) => void;
+  onToggle: (m: PlotMode, multiple: boolean) => void;
+  progress: number;
+  ready: boolean;
+  shown: VisiblePlots;
+  onOpenFiles: () => void;
+  onOpenFolder: () => void;
+}) {
+  const timing = experimentTiming(p.data?.headers || {}, p.data?.duration || 0);
   return (
     <div className="desktop-toolbar" role="toolbar" aria-label="Waveform tools">
       <button
         title="Open files [Ctrl/Cmd O]"
         aria-label="Browse files"
-        onClick={() => p.fileInput.current?.click()}
+        onClick={() => p.onOpenFiles()}
       >
         <FolderOpen size={17} />
       </button>
-      <button
-        title="Open folder"
-        aria-label="Open a folder"
-        onClick={() => p.folderInput.current?.click()}
-      >
+      <button title="Open folder" aria-label="Open a folder" onClick={() => p.onOpenFolder()}>
         <Folder size={16} />
       </button>
       <span className="tool-separator" />

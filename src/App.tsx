@@ -1,17 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { DesktopShell } from "./shell/DesktopShell";
+import { Toolbar } from "./shell/Toolbar";
+import { FilesPane } from "./shell/FilesPane";
+import { PositionPane } from "./shell/PositionPane";
+import { FeaturePane, type Painting } from "./shell/FeaturePane";
+import { StartScreen } from "./shell/StartScreen";
+import { Notice } from "./shell/Notice";
+import { FileInputs } from "./shell/FileInputs";
+import { Divider, usePaneLayout } from "./shell/panes";
+import { SwapPrompt } from "./tiles/SwapPrompt";
 import type { DragComparison } from "./tiles/tile-gestures";
 import { FloatingWindow } from "./shell/FloatingWindow";
-import { CellStats, type CellStat } from "./tiles/CellStats";
-import { captureFeatureGrid } from "./plots/FeatureView";
-import { captureTile, type VisiblePlots } from "./tiles/TileWall";
-import { CutDownloads, cutDownloadKey, writeCutDrag } from "./cut-downloads";
+import { TileWall, type TileActions, type VisiblePlots } from "./tiles/TileWall";
+import { CutDownloads, cutDownloadKey, writeCutDrag } from "./app/cut-downloads";
 import { usePreference } from "./preferences";
-import { useRecordingHistory, type RecordingSelection } from "./navigation";
-import { organiseFiles } from "./files";
+import { useRecordingHistory, type RecordingSelection } from "./app/navigation";
 import { request } from "./worker/client";
 import {
-  badgeStyle,
   fileId,
   defaultSettings,
   type Settings,
@@ -19,8 +23,6 @@ import {
   type Tetrode,
   type CutFile,
   type ViewData,
-  type AnalysisData,
-  type Trajectory,
   type PlotMode,
   type SplitPoint,
   type SwapState,
@@ -28,8 +30,12 @@ import {
 } from "./types";
 import { Superseded, type EditRequest } from "./worker/protocol";
 import { TOOL_PANELS, type PanelContext, type PanelName } from "./shell/panels";
-import { useShortcuts } from "./shortcuts";
-const fmt = (n: number) => n.toLocaleString("en-GB");
+import { useShortcuts } from "./app/shortcuts";
+import { useAnalyses } from "./app/analyses";
+import { useCopies } from "./app/copies";
+import { useSplit } from "./app/split";
+import { CopyWindow } from "./shell/CopyWindow";
+import { downloadBlob, organiseFiles } from "./files";
 function readSettings(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem("waveform-desktop-settings") || "{}");
@@ -46,37 +52,11 @@ function readSettings(): Settings {
     return defaultSettings;
   }
 }
-function download(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
-}
 type Pane = PanelName | null;
-
-/** A floating copy of a cell's tile or of a plot (path or feature grid). */
-interface PlotCopy {
-  id: string;
-  title: string;
-  image: string;
-  cell?: number;
-  stats?: CellStat[];
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
 
 /** The worker session key for a tetrode and cut. */
 function sessionKey(tet: Tetrode, cutId: string) {
   return `${tet.id}|${fileId(tet.file!)}|${cutId || "unsorted"}`;
-}
-
-/** The worker key for a trial's position file, or "" without one. */
-function positionKey(trial: Trial | undefined) {
-  return trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : "";
 }
 
 /** Plot visibility showing only `mode` (as in v1, without Shift). */
@@ -165,14 +145,6 @@ async function droppedFiles(transfer: DataTransfer) {
   return files;
 }
 
-/** Keep a window of the given size inside the viewport. */
-function clampToWindow(x: number, y: number, width: number, height: number) {
-  return {
-    x: Math.max(0, Math.min(innerWidth - width - 8, x)),
-    y: Math.max(0, Math.min(innerHeight - height - 8, y)),
-  };
-}
-
 export default function App() {
   // Imported files, and the selected trial → tetrode → cut.
   const [trials, setTrials] = useState<Trial[]>([]);
@@ -182,8 +154,6 @@ export default function App() {
 
   // The loaded recording (from the worker) and what the position pane shows.
   const [data, setData] = useState<ViewData | null>(null);
-  const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
-  const [trajectory, setTrajectory] = useState<Trajectory | null>(null);
 
   // Settings, the selected cell, and the feature-space painting tool
   // (destination ← sources), plus which plots each tile shows.
@@ -204,7 +174,6 @@ export default function App() {
   // Tool windows (the focused one is `pane`) and floating plot copies.
   const [pane, setPane] = useState<Pane>(null);
   const [panels, setPanels] = useState<PanelName[]>([]);
-  const [copies, setCopies] = useState<PlotCopy[]>([]);
   // Space held: clicking a plot copies it.
   const [grabMode, setGrabMode] = useState(false);
 
@@ -212,24 +181,22 @@ export default function App() {
   // an open waveform split, a pending swap, and the jiggle after an edit.
   const [hoverCell, setHoverCell] = useState<number | null>(null);
   const [dragComparison, setDragComparison] = useState<DragComparison | null>(null);
-  const [compareAnalysis, setCompareAnalysis] = useState<{
-    key: string;
-    data: AnalysisData;
-  } | null>(null);
   const [splitPoint, setSplitPoint] = useState<SplitPoint | null>(null);
   const [swap, setSwap] = useState<SwapState | null>(null);
   const [tileFeedback, setTileFeedback] = useState<TileFeedback | null>(null);
 
-  // Status: busy/progress for worker operations, error and notice banners,
-  // files dragged over the page, and a counter that re-renders prepared cuts.
+  // Status: busy/progress for worker operations, error and notice banners, and
+  // whether files are being dragged over the page.
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [drag, setDrag] = useState(false);
-  const [downloadVersion, setDownloadVersion] = useState(0);
+  // Bumped when a cut file finishes preparing, to re-render its export-ready marker.
+  const [, setDownloadVersion] = useState(0);
 
+  const panes = usePaneLayout();
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   // Bumped per recording load; async edits, loads and progress updates compare
@@ -239,9 +206,6 @@ export default function App() {
   const lastCuts = useRef(new Map<string, string>());
   // Sessions with unexported edits, for the leave-page warning.
   const dirtySessions = useRef(new Set<string>());
-  // The split finish/cancel in flight, so repeated clicks share one request.
-  const finishingSplit = useRef(false);
-  const splitCompletion = useRef<Promise<void> | null>(null);
   const cutDownloads = useRef(new CutDownloads());
   // The tile under the pointer (for S to swap), without re-rendering on hover.
   const hoveredTile = useRef<number | null>(null);
@@ -367,7 +331,7 @@ export default function App() {
     setDragComparison(null);
     setHoverCell(null);
     setError("");
-    setAnalysis(null);
+    clearAnalysis();
     request(
       "load",
       {
@@ -409,65 +373,29 @@ export default function App() {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when the tetrode or cut identity changes; other inputs are read at load time
   }, [tet?.id, tet?.file, cutId]);
-  // The path is shared by every cell, so it is fetched once per position file and
-  // processing settings rather than with each cell's analysis.
-  useEffect(() => {
-    let live = true;
-    if (!data?.key || !trial?.pos) {
-      setTrajectory(null);
-      return;
-    }
-    request("trajectory", {
-      pos: trial.pos,
-      posKey: positionKey(trial),
-      settings,
-    })
-      .then((t) => {
-        if (live) {
-          setTrajectory(t);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the position-processing settings change the trajectory
-  }, [data?.key, trial?.id, trial?.pos, settings.leds, settings.maxSpeed, settings.posSmooth]);
   const displayCell = dragComparison?.source ?? hoverCell ?? cell;
-  const comparisonKey = `${data?.session}|${data?.revision}|${trial?.id}|${trial?.pos ? fileId(trial.pos) : ""}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${dragComparison?.target}`;
-  useEffect(() => {
-    let live = true;
-    const target = dragComparison?.target;
-    if (!data || busy || target == null) {
-      return;
-    }
-    const timeout = setTimeout(
-      () =>
-        request("analysis", {
-          session: data.session,
-          cell: target,
-          pos: trial?.pos,
-          posKey: positionKey(trial),
-          settings,
-        })
-          .then((a) => {
-            if (live) {
-              setCompareAnalysis({ key: comparisonKey, data: a });
-            }
-          })
-          .catch((e) => {
-            if (live) {
-              setError(e.message);
-            }
-          }),
-      25,
-    );
-    return () => {
-      live = false;
-      clearTimeout(timeout);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- comparisonKey covers the comparison's inputs
-  }, [comparisonKey, trial?.pos, busy]);
+  const { analysis, trajectory, comparisonAnalysis, clearAnalysis } = useAnalyses({
+    data,
+    busy,
+    trial,
+    settings,
+    displayCell,
+    dragComparison,
+    onError: setError,
+  });
+  const {
+    copies,
+    popOut,
+    popPlot,
+    copyToClipboard,
+    close: closeCopy,
+  } = useCopies({
+    trial,
+    tetNum,
+    cell,
+    data,
+    onNotice: setNotice,
+  });
   useEffect(() => {
     if (pane) {
       setPanels((ps) => (ps.includes(pane) ? ps : [...ps, pane]));
@@ -487,52 +415,6 @@ export default function App() {
       removeEventListener("blur", blur);
     };
   }, []);
-  useEffect(() => {
-    if (!data || busy) {
-      return;
-    }
-    let live = true;
-    const t = setTimeout(
-      () =>
-        request("analysis", {
-          session: data.session,
-          cell: displayCell,
-          pos: trial?.pos,
-          posKey: positionKey(trial),
-          settings,
-        })
-          .then((a) => {
-            if (live) {
-              setAnalysis(a);
-            }
-          })
-          .catch((e) => {
-            if (live && !(e instanceof Superseded)) {
-              setError(e.message);
-            }
-          }),
-      25,
-    );
-    return () => {
-      live = false;
-      clearTimeout(t);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the listed analysis settings change the result; trial.id travels with trial.pos
-  }, [
-    data,
-    displayCell,
-    trial?.pos,
-    settings.binCm,
-    settings.smooth,
-    settings.acWindow,
-    settings.leds,
-    settings.maxSpeed,
-    settings.posSmooth,
-    settings.dirBin,
-    settings.speedBin,
-    settings.speedMax,
-    busy,
-  ]);
   const newCut = () => ({ id: crypto.randomUUID(), name: editedCutName(trial!, tet!) });
   // Show a worker view; an edit that created a local cut also adds and selects it.
   const adopt = (d: ViewData) => {
@@ -600,78 +482,17 @@ export default function App() {
       }
     }
   };
-  const previewSplit = async (
-    source: number,
-    channel: number,
-    sample: number,
-    threshold: number,
-  ) => {
-    if (!ready || finishingSplit.current) {
-      return;
-    }
-    source = splitPoint?.source ?? source;
-    setSplitPoint({ source, channel, sample, threshold });
-    setBusy(true);
-    setMessage("Preparing split preview…");
-    try {
-      const d = await request(
-        "split",
-        {
-          session: data!.session,
-          phase: "preview",
-          source,
-          channel,
-          sample,
-          threshold,
-        },
-        (p, m) => {
-          setProgress(p);
-          setMessage(m);
-        },
-      );
-      setData(d);
-    } catch (error) {
-      setError(String(error));
-      setData(await request("view", { session: data!.session }));
-      setSplitPoint(null);
-    } finally {
-      if (!finishingSplit.current) {
-        setBusy(false);
-      }
-    }
-  };
-  const finishSplit = (cancel = false): Promise<void> => {
-    if (splitCompletion.current) {
-      return splitCompletion.current;
-    }
-    if (!splitPoint) {
-      return Promise.resolve();
-    }
-    const completion = (async () => {
-      finishingSplit.current = true;
-      setBusy(true);
-      setHoverCell(null);
-      try {
-        adopt(
-          await request("split", {
-            session: data!.session,
-            phase: cancel ? "cancel" : "finish",
-            ...(!cancel && !cut?.local ? { newCut: newCut() } : {}),
-          }),
-        );
-      } catch (error) {
-        setError(String(error));
-        setData(await request("view", { session: data!.session }));
-      } finally {
-        splitCompletion.current = null;
-        setSplitPoint(null);
-        finishingSplit.current = false;
-        setBusy(false);
-      }
-    })();
-    splitCompletion.current = completion;
-    return completion;
-  };
+  const { previewSplit, finishSplit } = useSplit({
+    splitPoint,
+    setSplitPoint,
+    ready,
+    session: data?.session,
+    newCut: () => (cut?.local ? undefined : newCut()),
+    adopt,
+    setData,
+    onFinishing: () => setHoverCell(null),
+    status: { setBusy, setProgress, setMessage, setError },
+  });
   const pushSelection = useRecordingHistory(
     trial && tet?.file ? { trialId, tetNum, cutId } : null,
     async (next, current) => {
@@ -683,46 +504,6 @@ export default function App() {
       }
     },
   );
-  useEffect(() => {
-    if (!splitPoint) {
-      return;
-    }
-    const complete = (event: PointerEvent) => {
-      if (event.button !== 0) {
-        return;
-      }
-      // Left presses on either split tile's waveforms adjust the split instead.
-      const tile = (event.target as Element | null)
-        ?.closest(".tile-waves")
-        ?.closest<HTMLElement>(".cell-tile");
-      if (tile && [splitPoint.source, splitPoint.source + 1].includes(Number(tile.dataset.cell))) {
-        return;
-      }
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      const swallow = (click: MouseEvent) => {
-        click.preventDefault();
-        click.stopImmediatePropagation();
-      };
-      window.addEventListener("click", swallow, { capture: true, once: true });
-      setTimeout(() => window.removeEventListener("click", swallow, true), 500);
-      finishSplit();
-    };
-    const cancel = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        finishSplit(true);
-      }
-    };
-    window.addEventListener("pointerdown", complete, true);
-    window.addEventListener("keydown", cancel, true);
-    return () => {
-      window.removeEventListener("pointerdown", complete, true);
-      window.removeEventListener("keydown", cancel, true);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- listeners are re-registered per split point; finishSplit reads only values fixed for the split
-  }, [splitPoint]);
   const selectSource = (group: number, toggle = false) => {
     setSources((current) => nextSources(current, group, toggle));
   };
@@ -788,86 +569,11 @@ export default function App() {
         format: "cut",
         trial: trial!.name,
       });
-      download(b, `${trial!.name}_${tetNum}.cut`);
+      downloadBlob(b, `${trial!.name}_${tetNum}.cut`);
       setNotice("Cut exported. Original files are never overwritten.");
     } catch (e) {
       setError(String(e));
     }
-  };
-  const snapshot = () =>
-    captureTile(
-      cell,
-      `${trial?.name} · T${tetNum} · cell ${cell} · ${fmt(data?.counts[cell] || 0)} spikes`,
-    );
-  const popOut = (n: number, x = 45, y = 70) => {
-    const canvas = captureTile(n, "", { header: false, details: false });
-    if (!canvas) {
-      return;
-    }
-    const ratio = Math.min(2, devicePixelRatio || 1);
-    const width = Math.min(innerWidth - 20, Math.max(280, canvas.width / ratio));
-    const height = ((width - 2) * canvas.height) / canvas.width + 27;
-    const stats = [...document.querySelectorAll(`.cell-tile[data-cell="${n}"] .caption-inner`)].map(
-      (el) => ({
-        label: el.querySelector(".stat-label")?.textContent || "",
-        value: el.querySelector(".stat-value")?.textContent || "",
-      }),
-    );
-    setCopies((cs) => [
-      ...cs,
-      {
-        id: crypto.randomUUID(),
-        title: `${trial?.name} · T${tetNum} · cell ${n} (copy)`,
-        cell: n,
-        stats,
-        image: canvas.toDataURL(),
-        ...clampToWindow(x + 15, y + 15, width, height),
-        width,
-        height,
-      },
-    ]);
-  };
-  const popPlot = (kind: "path" | "features", x: number, y: number) => {
-    const source =
-      kind === "features"
-        ? captureFeatureGrid()
-        : document.querySelector<HTMLCanvasElement>(".position-path canvas");
-    if (!source) {
-      return;
-    }
-    const ratio = Math.min(2, devicePixelRatio || 1);
-    const sourceWidth = kind === "features" ? source.width / ratio : source.clientWidth;
-    const width = Math.max(240, Math.min(700, sourceWidth));
-    const height = ((width - 2) * source.height) / source.width + 27;
-    setCopies((cs) => [
-      ...cs,
-      {
-        id: crypto.randomUUID(),
-        title: `${trial?.name} · T${tetNum} · ${kind}`,
-        image: source.toDataURL(),
-        ...clampToWindow(x, y, width, height),
-        width,
-        height,
-      },
-    ]);
-  };
-  const copyPlot = async () => {
-    const c = snapshot();
-    if (!c) {
-      return;
-    }
-    c.toBlob(async (b) => {
-      if (!b) {
-        return;
-      }
-      try {
-        await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]);
-        setNotice("Cell plot copied to clipboard.");
-      } catch {
-        download(b, `cell-${cell}.png`);
-        setNotice("Clipboard unavailable; the plot was downloaded.");
-      }
-    });
   };
   const update = <K extends keyof Settings>(k: K, v: Settings[K]) =>
     setSettings((s) => ({ ...s, [k]: v }));
@@ -888,7 +594,7 @@ export default function App() {
     setGrabMode,
     openFiles: () => fileInput.current?.click(),
     operation: (type) => operation(type),
-    copyPlot: () => copyPlot(),
+    copyPlot: copyToClipboard,
     exportCut: () => exportCut(),
     cancelSwap: () => setSwap(null),
     startSwap: (n) => {
@@ -1014,45 +720,131 @@ export default function App() {
     history: data,
     headers: data?.headers || {},
   };
+  // Files dragged in from outside (not a cut dragged out of the organiser).
+  const dragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    const types = e.dataTransfer.types;
+    if (types.includes("Files") && !types.includes("application/x-waveform-cut")) {
+      setDrag(true);
+    }
+  };
+  const openFiles = () => fileInput.current?.click();
+  const openFolder = () => folderInput.current?.click();
+  const painting: Painting = {
+    sources,
+    dest,
+    tool,
+    onSource: selectSource,
+    onDest: selectDest,
+    onNewGroup: newDestination,
+    onTool: setTool,
+  };
+  const tileActions: TileActions = {
+    onSelect: setCell,
+    onHover: hoverTile,
+    onCompare: setDragComparison,
+    onMerge: mergeCells,
+    onWaveSplit: previewSplit,
+    onPopOut: popOut,
+    onSwapGroup: swapGroup,
+  };
   return (
-    <DesktopShell
-      {...{ trials, trial, tetNum, cutId, data, analysis, trajectory, settings }}
-      {...{ cell, sources, dest, tool, isolate, shown, grabMode, hoverCell, dragComparison }}
-      {...{ splitPoint, swap, tileFeedback, ready, busy, progress, message, error, notice, drag }}
-      {...{ fileInput, folderInput, downloadVersion }}
-      comparisonAnalysis={compareAnalysis?.key === comparisonKey ? compareAnalysis.data : null}
-      cutDownloads={cutDownloads.current}
-      onCompare={setDragComparison}
-      onHover={setHoverCell}
-      onTileHover={hoverTile}
-      onPopOut={popOut}
-      onPopPlot={popPlot}
-      onMerge={mergeCells}
-      onSwapGroup={swapGroup}
-      onCancelSwap={() => setSwap(null)}
-      onWaveSplit={previewSplit}
-      onImport={importFiles}
-      onTrial={chooseTrial}
-      onTet={chooseTet}
-      onRecording={chooseRecording}
-      onCut={(id) => navigateTo({ trialId, tetNum, cutId: id })}
-      onPrepareCut={prepareCut}
-      onCutDrag={dragCut}
-      onCell={setCell}
-      onSource={selectSource}
-      onDest={selectDest}
-      onNewGroup={newDestination}
-      onTool={setTool}
-      onToggle={showPlot}
-      onPanel={setPane}
-      onOperation={operation}
-      onPolygon={polygon}
-      onDemo={startDemo}
-      onError={() => setError("")}
-      onNotice={() => setNotice("")}
-      onDrag={setDrag}
+    <div
+      className={`app desktop-app ${grabMode ? "grab-mode" : ""} ${splitPoint ? "splitting" : ""}`}
+      data-ready={ready ? "true" : "false"}
+      onDragOver={dragOver}
+      onDragLeave={(e) => !e.relatedTarget && setDrag(false)}
       onDrop={drop}
     >
+      <FileInputs fileInput={fileInput} folderInput={folderInput} onImport={importFiles} />
+      {trials.length > 0 ? (
+        <>
+          <Toolbar
+            {...{ data, ready, busy, progress, message, shown }}
+            onOpenFiles={openFiles}
+            onOpenFolder={openFolder}
+            onOperation={operation}
+            onPanel={setPane}
+            onToggle={showPlot}
+          />
+          <div
+            className="desktop-workspace"
+            ref={panes.workspace}
+            style={{ gridTemplateColumns: panes.columns }}
+          >
+            <div
+              className="left-workspace"
+              ref={panes.left}
+              style={{ gridTemplateRows: panes.rows }}
+            >
+              <FilesPane
+                {...{ trials, trial, tetNum, cutId }}
+                cutDownloads={cutDownloads.current}
+                onTrial={chooseTrial}
+                onTet={chooseTet}
+                onRecording={chooseRecording}
+                onPrepareCut={prepareCut}
+                onCutDrag={dragCut}
+              />
+              <Divider part="files" onDrag={panes.dragDivider} />
+              <PositionPane
+                {...{ data, trial, settings, trajectory, analysis, comparisonAnalysis }}
+                {...{ hoverCell, dragComparison, grabMode }}
+                onPopPlot={popPlot}
+              />
+              <Divider part="position" onDrag={panes.dragDivider} />
+              <FeaturePane
+                {...{ data, settings, cell, isolate, painting, grabMode }}
+                canPaint={ready && !swap}
+                splitting={!!splitPoint}
+                onHover={setHoverCell}
+                onPolygon={polygon}
+                onPopPlot={popPlot}
+              />
+            </div>
+            <Divider part="columns" onDrag={panes.dragDivider} />
+            <section className="right-workspace">
+              {swap && data && (
+                <SwapPrompt
+                  state={swap}
+                  counts={data.counts}
+                  onGroup={swapGroup}
+                  onCancel={() => setSwap(null)}
+                />
+              )}
+              {data ? (
+                <TileWall
+                  {...{ data, settings, trial, shown, splitPoint, swap, grabMode }}
+                  selected={cell}
+                  feedback={tileFeedback}
+                  busy={!ready}
+                  actions={tileActions}
+                />
+              ) : (
+                <div className="pane-placeholder">{message || "Loading recording…"}</div>
+              )}
+            </section>
+          </div>
+        </>
+      ) : (
+        <StartScreen
+          {...{ busy, progress, message, drag }}
+          onOpenFiles={openFiles}
+          onOpenFolder={openFolder}
+          onDemo={startDemo}
+        />
+      )}
+      <Notice
+        error={error}
+        notice={notice}
+        onDismiss={() => (error ? setError("") : setNotice(""))}
+      />
+      {drag && trials.length > 0 && (
+        <div className="drag-overlay">
+          <p className="drop-title-wobble">drag &amp; drop files here</p>
+          <small>.set · .pos · .1, .2, … · .cut · .clu.N</small>
+        </div>
+      )}
       {panels.map((name) => {
         const panel = TOOL_PANELS[name];
         return (
@@ -1072,35 +864,14 @@ export default function App() {
           </FloatingWindow>
         );
       })}
-      {copies.map((c) => (
-        <FloatingWindow
-          key={c.id}
-          comparison
+      {copies.map((copy) => (
+        <CopyWindow
+          key={copy.id}
+          copy={copy}
           grabMode={grabMode}
-          title={c.title}
-          x={c.x}
-          y={c.y}
-          width={c.width}
-          height={c.height}
-          onClose={() => setCopies((cs) => cs.filter((v) => v.id !== c.id))}
-        >
-          {c.cell !== undefined ? (
-            <div className="tile-copy">
-              <img className="plot-copy" src={c.image} alt="Copied cell plots" draggable={false} />
-              <span className="tile-copy-badge" style={badgeStyle(c.cell)}>
-                {c.cell}
-              </span>
-              <CellStats
-                entries={c.stats || []}
-                className="tile-copy-stats"
-                label="Copied cell statistics"
-              />
-            </div>
-          ) : (
-            <img className="plot-copy" src={c.image} alt="Copied plot" draggable={false} />
-          )}
-        </FloatingWindow>
+          onClose={() => closeCopy(copy.id)}
+        />
       ))}
-    </DesktopShell>
+    </div>
   );
 }

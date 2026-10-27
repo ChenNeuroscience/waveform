@@ -1,5 +1,5 @@
-import { request } from "./worker/client";
-import type { CutFile, Tetrode, Trial } from "./types";
+import { request } from "../worker/client";
+import type { CutFile, Tetrode, Trial } from "../types";
 export interface PreparedCut {
   file: File;
   url: string;
@@ -51,7 +51,7 @@ export class CutDownloads {
     this.entries.clear();
   }
 }
-import { fileId as fileIdentity } from "./types";
+import { fileId as fileIdentity } from "../types";
 export function writeCutDrag(data: DataTransfer, cut: PreparedCut) {
   data.effectAllowed = "copy";
   data.items.add(cut.file);
