@@ -273,7 +273,9 @@ export default function App() {
         const first = d.counts.findIndex((n, i) => n > 0 && i > 0),
           c = first < 0 ? 0 : first;
         setCell(c);
-        setSources([c]);
+        // Paint from the lowest populated group (usually noise, 0) into a new group.
+        const lowest = d.counts.findIndex((n) => n > 0);
+        setSources([lowest < 0 ? 0 : lowest]);
         const empty = d.counts.findIndex((n, i) => n === 0 && i > 0);
         setDest(empty < 0 ? 0 : empty);
         setBusy(false);

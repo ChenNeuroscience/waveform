@@ -21,6 +21,18 @@ export async function destination(page: Page, group: number) {
   await expect(active).toHaveAttribute("data-group", String(group));
 }
 
+/** Make `group` the only painting source (right-click its chip). */
+export async function source(page: Page, group: number) {
+  await ready(page);
+  await page
+    .locator(`.group-selector button[data-group="${group}"]`)
+    .first()
+    .click({ button: "right" });
+  await expect(
+    page.locator(".painting-sources button[data-group]"),
+  ).toHaveAttribute("data-group", String(group));
+}
+
 // Paint the entire projection to exercise the same multi-source transfer path
 // as a region edit, without relying on the removed numeric/merge controls.
 export async function paintSources(page: Page) {

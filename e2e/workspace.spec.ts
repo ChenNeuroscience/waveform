@@ -1,4 +1,4 @@
-import { destination, paintSources } from "./controls";
+import { destination, paintSources, source } from "./controls";
 import { ready, exportCut } from "./controls";
 import { test, expect } from "@playwright/test";
 test("demo imports, exact cut edits survive switching, undo/redo and export", async ({
@@ -18,6 +18,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     .getByRole("button", { name: "Select cell 1", exact: true })
     .textContent();
   await destination(page, 2);
+  await source(page, 1);
   await paintSources(page);
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
@@ -29,6 +30,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toHaveText(count!);
   await destination(page, 2);
+  await source(page, 1);
   await paintSources(page);
   await ready(page);
   await page.locator(".tile-wall").evaluate((el) => (el.scrollTop = 0));
