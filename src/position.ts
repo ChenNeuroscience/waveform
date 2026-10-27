@@ -109,7 +109,9 @@ export function analyse(
     w.engine_analysis_meta(engine),
     8,
   ).slice();
-  const array = (name: string) =>
+  const array = (
+    name: "spatial" | "spikes" | "direction" | "speed" | "speed_dwell" | "ac",
+  ) =>
     copyF32(
       w,
       w[`engine_analysis_${name}`](engine),
