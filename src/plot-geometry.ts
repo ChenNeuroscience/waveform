@@ -22,6 +22,34 @@ export function projectionFrame(width: number, height: number) {
   return { ...box, x: box.x + 2, y: box.y + 2 };
 }
 
+/**
+ * Waveform frame geometry, shared by the GPU shader, the split marker, split
+ * gestures and tests. Each of the four channels fills a quarter of the frame
+ * width, with its 50 samples spanning the middle WAVE_SPAN of that quarter
+ * (WAVE_MARGIN either side); ±128 ADC units span WAVE_GAIN of the frame height.
+ * Coordinates are fractions of the frame: x from the left, y from the top.
+ */
+export const WAVE_SAMPLES = 50,
+  WAVE_MARGIN = 0.08,
+  WAVE_SPAN = 0.84,
+  WAVE_GAIN = 0.78;
+export const waveX = (channel: number, sample: number) =>
+  (channel + WAVE_MARGIN + (WAVE_SPAN * sample) / (WAVE_SAMPLES - 1)) / 4;
+export const waveY = (value: number) => 0.5 - ((value / 128) * WAVE_GAIN) / 2;
+/** The channel, nearest sample and threshold value under a point in the frame. */
+export function wavePoint(x: number, y: number) {
+  const wx = Math.min(0.99999, Math.max(0, x)) * 4,
+    channel = Math.min(3, Math.floor(wx)),
+    sample = Math.round(
+      ((wx - channel - WAVE_MARGIN) / WAVE_SPAN) * (WAVE_SAMPLES - 1),
+    ),
+    threshold = Math.round(((0.5 - y) * 2 * 128) / WAVE_GAIN);
+  return {
+    channel,
+    sample: Math.max(0, Math.min(WAVE_SAMPLES - 1, sample)),
+    threshold: Math.max(-128, Math.min(127, threshold)),
+  };
+}
 export interface WaveLayout {
   columns: number;
   tileStride: number;

@@ -1,6 +1,14 @@
 import { program } from "./gpu";
 import { cellRgb } from "./types";
-import type { WaveLayout } from "./plot-geometry";
+import {
+  WAVE_GAIN,
+  WAVE_MARGIN,
+  WAVE_SAMPLES,
+  WAVE_SPAN,
+  type WaveLayout,
+} from "./plot-geometry";
+/** A JS number as a GLSL float literal. */
+const glsl = (n: number) => (Number.isInteger(n) ? `${n}.` : `${n}`);
 // Raw 216-byte records live in an R8I texture array, 9 records per 1944-byte row and
 // 2048 rows per layer (within WebGL2's guaranteed size limits). The shader reads the
 // file's own layout, so no CPU transposition is needed. One layer is one batch.
@@ -23,7 +31,8 @@ void main(){
  uint ticks=0u;for(int b=0;b<4;b++)ticks=ticks<<8|uint(texelFetch(waves,at+ivec3(b,0,0),0).r&255);
  time=float(ticks)*timeScale;
  float v=float(texelFetch(waves,at+ivec3(4+gl_VertexID,0,0),0).r)/128.;
- float x=(float(channel)+(float(gl_VertexID)/49.)*.84+.08)/4.;gl_Position=vec4(x*2.-1.,v*.78,0.,1.);}`;
+ // Shared waveform frame geometry (plot-geometry.ts).
+ float x=(float(channel)+${glsl(WAVE_MARGIN)}+${glsl(WAVE_SPAN)}*float(gl_VertexID)/${glsl(WAVE_SAMPLES - 1)})/4.;gl_Position=vec4(x*2.-1.,v*${glsl(WAVE_GAIN)},0.,1.);}`;
 const lineFragment = `#version 300 es
 precision highp float;uniform float unit;flat in float time;out vec4 c;void main(){c=vec4(unit,time*unit,0.,0.);}`;
 const quadVertex = `#version 300 es

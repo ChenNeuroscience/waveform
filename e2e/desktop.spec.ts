@@ -2,6 +2,7 @@ import { ready, exportCut, setDensity } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { decodeCut } from "../tests/wasm";
+import { waveX, waveY } from "../src/plot-geometry";
 async function assignments(page: Page) {
   const [d] = await Promise.all([
     page.waitForEvent("download"),
@@ -134,8 +135,8 @@ test("tile drag merge and right-button waveform split preserve exact undo labels
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   expect(await assignments(page)).toEqual([1, 1, 1, 1, 2]);
   const b = (await wave(1).boundingBox())!;
-  const x = b.x + (b.width / 4) * (0.08 + (0.84 * 14) / 49),
-    y = b.y + (b.height * (64 - 60 * 0.39)) / 128;
+  const x = b.x + b.width * waveX(0, 14),
+    y = b.y + b.height * waveY(60);
   await page.mouse.move(x, y + 3);
   await page.mouse.down({ button: "right" });
   await page.mouse.move(x, y, { steps: 4 });
@@ -158,8 +159,8 @@ test("tile drag merge and right-button waveform split preserve exact undo labels
   // Adjust from the spawned tile, using a different channel/sample. Membership
   // must always be recomputed from the original cell, never just one half.
   const second = (await wave(2).boundingBox())!;
-  const xx = second.x + (second.width / 4) * (1 + 0.08 + (0.84 * 20) / 49),
-    yy = second.y + (second.height * (64 - 60 * 0.39)) / 128;
+  const xx = second.x + second.width * waveX(1, 20),
+    yy = second.y + second.height * waveY(60);
   await page.mouse.move(xx, yy + 3);
   await page.mouse.down({ button: "right" });
   await page.mouse.move(xx, yy, { steps: 4 });

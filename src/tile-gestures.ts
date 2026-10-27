@@ -4,6 +4,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { wavePoint } from "./plot-geometry";
 export interface DragComparison {
   source: number;
   target: number | null;
@@ -101,21 +102,13 @@ export function useTileGestures({
         plotWidth = Number(wave.dataset.plotWidth) || wr.width,
         plotHeight = Number(wave.dataset.plotHeight) || rect.height,
         plotTop = Number(wave.dataset.plotTop) || 0,
-        wx = Math.min(0.99999, x / plotWidth),
-        y = Math.max(0, Math.min(rect.height - 1, py - rect.top)),
-        channel = Math.min(3, Math.floor(wx * 4)),
-        sample = Math.max(
-          0,
-          Math.min(49, Math.round(((wx * 4 - channel - 0.08) / 0.84) * 49)),
-        ),
-        threshold = Math.max(
-          -128,
-          Math.min(
-            127,
-            Math.round((64 - ((y - plotTop) / plotHeight) * 128) / 0.39),
-          ),
-        );
-      return { cell, x, y, channel, sample, threshold };
+        y = Math.max(0, Math.min(rect.height - 1, py - rect.top));
+      return {
+        cell,
+        x,
+        y,
+        ...wavePoint(x / plotWidth, (y - plotTop) / plotHeight),
+      };
     };
     const locate = () => {
       const hit = document

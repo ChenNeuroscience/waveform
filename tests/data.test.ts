@@ -3,7 +3,13 @@ import { parseHeader, organiseFiles } from "../src/files";
 import { corePromise, decodeCut as readCut, seedEngine } from "./wasm";
 import { analyse, parsePosition, trajectory } from "../src/position";
 import { defaultSettings } from "../src/types";
-import { fitGrid, projectionFrame } from "../src/plot-geometry";
+import {
+  fitGrid,
+  projectionFrame,
+  waveX,
+  waveY,
+  wavePoint,
+} from "../src/plot-geometry";
 describe("LTX import", () => {
   it("keeps folder-scoped File identities across incremental imports", async () => {
     const f = (path: string, text = "") => {
@@ -222,4 +228,16 @@ describe("plot geometry", () => {
       expect(frame.width).toBe(frame.height);
     }
   });
+});
+
+it("waveform frame geometry round-trips between samples and split points", () => {
+  for (const channel of [0, 1, 2, 3])
+    for (const sample of [0, 14, 49])
+      for (const threshold of [-128, -40, 0, 60, 127])
+        expect(wavePoint(waveX(channel, sample), waveY(threshold))).toEqual({
+          channel,
+          sample,
+          threshold,
+        });
+  expect(waveY(0)).toBe(0.5);
 });

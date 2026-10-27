@@ -4,7 +4,7 @@ import { WaveGPU } from "./wave-gpu";
 import { AnalysisPlot } from "./plots";
 import { CellStats } from "./CellStats";
 import { request } from "./client";
-import type { WaveLayout } from "./plot-geometry";
+import { waveX, waveY, type WaveLayout } from "./plot-geometry";
 import { useTileGestures, type DragComparison } from "./tile-gestures";
 import {
   color,
@@ -367,13 +367,8 @@ export function TileWall({
                   : null,
               marker = point
                 ? {
-                    x:
-                      ((point.channel + 0.08 + (0.84 * point.sample) / 49) *
-                        waveFrameWidth) /
-                      4,
-                    y:
-                      waveFrameTop +
-                      ((64 - point.threshold * 0.39) * waveFrameHeight) / 128,
+                    x: waveX(point.channel, point.sample) * waveFrameWidth,
+                    y: waveFrameTop + waveY(point.threshold) * waveFrameHeight,
                   }
                 : null;
             return (
