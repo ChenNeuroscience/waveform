@@ -145,7 +145,7 @@ test("cut files remain inline when collapsed; edits create independently navigab
   await page.screenshot({ path: "test-results/file-organiser.png" });
   expect(errors).toEqual([]);
 });
-test("original favicon and compact tile corners; extra filter, time controls and channel hover labels are absent", async ({
+test("favicon and compact tile corners; extra filter, time controls and channel hover labels are absent", async ({
   page,
 }) => {
   await fixture(page);

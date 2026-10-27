@@ -39,9 +39,7 @@ async function fixture(page: Page) {
   ]);
   await ready(page);
 }
-test("original desktop dimensions, nested cuts and independent floating tools", async ({
-  page,
-}) => {
+test("desktop dimensions, nested cuts and independent floating tools", async ({ page }) => {
   await fixture(page);
   const left = page.locator(".left-workspace");
   expect((await left.boundingBox())!.width).toBe(350);

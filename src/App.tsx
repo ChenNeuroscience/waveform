@@ -60,7 +60,7 @@ function sessionKey(tet: Tetrode, cutId: string) {
   return `${tet.id}|${fileId(tet.file!)}|${cutId || "unsorted"}`;
 }
 
-/** Plot visibility showing only `mode` (as in v1, without Shift). */
+/** Plot visibility showing only `mode` (a plain click or key, without Shift). */
 function onlyPlot(mode: PlotMode): VisiblePlots {
   return {
     waveforms: false,
@@ -211,7 +211,7 @@ export default function App() {
   // The tile under the pointer (for S to swap), without re-rendering on hover.
   const hoveredTile = useRef<number | null>(null);
 
-  // As in v1: show only the chosen plot; with Shift, toggle it among the others.
+  // Show only the chosen plot; with Shift, toggle it among the others.
   const showPlot = (mode: PlotMode, multiple: boolean) => {
     setShown((s) => (multiple ? { ...s, [mode]: !s[mode] } : onlyPlot(mode)));
   };

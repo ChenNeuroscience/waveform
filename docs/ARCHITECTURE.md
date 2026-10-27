@@ -1,105 +1,74 @@
-# Data flow, caches and bounded work
+# Architecture
 
 ```mermaid
 flowchart LR
-    Files[Local LTX files] -->|File handles| Worker[Module worker]
-    Worker -->|32,768-record chunks| Rust[Rust / Wasm]
-    Rust --> Features[Timestamp + amplitudes + labels]
-    Features -->|Transferred bounded view| GPU[WebGL2 buffers]
-    React[React controls] -->|Uniforms only| GPU
-    Worker -->|Cut deltas and inactive labels| IDB[IndexedDB]
-    Features --> Analysis[Cached analysis]
-    Analysis --> Canvas[Small 2D plots]
+    Files[Local LTX files] -->|File handles| Worker[Web Worker]
+    Worker -->|32,768-record chunks| Rust[Rust / Wasm engine]
+    Rust --> Population[Timestamps, amplitudes, labels]
+    Population -->|Once per recording, then labels| GPU[WebGL2]
+    Worker -->|Waveform record batches| GPU
+    Worker -->|Undo patches, inactive labels| IDB[IndexedDB]
+    Population --> Analysis[Cached analyses]
+    Analysis --> Canvas[2D plots]
 ```
 
 ## Ownership
 
-React owns control state and bounded display arrays, never the full waveform file. A worker owns opaque Rust engine pointers, population arrays, file references, cut sessions and analysis caches. One Wasm instance owns all engine allocations in the worker. Eviction frees inactive engines for allocator reuse; Wasm linear memory retains its high-water allocation until the worker closes. The 384 MiB target bounds retained engine data, not the whole browser process.
+React owns UI state and display arrays, never the waveform file. A module worker owns the Rust engines (one Wasm instance), file references, cut sessions and analysis caches; requests are serialised there, so labels and history cannot be edited concurrently. The worker request protocol is typed in `src/worker/protocol.ts`, and the Wasm exports in `src/worker/wasm.ts` (a unit test checks the table against the compiled module).
 
-The Rust crate is dependency-free. It parses cuts/CLu incrementally, decodes signed samples, computes peak-to-peak amplitude, retains timestamps/labels, selects resident waveform records and groups them by cell, prepares display buffers, processes position, computes analyses, generates/applies undo patches, formats exports and applies polygon, raster-brush, waveform-gate, merge, swap and renumber operations. JavaScript performs browser file/storage I/O, asynchronous scheduling and bulk buffer transfers. The worker validates format/count/range constraints before invoking the raw ABI. Allocation helpers accept byte buffers; addresses remain stable across Wasm memory growth, and JS typed-array views are reconstructed after operations that may allocate.
-
-Position processing, histograms, occupancy and rate maps run in the same worker. UI updates cannot run large file or analysis loops on the React thread. Responses carry request IDs; React generation checks discard stale display results. New load requests cancel superseded chunk scans at the next asynchronous boundary. Mutations are serialised so files, labels and history cannot be edited concurrently.
+The Rust crate (`core/`) is dependency-free. It parses tetrodes and cut/CLu files incrementally, computes peak-to-peak amplitudes, applies every edit (lasso, brush, waveform gate, merge, swap, renumber), produces undo patches and exports, processes position, computes analyses, and selects and groups the GPU-resident waveform records. JavaScript does browser I/O, scheduling and buffer transfers.
 
 ## Source layout
 
-- `core/src/`: the Rust engine (parsing, edits, analyses, waveform residency, simulated recordings).
-- `src/worker/`: runs in the Web Worker (`engine.worker.ts`, position parsing, IndexedDB undo history, simulated recording files, Wasm bindings), plus the main-thread bridge (`client.ts`) and the typed request protocol shared by both (`protocol.ts`).
-- `src/shell/`: the desktop layout. `DesktopShell` arranges the toolbar, files, position, feature and tile regions (one file each, each declaring the shell props it uses), and hosts floating tool windows (`panels.tsx`).
+- `core/src/`: the Rust engine, including the simulated recordings.
+- `src/worker/`: the Web Worker and its modules (position parsing, IndexedDB undo history, simulated files, Wasm bindings), the main-thread `client.ts` and the shared `protocol.ts`.
+- `src/app/`: hooks used by `App` (analyses, floating copies, waveform split, keyboard shortcuts, browser history, prepared cut downloads).
+- `src/shell/`: layout regions (toolbar, files, position and feature panes, start screen), pane dividers, floating windows and tool panels.
 - `src/tiles/`: the cell tile wall, its gestures (drag-merge, split, swap) and the GPU waveform renderer.
-- `src/plots/`: the feature view and its GPU renderer, analysis and path plots, shared WebGL helpers and plot geometry.
-- `src/`: the entry point and `App` (application state and edits), app-level hooks (preferences, browser history, keyboard shortcuts, prepared cut downloads), shared types, the palette and file organisation.
+- `src/plots/`: the feature view and its GPU renderer, analysis and path plots, WebGL helpers and plot geometry.
+- `src/`: `main.tsx`, `App.tsx` (application state, loading and edits), preferences, types, palette and file organisation.
 
-## Population representation
+## Population data
 
-For N spikes:
+For N spikes (about 1.94 GB of file at 9M spikes, which is never copied whole into JS or Wasm; it is read through Blob slices):
 
-| Data                    | Representation                                                                | 9 million spikes           |
-| ----------------------- | ----------------------------------------------------------------------------- | -------------------------- |
-| Timestamps              | `u32[N]`, raw acquisition ticks                                               | 36 MB                      |
-| Peak-to-peak amplitudes | `u8[N*4]`, signed-wave max−min                                                | 36 MB                      |
-| Active cell labels      | `u16[N]`                                                                      | 18 MB                      |
-| Cell membership index   | Lazy cached `u32` indices, grouped by label for repeated per-cell analysis    | 36 MB after first analysis |
-| Waveform input          | 32,768 × 216 byte scratch chunk                                               | 7.08 MB                    |
-| Waveform slot order     | `u32` per resident record (at most 1M), grouped by cell, plus per-cell hashes | 4 MB                       |
+| Data                  | Representation                                      | At 9M spikes    |
+| --------------------- | --------------------------------------------------- | --------------- |
+| Timestamps            | `u32[N]`, raw acquisition ticks                     | 36 MB           |
+| Amplitudes            | `u8[N*4]`, peak-to-peak per channel                 | 36 MB           |
+| Labels                | `u16[N]`                                            | 18 MB           |
+| Cell membership index | lazy `u32` indices grouped by label                 | 36 MB once used |
+| Waveform slot order   | `u32` per GPU-resident record (at most 1M), by cell | 4 MB            |
 
-The input file itself is about 1.94 GB. It is held as a browser File reference and read with Blob slices. It is not copied into JS or Wasm as one buffer. File timestamps, amplitudes and record order are retained exactly. Raw ADC amplitudes are displayed without claiming calibrated microvolts.
+A waveform threshold needs one channel/sample column; the first gate on a column reads the file once and caches one byte per spike (two columns per tetrode). An interactive split also caches the source cell's waveforms (up to 400,000 spikes) so further adjustments need no file reads. The preview never touches history; finishing commits one undo patch and Escape restores the labels.
 
-A waveform threshold needs one channel/sample column that the compact amplitude representation cannot reconstruct. The first gate on a column reads the file in chunks and caches one signed byte per spike; two columns are retained per tetrode. For interactive split mode, the first required scan also caches all source-cell waveforms when the source has at most 400,000 spikes (81.6 MB including indices). Further channel/sample/threshold adjustments then use those cached records; larger groups use the two-column cache. Source membership and original labels stay fixed during preview. A left click persists one final undo patch; Escape restores the original labels. Preview caches are released after finish/cancel.
+## GPU rendering
 
-## Display and GPU
+**Feature view.** Every spike is drawn from the population arrays (10 bytes per spike). Amplitudes and timestamps are sent once per recording and reattached by `worker/client.ts`; edits transfer only labels, which update one buffer in place. Axes, time range, point size and isolation are uniforms. Drift adds (1, normalised time) per spike into an `RG32F` target and colours each pixel by mean spike time, red (start) to green (end).
 
-The feature view draws every spike from the population arrays: four `u8` amplitudes, the raw `u32` timestamp and the `u16` label (10 bytes per spike, 10 MB at 1M). Amplitudes and timestamps never change for a recording, so the worker sends them only when the recording changes and `worker/client.ts` reattaches them to later views; each edit then transfers just the labels. No millions-of-object JS model is built.
+**Waveforms.** Up to 1M records are resident: all spikes up to 1M, otherwise 1M evenly spaced ones (flagged once in the toolbar). Records keep the file's 216-byte layout in an `R8I` texture array that the shader reads directly; the tile wall loads them in ~4 MB layers. Each cell renders once, in per-frame budgets, into a texture of per-pixel (line count, summed spike time), cached by a hash of the cell's resident records; frames only composite those textures into tiles. Flag, density and drift colour the same counts, so switching is instant, and edits re-render only cells whose membership changed.
 
-One WebGL2 context draws six projections from one VAO/buffer set. Axis selection, visible time range, point size and selected-cell isolation are uniforms. These settings neither reread files nor rebuild population features. Buffers are reused across renders; only changed labels are uploaded after edits. Up to four view buffer sets are cached, with least-recently-used eviction. The drift view adds each spike's (1, normalised time) into an `RG32F` target with additive blending, then colours every pixel by its mean spike time, red at the start of the recording to green at the end. It needs `EXT_color_buffer_float` and `EXT_float_blend`; without them drift is not drawn.
+Drift and exact counts need `EXT_color_buffer_float` and `EXT_float_blend`; without them drift is not drawn and density counts saturate. Nothing else is sampled: analyses, autocorrelograms and the position overlays use every spike.
 
-The tile wall sizes cells from the enabled plot widths and wraps them into columns. It virtualises grid rows and shares one WebGL2 waveform context; a single atlas maps visible cell densities onto their grid positions. The original 256-entry group palette is shared by CPU/GPU drawing; the density palette is normalised by each cell's resident spike count. Hover spike counts and peak rates use the original bottom-right stats layout, hidden during tile dragging. A pointer-transparent page-layer halo lets the yellow hover glow extend over the toolbar without covering the shared canvas. A drag captures one bounded, headerless PNG and masks its original slot with a placeholder. Snapping positions the PNG over its target; a CSS opacity cycle compares the plots without additional GPU contexts, rasterisation or population processing. The position canvas draws separately coloured source/target spike layers from cached worker analyses. Only releasing on an actual snapped target issues a merge edit; a cancelled drop returns the PNG with a short horizontal settling animation. Waveforms are described below. Numeric rate settings do not rerender waveform counts. Floating comparisons store titleless PNG snapshots and small frozen stats arrays; their title is shown in the window header and stats are drawn as an HTML overlay only on hover. Space-click closes both comparison and tool windows. Browser command modifiers cannot trigger the plain-letter plot shortcuts before a reload/close warning. Copies retain no population arrays or additional live GPU contexts. WebGL context restoration recreates projection resources.
+Waveform frame geometry (shared by the shader, split marker and gestures) lives in `plots/plot-geometry.ts`.
 
-### Waveforms
+## Caches
 
-Up to 1,000,000 waveform records are GPU-resident: every spike when a tetrode has at most 1M, otherwise 1M evenly spaced records (slot `s` is record `⌊s·N/M⌋`). Records stay in the file's raw 216-byte layout in an `R8I` texture array (9 records per 1,944-byte row, 2,048 rows per layer, within WebGL2's guaranteed limits); the vertex shader reads samples directly, so no CPU transposition is needed. Records are not retained in Wasm. The tile wall loads them one layer (18,432 records, about 4 MB) per `wave_batch` request: unsampled layers are a single Blob slice transferred untouched, while sampled layers stream through Rust, which copies only resident records with one fixed-size copy each. The Wasm build enables SIMD.
-
-After each label change Rust counting-sorts resident slots by cell and computes an order-independent 64-bit hash of each cell's slot set. The tile wall uploads that order (4 MB at 1M) and renders each cell once, as additive per-pixel line counts, into an offscreen texture cached by its hash; frames only composite cached textures into tile viewports. Rendering is budgeted to 131,072 spikes per animation frame, so large cells fill in progressively. Merges, swaps and split previews rerender only cells whose membership changed; renumbered cells reuse their image because colour is applied at composite time. Cache textures hold per-pixel (line count, summed spike time); the shader reads each spike's time from its record's timestamp bytes. Flag mode colours any non-zero count; density mode applies the original palette, normalised by the cell's resident count; drift (the shared time-colour setting) shows mean spike time, red at the start of the recording to green at the end. Switching mode does not rerender. With `EXT_float_blend` the cache is RG32F and counts are exact; otherwise counts saturate at 2,048 (half floats) or 255 (no float render targets) and drift is not drawn. The cache is bounded to 192 MB and is cleared on tile-size or recording changes; context restoration reloads the records.
-
-Sampled waveforms (tetrodes over 1M spikes) are flagged once in the toolbar as “WARNING: waveforms sampled”, not on tiles. Nothing else is sampled. Analyses, autocorrelograms and position overlays use every spike: an autocorrelogram's cost scales with the spike pairs inside its window, not with spike count.
-
-Data pixels retain a common scale in x/y. Rate-map bins are square; trajectory coordinates use physical arena dimensions; feature projections use square viewports and the same transform for lasso picking. Waveforms use a fixed four-channel grid in both density and flag modes; narrow panes scroll. The direction radius is circular and histogram frames keep their proportions. PNG copies preserve the captured pixel aspect. Comparison windows have no resize handle and drag from any point in their content; tool windows keep title-bar dragging and resizing. The grid centres in available pane space; oversized grids remain scrollable from their first row. Paint is the default tool and group chips wrap. Feature slots are 128 px squares separated by 4 px gaps, using shared layout geometry for WebGL viewports, pointer picking and PNG copies; each plot has all four borders. They have only top-left Y / bottom-right X labels (A1–A4); captures bake those labels into their PNG. The position summary stays visible over a faint white backing with a small left margin. It uses speed dwell occupancy with a red vertical line beside the bars and a maximum-speed label; there is no horizontal axis. Recording statistics occupy two small lines at the toolbar’s right edge, replacing the footer. Drift and density are toolbar toggles (grayscale icons, slate-blue when on); other rendering controls live in Settings; the feature-pane checkboxes and numeric waveform-split form have been removed. The path fills its pane, fits physical x/y uniformly and starts at the top. Duration uses whole minutes and seconds. Clock times prefer the recorded trial_time header, avoiding viewer-timezone changes.
+- **Recordings:** about 384 MiB of retained engine data; inactive tetrodes are evicted first.
+- **Positions:** four processed variants (file × LED/jump/smoothing settings), each caching its trajectory and occupancy maps, which every cell's analysis reuses.
+- **Analyses:** keyed by the cell's membership (spike count plus a 64-bit hash of its spike indices) and the analysis settings, in the worker (200) and the tile wall (512). Edits recompute only cells whose spikes changed; renumbered cells keep theirs. The worker reports the membership it analysed so a result can't be filed under a stale key.
+- **GPU:** four feature-view buffer sets; waveform tile textures up to 192 MB.
 
 ## Cut histories
 
-Each `(file identity, cut identity)` has its own undo/redo metadata in the existing worker, not a separate thread or Wasm instance. The first actual edit to an imported cut (or unsorted recording) creates a new blue local cut and leaves the imported original intact. Further edits update that local cut. A cut duplicate copies history references as well as labels, including the redo stack. Before an edit, one temporary label copy is taken. A sparse patch stores changed indices and before/after labels (8 bytes per changed spike); if that exceeds two compact label snapshots, the dense representation is used instead. The immutable patch is committed to IndexedDB before an edit is accepted. Storage failure restores the previous labels and counts.
+Each (file, cut) has its own undo/redo history. The first edit of an imported cut, or of an unsorted recording, creates a separate local (blue) cut; files on disk are never modified. Each edit stores an immutable patch in IndexedDB (sparse changed indices, or dense labels when smaller) before it is accepted; undo/redo applies a patch without re-reading spikes. Switching cuts saves the outgoing labels to IndexedDB. History lives for the browser tab; exporting a `.cut` is the durable result.
 
-Undo/redo reads one patch and applies it to the labels. It does not re-decode spikes. Redo branches are cleared on a new edit. Switching cuts writes the outgoing labels to IndexedDB and restores the incoming labels. There is no fixed history depth, but browser storage quota remains a practical bound. Inactive full labels are not kept in the worker's JS heap.
+Only explicit trial/tetrode/cut choices add browser history entries, so Back/Forward moves between recordings (cancelling an open split first).
 
-Workspace/session metadata is intentionally tab-local. IndexedDB holds patch payloads and inactive labels, but reloading does not reconstruct open File objects or the metadata stack. Export remains the durable interchange mechanism. Original files on disk are immutable to the app.
+## Simulated recordings
 
-The organiser displays tetrodes and their cuts inline at both collapsed and expanded sizes. It remembers the last cut per trial/tetrode. A four-entry export Blob cache prepares local cuts in the worker, including inactive cuts via a label-only Rust engine; this does not switch the active recording or mutate its history. Native dragging supplies a File and Chromium DownloadURL. Cold exports must finish preparation before the drag begins.
-
-Rendering/analysis settings, plot visibility, isolation, divider positions and named tool-window geometry persist in localStorage. Only settings are restored after reload. Layout restoration clamps dimensions and positions to the current viewport.
-
-## Cache limits and invalidation
-
-- Population cache: approximately 384 MiB target, evicting inactive tetrodes first. This is a retained-cache target, not a hard bound on browser/GPU/temporary memory. Wasm allocator high-water marks, edits, clones and GC can briefly increase memory.
-- Positions: four processed variants keyed by file and LED/jump/smoothing settings. Each caches its trajectory and its occupancy maps (per bin settings), which are cell-independent: the trajectory is sent once per variant rather than with every cell's analysis, and occupancy is computed once rather than per cell.
-- Analysis: up to 200 results in the worker and 512 in the tile wall, keyed by recording, the cell's membership (spike count and an order-independent 64-bit hash of its spike indices), position variant and numeric bin/smoothing/window settings. Edits therefore recompute only cells whose spikes changed; renumbered cells (for example above a split) reuse their results. Rust rebuilds the hashes lazily after any label change. The worker returns the membership it analysed so results are filed correctly even if an edit was processed first.
-- GPU: four bounded point views; render-only controls reuse buffers.
-- Cell membership: one lazy index per engine, rebuilt after label changes and reused across cell analyses.
-- Waveform tiles: one count texture per cell membership set; mode, colour and scroll changes only recomposite.
-- Waveform gates: two compact sample columns per cached tetrode.
-
-Rate-map colour ceilings only recolour an existing map. Position options reprocess position, not tetrode waveforms. Numeric map/window settings invalidate only their derived analysis. The worker's current implementation computes a selected-cell analysis bundle together; splitting that bundle into independent caches would further reduce work when changing only one analysis setting.
+The start screen's demo generates five trials of eight tetrodes (about 50k spikes over 20 minutes each) in Rust, on demand by record range, so no large fake files are held. Cells are place, head-direction or untuned, with Poisson spiking and theta modulation; one or two cells per tetrode drift in amplitude. Tetrode 7 is partly cut and tetrode 8 has no cut. `?demo=quick` is a smaller fixed-seed version for tests; `?demo=stress` generates 9M spikes and 100 cells.
 
 ## Static hosting
 
-Vite emits relative asset paths and a content-hashed Wasm asset. Main-thread initialisation resolves the imported Wasm URL against the document and passes it to the worker, so JavaScript and Wasm stay version-matched under `/waveform/`. Cargo also copies the module to `public/wasm` for native Node verification/benchmarks before Vite builds. No thread-shared Wasm memory, SharedArrayBuffer, custom server, authentication service or cross-origin isolation header is required.
-
-## Generated recordings
-
-The landing-page file stack is a click-only button. The default generates five trials and eight tetrodes per trial; recordings have roughly 50,000 spikes over 20 minutes, with 24, 36 and 48 cells plus noise across tetrodes. A fresh seed determines cell templates, waveform variation, simple uniform sample noise and spatial firing preferences. Tetrodes in a trial share one generated position trajectory and acquisition clock. At 50 Hz, the simulator perturbs angular velocity and target speed, includes brief pauses, and uses look-ahead wall avoidance and slowing within a 1 × 1 m arena. A 10 × 10 occupancy grid biases targets towards unvisited and lightly visited squares while angular inertia preserves smooth turns. Trajectories are shared as immutable data across tetrodes in the existing Wasm instance.
-
-Rust generates position records, cut labels and random-access tetrode record ranges. The worker returns normal set/pos/cut Files and small tetrode markers; before decoding, a marker resolves to a worker-only File adapter whose size and slice/stream methods expose the full generated recording. Only requested chunks are materialised. The existing decoder, waveform batches, gating reads, caches and edit/export paths operate on the full population. This avoids retaining several GB of artificial waveform Blobs and adds no worker or Wasm instance. Generated-demo timings include synthesis, not real disk throughput.
-
-`?demo=quick` uses the same generator at a smaller scale with a fixed seed for routine interaction tests. `?demo=stress` selects the 9M-spike/100-cell workload. CI separately exercises this stress demo and the ordinary 50k/20-minute demo, including exact merge/undo/export integrity. The generated cut files remain ordinary exportable files.
-
-## Recording navigation
-
-Only explicit trial/tetrode/cut choices push browser history entries, using history.state without changing the URL. Re-selecting the current recording adds no entry. Edits that create a local cut replace the current entry’s cut identity; undo/redo, cell selection, rendering controls and window/pane changes add none. Back/Forward restores the selected recording and its existing cut history, cancelling an unfinished split preview first. A workspace identity prevents stale entries from a previous tab workspace from selecting unrelated data. Readiness requires both a completed load and a view whose session matches the requested selection, avoiding stale results during fast navigation.
+Vite emits relative paths and a hashed Wasm asset, so the app runs from GitHub Pages under `/waveform/` with no server, SharedArrayBuffer or cross-origin isolation headers.
