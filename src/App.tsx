@@ -545,6 +545,17 @@ export default function App() {
     if (!splitPoint) return;
     const complete = (event: PointerEvent) => {
       if (event.button !== 0) return;
+      // Left presses on either split tile's waveforms adjust the split instead.
+      const tile = (event.target as Element | null)
+        ?.closest(".tile-waves")
+        ?.closest<HTMLElement>(".cell-tile");
+      if (
+        tile &&
+        [splitPoint.source, splitPoint.source + 1].includes(
+          Number(tile.dataset.cell),
+        )
+      )
+        return;
       event.preventDefault();
       event.stopImmediatePropagation();
       const swallow = (click: MouseEvent) => {

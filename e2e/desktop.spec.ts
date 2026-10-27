@@ -170,6 +170,21 @@ test("tile drag merge and right-button waveform split preserve exact undo labels
   await expect(
     page.locator('.cell-tile[data-cell="2"] .tile-caption .stat-value').last(),
   ).toHaveText("1");
+  // A left press on a split tile's waveforms adjusts rather than finishing.
+  await ready(page);
+  await page.mouse.move(xx, yy + 3);
+  await page.mouse.down();
+  await page.mouse.move(xx, yy, { steps: 4 });
+  await page.mouse.up();
+  await ready(page);
+  await expect(page.locator(".split-pair")).toHaveCount(2);
+  await expect(page.locator(".tile-wall")).toHaveAttribute(
+    "data-splitting",
+    "1",
+  );
+  await expect(
+    page.locator('.cell-tile[data-cell="2"] .tile-caption .stat-value').last(),
+  ).toHaveText("1");
   await page.screenshot({ path: "test-results/split-mode.png" });
   await page.mouse.click(1050, 15); // Any left click completes; this click is consumed.
   await expect(page.locator(".split-pair")).toHaveCount(0);
