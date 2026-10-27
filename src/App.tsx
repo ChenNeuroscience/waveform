@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { DesktopShell } from "./DesktopShell";
-import type { DragComparison } from "./tile-gestures";
-import { FloatingWindow } from "./FloatingWindow";
-import { CellStats, type CellStat } from "./CellStats";
-import { captureFeatureGrid } from "./plots";
-import { captureTile, type VisiblePlots } from "./TileWall";
+import { DesktopShell } from "./shell/DesktopShell";
+import type { DragComparison } from "./tiles/tile-gestures";
+import { FloatingWindow } from "./shell/FloatingWindow";
+import { CellStats, type CellStat } from "./tiles/CellStats";
+import { captureFeatureGrid } from "./plots/FeatureView";
+import { captureTile, type VisiblePlots } from "./tiles/TileWall";
 import { CutDownloads, cutDownloadKey, writeCutDrag } from "./cut-downloads";
 import { usePreference } from "./preferences";
 import { useRecordingHistory, type RecordingSelection } from "./navigation";
 import { organiseFiles } from "./files";
-import { request } from "./client";
+import { request } from "./worker/client";
 import {
   badgeStyle,
   fileId,
@@ -26,8 +26,8 @@ import {
   type SwapState,
   type TileFeedback,
 } from "./types";
-import { Superseded, type EditRequest } from "./protocol";
-import { TOOL_PANELS, type PanelContext, type PanelName } from "./panels";
+import { Superseded, type EditRequest } from "./worker/protocol";
+import { TOOL_PANELS, type PanelContext, type PanelName } from "./shell/panels";
 import { useShortcuts } from "./shortcuts";
 const fmt = (n: number) => n.toLocaleString("en-GB");
 function readSettings(): Settings {

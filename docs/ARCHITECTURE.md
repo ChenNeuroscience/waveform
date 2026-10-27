@@ -20,6 +20,15 @@ The Rust crate is dependency-free. It parses cuts/CLu incrementally, decodes sig
 
 Position processing, histograms, occupancy and rate maps run in the same worker. UI updates cannot run large file or analysis loops on the React thread. Responses carry request IDs; React generation checks discard stale display results. New load requests cancel superseded chunk scans at the next asynchronous boundary. Mutations are serialised so files, labels and history cannot be edited concurrently.
 
+## Source layout
+
+- `core/src/`: the Rust engine (parsing, edits, analyses, waveform residency, simulated recordings).
+- `src/worker/`: runs in the Web Worker (`engine.worker.ts`, position parsing, IndexedDB undo history, simulated recording files, Wasm bindings), plus the main-thread bridge (`client.ts`) and the typed request protocol shared by both (`protocol.ts`).
+- `src/shell/`: the desktop layout. `DesktopShell` arranges the toolbar, files, position, feature and tile regions (one file each, each declaring the shell props it uses), and hosts floating tool windows (`panels.tsx`).
+- `src/tiles/`: the cell tile wall, its gestures (drag-merge, split, swap) and the GPU waveform renderer.
+- `src/plots/`: the feature view and its GPU renderer, analysis and path plots, shared WebGL helpers and plot geometry.
+- `src/`: the entry point and `App` (application state and edits), app-level hooks (preferences, browser history, keyboard shortcuts, prepared cut downloads), shared types, the palette and file organisation.
+
 ## Population representation
 
 For N spikes:
@@ -39,7 +48,7 @@ A waveform threshold needs one channel/sample column that the compact amplitude 
 
 ## Display and GPU
 
-The feature view draws every spike from the population arrays: four `u8` amplitudes, the raw `u32` timestamp and the `u16` label (10 bytes per spike, 10 MB at 1M). Amplitudes and timestamps never change for a recording, so the worker sends them only when the recording changes and `client.ts` reattaches them to later views; each edit then transfers just the labels. No millions-of-object JS model is built.
+The feature view draws every spike from the population arrays: four `u8` amplitudes, the raw `u32` timestamp and the `u16` label (10 bytes per spike, 10 MB at 1M). Amplitudes and timestamps never change for a recording, so the worker sends them only when the recording changes and `worker/client.ts` reattaches them to later views; each edit then transfers just the labels. No millions-of-object JS model is built.
 
 One WebGL2 context draws six projections from one VAO/buffer set. Axis selection, visible time range, point size and selected-cell isolation are uniforms. These settings neither reread files nor rebuild population features. Buffers are reused across renders; only changed labels are uploaded after edits. Up to four view buffer sets are cached, with least-recently-used eviction. The drift view adds each spike's (1, normalised time) into an `RG32F` target with additive blending, then colours every pixel by its mean spike time, red at the start of the recording to green at the end. It needs `EXT_color_buffer_float` and `EXT_float_blend`; without them drift is not drawn.
 

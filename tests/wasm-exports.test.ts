@@ -1,6 +1,6 @@
 import { it, expect } from "vitest";
 import { readFile } from "node:fs/promises";
-import { EXPORTS } from "../src/wasm";
+import { EXPORTS } from "../src/worker/wasm";
 
 it("the typed export table matches the compiled Wasm module", async () => {
   const module = await WebAssembly.compile(

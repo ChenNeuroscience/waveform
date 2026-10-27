@@ -1,6 +1,6 @@
-import type { ViewData, ViewMessage } from "./types";
+import type { ViewData, ViewMessage } from "../types";
 import { Superseded, type Payload, type RequestType, type Result } from "./protocol";
-import wasmUrl from "./generated/waveform_core.wasm?url";
+import wasmUrl from "../generated/waveform_core.wasm?url";
 const worker = new Worker(new URL("./engine.worker.ts", import.meta.url), {
   type: "module",
 });

@@ -2,7 +2,7 @@ import { ready, exportCut, setDensity } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { decodeCut } from "../tests/wasm";
-import { waveX, waveY } from "../src/plot-geometry";
+import { waveX, waveY } from "../src/plots/plot-geometry";
 async function assignments(page: Page) {
   const [d] = await Promise.all([page.waitForEvent("download"), exportCut(page)]);
   return [...(await decodeCut(new File([await readFile((await d.path())!)], "trial_1.cut"), 5))];

@@ -1,0 +1,159 @@
+import { useEffect, useRef } from "react";
+import { fitGrid } from "./plot-geometry";
+import { type AnalysisData, type PlotMode } from "../types";
+
+export function AnalysisPlot({
+  data,
+  mode,
+  maxRate,
+  compact = false,
+  speedAlignment = "right",
+  positionSpeed = false,
+}: {
+  data: AnalysisData;
+  mode: PlotMode;
+  maxRate: number;
+  compact?: boolean;
+  speedAlignment?: "left" | "right";
+  positionSpeed?: boolean;
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = canvas.current!;
+    const draw = () => {
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      c.width = c.clientWidth * dpr;
+      c.height = c.clientHeight * dpr;
+      const ctx = c.getContext("2d")!;
+      ctx.scale(dpr, dpr);
+      let w = c.clientWidth;
+      let h = c.clientHeight;
+      ctx.fillStyle = "#ffffff";
+      if (!positionSpeed) {
+        ctx.fillRect(0, 0, w, h);
+      }
+      if (compact && (mode === "ac" || mode === "speed")) {
+        const box = fitGrid(w, h, mode === "ac" ? 128 : 24, mode === "ac" ? 32 : 80);
+        ctx.translate(mode === "speed" && speedAlignment === "left" ? 0 : box.x, box.y);
+        ctx.scale(box.unit, box.unit);
+        w = mode === "ac" ? 128 : 24;
+        h = mode === "ac" ? 32 : 80;
+      }
+      if (mode === "spatial") {
+        const scale = maxRate || data.peak || 1;
+        const box = fitGrid(w, h, data.width, data.height);
+        const ww = box.unit;
+        const hh = box.unit;
+        for (let i = 0; i < data.spatial.length; i++) {
+          const v = data.spatial[i];
+          ctx.fillStyle = Number.isFinite(v)
+            ? `hsl(${240 - Math.min(1, v / scale) * 240} 100% 50%)`
+            : "#ffffff";
+          ctx.fillRect(
+            box.x + (i % data.width) * ww,
+            box.y + Math.floor(i / data.width) * hh,
+            ww + 0.5,
+            hh + 0.5,
+          );
+        }
+      } else if (mode === "direction") {
+        const a = data.direction;
+        const max = Math.max(...a, 1);
+        const r = Math.min(w, h) * 0.4;
+        const cx = w / 2;
+        const cy = h / 2;
+        ctx.strokeStyle = "#dddddd";
+        for (const k of [0.5, 1]) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, r * k, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = "#111111";
+        ctx.fillStyle = "transparent";
+        ctx.beginPath();
+        for (let i = 0; i <= a.length; i++) {
+          const j = i % a.length;
+          const theta = (j / a.length) * Math.PI * 2 - Math.PI;
+          const rr = (a[j] / max) * r;
+          const x = cx + Math.cos(theta) * rr;
+          const y = cy + Math.sin(theta) * rr;
+          if (!i) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (compact) {
+        const a = mode === "ac" ? data.ac : positionSpeed ? data.speedDwell : data.speed;
+        const max = Math.max(...a, 1);
+        if (mode === "ac") {
+          ctx.strokeStyle = "#f00000";
+          ctx.lineWidth = 0.7;
+          ctx.beginPath();
+          for (let i = 0; i < a.length; i++) {
+            const x = (i / (a.length - 1)) * (w - 2) + 1;
+            const y = h - 2 - (a[i] / max) * (h - 4);
+            if (!i) {
+              ctx.moveTo(x, y);
+            } else {
+              ctx.lineTo(x, y);
+            }
+          }
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = "#111";
+          const bh = h / a.length;
+          for (let i = 0; i < a.length; i++) {
+            if (!(a[i] > 0)) {
+              continue;
+            }
+            const bw = (a[i] / max) * (w - 1);
+            ctx.fillRect(
+              speedAlignment === "left" ? 0 : w - bw,
+              i * bh,
+              bw,
+              Math.max(0.5, bh - 0.4),
+            );
+          }
+          if (positionSpeed) {
+            ctx.fillStyle = "#f00";
+            ctx.fillRect(0, 0, 0.6, h);
+          }
+        }
+      } else {
+        const a = mode === "ac" ? data.ac : positionSpeed ? data.speedDwell : data.speed;
+        const max = Math.max(...a, 1);
+        const bw = (w - 36) / a.length;
+        ctx.strokeStyle = "#888";
+        ctx.beginPath();
+        ctx.moveTo(28, 10);
+        ctx.lineTo(28, h - 23);
+        ctx.lineTo(w - 6, h - 23);
+        ctx.stroke();
+        ctx.fillStyle = "#0044cc";
+        for (let i = 0; i < a.length; i++) {
+          const v = (a[i] / max) * (h - 40);
+          ctx.fillRect(29 + i * bw, h - 24 - v, Math.max(1, bw - 1), v);
+        }
+        ctx.fillStyle = "#555";
+        ctx.font = "10px monospace";
+        ctx.fillText("0", 25, h - 7);
+        ctx.fillText(mode === "ac" ? "lag →" : "speed (cm/s) →", w / 2 - 25, h - 7);
+      }
+    };
+    draw();
+    const ro = new ResizeObserver(draw);
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, [data, mode, maxRate, compact, speedAlignment, positionSpeed]);
+  return (
+    <canvas
+      ref={canvas}
+      className="analysis-canvas"
+      aria-label={mode === "ac" ? "Temporal autocorrelogram" : `${mode} plot`}
+    />
+  );
+}

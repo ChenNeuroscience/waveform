@@ -1,6 +1,9 @@
-import { groupPalette } from "./palette";
-import type { Settings, ViewData } from "./types";
+import { program } from "./webgl";
+import { groupPalette } from "../palette";
+import type { Settings, ViewData } from "../types";
 import { projectionFrame, featurePlotOrigin, FEATURE_PLOT } from "./plot-geometry";
+
+/** The six feature-space projections drawn as GPU points, plus the drift view. */
 const vertex = `#version 300 es
 precision highp float;
 layout(location=0) in vec4 amplitudes;
@@ -28,29 +31,6 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-
 const resolveFragment = `#version 300 es
 precision highp float;uniform sampler2D sums;out vec4 c;
 void main(){vec2 s=texelFetch(sums,ivec2(gl_FragCoord.xy),0).rg;if(s.r<.5)discard;float t=s.g/s.r;c=vec4(1.-t,t,0.,1.);}`;
-function shader(gl: WebGL2RenderingContext, type: number, source: string) {
-  const s = gl.createShader(type)!;
-  gl.shaderSource(s, source);
-  gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-    throw new Error(gl.getShaderInfoLog(s) || "Shader compilation failed");
-  }
-  return s;
-}
-export function program(gl: WebGL2RenderingContext, v: string, f: string) {
-  const p = gl.createProgram()!;
-  const a = shader(gl, gl.VERTEX_SHADER, v);
-  const b = shader(gl, gl.FRAGMENT_SHADER, f);
-  gl.attachShader(p, a);
-  gl.attachShader(p, b);
-  gl.linkProgram(p);
-  gl.deleteShader(a);
-  gl.deleteShader(b);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-    throw new Error(gl.getProgramInfoLog(p) || "Shader link failed");
-  }
-  return p;
-}
 export const projections = [
   [0, 1],
   [0, 2],

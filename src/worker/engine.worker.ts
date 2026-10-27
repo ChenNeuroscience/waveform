@@ -2,8 +2,8 @@
 // Owns browser handles and asynchronous scheduling. Rust owns population data and
 // every loop over spike, label, waveform and position records.
 import { demoFiles, recordingSource } from "./demo";
-import { parseHeader, textHeader, readCut } from "./files";
-import type { Settings, Header, HistoryEntry, ViewMessage, AnalysisData } from "./types";
+import { parseHeader, textHeader, readCut } from "../files";
+import type { Settings, Header, HistoryEntry, ViewMessage, AnalysisData } from "../types";
 import { parsePosition, analyse, trajectory, type Position } from "./position";
 import { openStore, put, get } from "./history";
 import { streamFile, copyU8, copyU16, copyU32, withU16, withF32, type Core } from "./wasm";

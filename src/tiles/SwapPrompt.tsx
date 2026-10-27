@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { SwapState } from "./types";
+import type { SwapState } from "../types";
 
 /** Why a typed swap target is invalid, or "" if it is fine. */
 function swapError(value: string, source: number, groups: number) {

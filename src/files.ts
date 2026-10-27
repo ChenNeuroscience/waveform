@@ -166,7 +166,7 @@ export async function organiseFiles(
 export async function readCut(
   file: File,
   n: number,
-  wasm: import("./wasm").Core,
+  wasm: import("./worker/wasm").Core,
   engine: number,
 ): Promise<void> {
   const clu = /\.clu\.\d+$/i.test(file.name);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { usePreference, fitWindowLayout } from "./preferences";
+import { usePreference, fitWindowLayout } from "../preferences";
 import { X } from "lucide-react";
 let top = 100;
 export function FloatingWindow({

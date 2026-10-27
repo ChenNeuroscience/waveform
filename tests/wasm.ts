@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { readCut } from "../src/files";
-import type { Core } from "../src/wasm";
+import type { Core } from "../src/worker/wasm";
 export const corePromise = readFile(
   new URL("../public/wasm/waveform_core.wasm", import.meta.url),
 ).then(

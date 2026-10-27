@@ -1,6 +1,6 @@
 import { it, expect } from "vitest";
 import { corePromise, decodeCut } from "./wasm";
-import { demoFiles, recordingSource } from "../src/demo";
+import { demoFiles, recordingSource } from "../src/worker/demo";
 import { parseHeader } from "../src/files";
 it("generated files share an acquisition clock and support exact random-access byte ranges", async () => {
   const w = await corePromise;

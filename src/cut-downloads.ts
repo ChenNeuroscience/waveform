@@ -1,4 +1,4 @@
-import { request } from "./client";
+import { request } from "./worker/client";
 import type { CutFile, Tetrode, Trial } from "./types";
 export interface PreparedCut {
   file: File;

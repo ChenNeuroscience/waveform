@@ -1,7 +1,7 @@
 // Browser I/O and ABI bridge. Numeric position/analysis code is in Rust.
-import { parseHeader } from "./files";
+import { parseHeader } from "../files";
 import { streamFile, copyF32, type Core } from "./wasm";
-import type { Header, Settings, AnalysisData, Trajectory } from "./types";
+import type { Header, Settings, AnalysisData, Trajectory } from "../types";
 export interface Position {
   handle: number;
   identity: string;

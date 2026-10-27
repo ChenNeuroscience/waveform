@@ -1,7 +1,7 @@
 /** Tool-window panels: settings, help/shortcuts and file headers. */
 import { useState, type ReactNode } from "react";
 import { History, Redo2, Search, Undo2 } from "lucide-react";
-import type { HistoryEntry, Settings } from "./types";
+import type { HistoryEntry, Settings } from "../types";
 
 export type PanelName = "settings" | "history" | "headers" | "help";
 /** Everything the tool panels read or act on, assembled once by App. */

@@ -1,4 +1,4 @@
-import type { Header } from "./types";
+import type { Header } from "../types";
 export function experimentTiming(headers: Record<string, Header>, fallbackDuration: number) {
   const head = { ...headers.tetrode, ...headers.position, ...headers.set };
   const duration = Math.max(0, parseFloat(head.duration) || fallbackDuration || 0);
@@ -24,3 +24,4 @@ export function experimentTiming(headers: Record<string, Header>, fallbackDurati
     date: head.trial_date || "",
   };
 }
+export type Timing = ReturnType<typeof experimentTiming>;

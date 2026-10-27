@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { WaveGPU } from "./wave-gpu";
-import { AnalysisPlot } from "./plots";
+import { AnalysisPlot } from "../plots/AnalysisPlot";
 import { CellStats } from "./CellStats";
-import { request } from "./client";
-import { waveX, waveY, type WaveLayout } from "./plot-geometry";
+import { request } from "../worker/client";
+import { waveX, waveY, type WaveLayout } from "../plots/plot-geometry";
 import { useTileGestures, type DragComparison } from "./tile-gestures";
 import {
   badgeStyle,
@@ -16,7 +16,7 @@ import {
   type SplitPoint,
   type SwapState,
   type TileFeedback,
-} from "./types";
+} from "../types";
 export type VisiblePlots = Record<PlotMode, boolean>;
 const ROW = 124;
 const STRIDE = ROW + 2;

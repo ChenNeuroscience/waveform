@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { wavePoint } from "./plot-geometry";
+import { wavePoint } from "../plots/plot-geometry";
 export interface DragComparison {
   source: number;
   target: number | null;

@@ -1,4 +1,4 @@
-import { fileId } from "./types";
+import { fileId } from "../types";
 import { copyU8, type Core } from "./wasm";
 const encode = new TextEncoder();
 const tail = encode.encode("\r\ndata_end");

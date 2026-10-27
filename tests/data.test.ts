@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { parseHeader, organiseFiles } from "../src/files";
 import { corePromise, decodeCut as readCut, seedEngine } from "./wasm";
-import { analyse, parsePosition, trajectory } from "../src/position";
+import { analyse, parsePosition, trajectory } from "../src/worker/position";
 import { defaultSettings } from "../src/types";
-import { fitGrid, projectionFrame, waveX, waveY, wavePoint } from "../src/plot-geometry";
+import { fitGrid, projectionFrame, waveX, waveY, wavePoint } from "../src/plots/plot-geometry";
 describe("LTX import", () => {
   it("keeps folder-scoped File identities across incremental imports", async () => {
     const f = (path: string, text = "") => {

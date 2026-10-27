@@ -1,7 +1,7 @@
 import { it, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { fitPaneLayout, fitWindowLayout, defaultLayout } from "../src/preferences";
-import { experimentTiming } from "../src/position-info";
+import { experimentTiming } from "../src/shell/position-info";
 import { groupRgb8, groupTextColor } from "../src/palette";
 it("matches every original palette byte and every badge contrast colour", async () => {
   const html = await readFile(new URL("./fixtures/v1-palettes.html", import.meta.url), "utf8");

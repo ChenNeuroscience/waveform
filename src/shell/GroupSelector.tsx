@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Plus } from "lucide-react";
-import { badgeStyle } from "./types";
+import { badgeStyle } from "../types";
 
 export function GroupSelector({
   children,

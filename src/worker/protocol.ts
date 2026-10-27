@@ -1,7 +1,7 @@
 /** The worker request protocol: each request type's payload and result, shared by
  * the client (client.ts) and the worker (engine.worker.ts) so a renamed request or
  * field fails to compile rather than at runtime. */
-import type { AnalysisData, Settings, Trajectory, ViewData, ViewMessage } from "./types";
+import type { AnalysisData, Settings, Trajectory, ViewData, ViewMessage } from "../types";
 
 /** A request dropped because a newer one replaced it (another recording, a newer
  * analysis batch, an outdated export). Callers ignore these rather than report them. */

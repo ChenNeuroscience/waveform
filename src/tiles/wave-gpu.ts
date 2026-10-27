@@ -1,6 +1,12 @@
-import { program } from "./gpu";
-import { cellRgb } from "./types";
-import { WAVE_GAIN, WAVE_MARGIN, WAVE_SAMPLES, WAVE_SPAN, type WaveLayout } from "./plot-geometry";
+import { program } from "../plots/webgl";
+import { cellRgb } from "../types";
+import {
+  WAVE_GAIN,
+  WAVE_MARGIN,
+  WAVE_SAMPLES,
+  WAVE_SPAN,
+  type WaveLayout,
+} from "../plots/plot-geometry";
 /** A JS number as a GLSL float literal. */
 const glsl = (n: number) => (Number.isInteger(n) ? `${n}.` : `${n}`);
 // Raw 216-byte records live in an R8I texture array, 9 records per 1944-byte row and
