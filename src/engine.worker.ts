@@ -221,7 +221,7 @@ async function loadAsset(
 function view(a: Asset, s: Session, cached: boolean): ViewMessage {
   const w = a.wasm,
     e = a.e;
-  w.engine_prepare_view(e);
+  w.engine_build_wave_order(e);
   const population =
     populationSent === a.key
       ? {}
@@ -560,29 +560,7 @@ async function handle(m: any): Promise<any> {
     let changed = 0;
     try {
       if (m.action === "sort") w.engine_sort(e);
-      else if (m.action === "wave_split") {
-        await waveformColumn(a, m.channel, m.sample, m.id);
-        if (
-          w.engine_split_gate(e, m.source, m.channel, m.sample, m.threshold) < 0
-        )
-          throw new Error(
-            "No room to insert another cell (maximum label 1023).",
-          );
-      } else if (m.action === "gate") {
-        await waveformColumn(a, m.channel, m.sample, m.id);
-        withU16(w, m.sources, (p, n) =>
-          w.engine_gate_apply(
-            e,
-            p,
-            n,
-            m.dest,
-            m.channel,
-            m.sample,
-            m.threshold,
-            m.above ? 1 : 0,
-          ),
-        );
-      } else if (m.action === "polygon" || m.action === "paint")
+      else if (m.action === "polygon" || m.action === "paint")
         withU16(w, m.sources, (p, n) =>
           withF32(w, m.polygon, (q, count) =>
             m.action === "paint"

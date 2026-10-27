@@ -163,7 +163,19 @@ export function Clusters({
     } catch (e) {
       setError(String(e));
     }
-  }, [data, settings, selected, isolate, range, axes, version, columns]);
+    // Only point size and drift affect the points; other settings (rate maps,
+    // analysis windows) must not redraw the whole population.
+  }, [
+    data,
+    settings.pointSize,
+    settings.drift,
+    selected,
+    isolate,
+    range,
+    axes,
+    version,
+    columns,
+  ]);
   const grid = featureGridSize(columns);
   const point = (e: React.PointerEvent) => {
     const b = e.currentTarget.getBoundingClientRect();

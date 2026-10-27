@@ -3,9 +3,6 @@ export type Core = { memory: WebAssembly.Memory; [name: string]: any };
 export function copyU8(w: Core, p: number, n: number) {
   return new Uint8Array(w.memory.buffer, p, n).slice();
 }
-export function copyI8(w: Core, p: number, n: number) {
-  return new Int8Array(w.memory.buffer, p, n).slice();
-}
 export function copyU16(w: Core, p: number, n: number) {
   return new Uint16Array(w.memory.buffer, p, n).slice();
 }

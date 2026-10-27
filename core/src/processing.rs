@@ -102,11 +102,6 @@ impl CutParser {
     }
 }
 impl Engine {
-    /// The feature view uses the population arrays directly; only the waveform
-    /// slot order is derived per view.
-    fn prepare_view(&mut self) {
-        self.wave_order();
-    }
     /// Each cell's membership hash, which lets analysis caches survive edits that
     /// leave a cell's spikes unchanged (including renumbering).
     fn cell_hashes(&mut self) -> &[u32] {
@@ -228,9 +223,11 @@ pub unsafe extern "C" fn engine_cut_finish(e: *mut Engine) -> i32 {
     }
     status
 }
+/// Rebuild the waveform slot order after label changes (the feature view uses the
+/// population arrays directly).
 #[no_mangle]
-pub unsafe extern "C" fn engine_prepare_view(e: *mut Engine) {
-    (*e).prepare_view();
+pub unsafe extern "C" fn engine_build_wave_order(e: *mut Engine) {
+    (*e).wave_order();
 }
 getter!(engine_patch, engine_patch_len, [edit.patch], u8);
 /// Two u32 halves per cell (MAX_CELLS * 2 values), always current.
@@ -279,34 +276,6 @@ pub unsafe extern "C" fn engine_gate_feed(e: *mut Engine, first: usize, p: *cons
         }
         g.column[first + i] = r[g.channel * 54 + 4 + g.sample] as i8;
     }
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_gate_apply(
-    e: *mut Engine,
-    src: *const u16,
-    ns: usize,
-    dest: u16,
-    channel: usize,
-    sample: usize,
-    threshold: i32,
-    above: u32,
-) -> usize {
-    let e = &mut *e;
-    let sources = slice::from_raw_parts(src, ns);
-    let g = e
-        .gates
-        .iter()
-        .find(|g| g.channel == channel && g.sample == sample)
-        .unwrap();
-    let mut changed = 0;
-    for (c, &v) in e.labels.iter_mut().zip(&g.column) {
-        if *c != dest && sources.contains(c) && ((v as i32 >= threshold) == (above != 0)) {
-            *c = dest;
-            changed += 1;
-        }
-    }
-    e.recount();
-    changed
 }
 /// Insert the new half immediately after its source, matching the original tile
 /// split. Higher cell numbers move up together in the same undoable operation.
