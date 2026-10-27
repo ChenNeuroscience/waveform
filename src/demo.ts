@@ -128,14 +128,15 @@ export async function demoFiles(
           : options.stress
             ? 100
             : [24, 36, 48][(tet - 1) % 3],
-        spikes = sizes[trial][tet - 1],
         context = w.synthetic_new(
           (options.seed + trial * 173) >>> 0,
           cells,
-          spikes,
+          sizes[trial][tet - 1],
           duration,
           tet,
         ),
+        // Poisson spiking: the count is near the requested size, not exact.
+        spikes = context ? w.synthetic_spikes(context) : 0,
         header = encode.encode(
           `duration ${duration}\nnum_spikes ${spikes}\nnum_chans 4\nsamples_per_spike 50\nbytes_per_sample 1\nbytes_per_timestamp 4\ntimebase 96000 hz\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start`,
         ),
@@ -164,20 +165,27 @@ export async function demoFiles(
           w.free_bytes(p, length);
         }
       }
-      const parts: BlobPart[] = [
-          `n_clusters: ${cells + 1}\nn_channels: 4\nExact_cut_for: ${name} spikes: ${spikes}\n`,
+      // Like data you come to yourself: tetrode 8 is uncut, tetrode 7 has only
+      // two cells sorted with everything else left in noise group 0.
+      if (tet === 8) {
+        completed += spikes;
+        continue;
+      }
+      const keep = tet === 7 ? 2 : 0,
+        parts: BlobPart[] = [
+          `n_clusters: ${(keep || cells) + 1}\nn_channels: 4\nExact_cut_for: ${name} spikes: ${spikes}\n`,
         ],
         p = w.alloc_bytes(CHUNK * 4);
       try {
         for (let first = 0; first < spikes; first += CHUNK) {
           const count = Math.min(CHUNK, spikes - first);
-          w.synthetic_cut(context, first, count, p);
+          w.synthetic_cut(context, first, count, p, keep);
           parts.push(copyU8(w, p, count * 4));
           completed += count;
           if (first % (CHUNK * 16) === 0) {
             progress(
-              completed / total,
-              `Preparing simulated recordings ${Math.round((completed / total) * 100)}%`,
+              Math.min(1, completed / total),
+              `Preparing simulated recordings ${Math.min(100, Math.round((completed / total) * 100))}%`,
             );
             await new Promise((resolve) => setTimeout(resolve, 0));
           }

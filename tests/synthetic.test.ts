@@ -9,8 +9,10 @@ it("generated files share an acquisition clock and support exact random-access b
     source = recordingSource(w, marker),
     prefix = new Uint8Array(await source.slice(0, 65536).arrayBuffer()),
     { header, offset } = parseHeader(prefix);
-  expect(header.num_spikes).toBe("18000");
-  expect(source.size).toBe(offset + 18000 * 216 + 10);
+  // Poisson spiking: the count varies around the requested 18,000.
+  const n = Number(header.num_spikes);
+  expect(Math.abs(n - 18000)).toBeLessThan(800);
+  expect(source.size).toBe(offset + n * 216 + 10);
   expect(marker.size).toBeLessThan(1024); // No multi-GB fake waveform Blob is retained.
   const a = new Uint8Array(
     await source.slice(offset + 43, offset + 216 * 7 + 17).arrayBuffer(),
@@ -21,8 +23,24 @@ it("generated files share an acquisition clock and support exact random-access b
   expect(a).toEqual(b.subarray(43, 216 * 7 + 17));
   expect(await source.slice(-10).text()).toBe("\r\ndata_end");
   const cut = files.find((f) => f.name === "demo_box-a_1.cut")!;
-  const labels = await decodeCut(cut, 18000);
+  const labels = await decodeCut(cut, n);
   expect(Math.max(...labels)).toBe(12);
+  // Tetrode 8 is uncut; tetrode 7 has only two cells sorted.
+  expect(files.some((f) => f.name === "demo_box-a_8.cut")).toBe(false);
+  const partial = files.find((f) => f.name === "demo_box-a_7.cut")!,
+    n7 = Number(
+      parseHeader(
+        new Uint8Array(
+          await recordingSource(
+            w,
+            files.find((f) => f.name === "demo_box-a.7")!,
+          )
+            .slice(0, 65536)
+            .arrayBuffer(),
+        ),
+      ).header.num_spikes,
+    );
+  expect(new Set(await decodeCut(partial, n7))).toEqual(new Set([0, 1, 2]));
   const p = w.alloc_bytes(216 * 9),
     engine = w.engine_new(9);
   try {
@@ -31,8 +49,9 @@ it("generated files share an acquisition clock and support exact random-access b
     const times = [
       ...new Uint32Array(w.memory.buffer, w.engine_times(engine), 9),
     ];
-    expect(times[0]).toBe(0);
-    expect(times[8]).toBe(Math.floor((8 * 600 * 96000) / 18000));
+    // Poisson spike times on the 96 kHz clock, starting in the first seconds.
+    expect(times).toEqual([...times].sort((x, y) => x - y));
+    expect(times[8]).toBeLessThan(96000 * 5);
   } finally {
     w.engine_free(engine);
     w.free_bytes(p, 216 * 9);

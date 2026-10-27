@@ -267,7 +267,7 @@ test("compact toolbar replaces the footer; feature grid centres without experime
     name: "Recording details",
     exact: true,
   });
-  await expect(details).toContainText("18,000");
+  await expect(details).toContainText(/\b1[78],\d{3}\b/);
   const toolbar = (await page.locator(".desktop-toolbar").boundingBox())!,
     status = (await details.boundingBox())!;
   expect(status.y).toBeGreaterThanOrEqual(toolbar.y);

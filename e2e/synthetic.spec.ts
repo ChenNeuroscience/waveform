@@ -19,7 +19,7 @@ test("the simulated-files card starts the demo on click", async ({ page }) => {
   await ready(page);
   await expect(
     page.getByRole("group", { name: "Recording details", exact: true }),
-  ).toContainText("18,000");
+  ).toContainText(/\b1[78],\d{3}\b/);
   await expect(page.locator(".toolbar-status")).not.toContainText(
     "Local files",
   );
@@ -47,7 +47,9 @@ test("the stress demo generates nine million spikes and 100 cells; merge/undo pr
     .click();
   await ready(page, 120000);
   console.log(`Generated 9M demo ready: ${Date.now() - start}ms`);
-  await expect(page.locator(".toolbar-status")).toContainText("9,000,000");
+  await expect(page.locator(".toolbar-status")).toContainText(
+    /\b(8,99\d|9,00\d),\d{3}\b/,
+  );
   await expect(page.locator(".trial-block")).toHaveCount(5);
   await expect(page.locator('.group-selector [data-group="100"]')).toHaveCount(
     1,
@@ -101,7 +103,9 @@ test("the normal demo is a twenty-minute box experiment with typical spike and c
     })
     .click();
   await ready(page);
-  await expect(page.locator(".toolbar-status")).toContainText("50,000");
+  await expect(page.locator(".toolbar-status")).toContainText(
+    /\b(49|50),\d{3}\b/,
+  );
   await expect(page.locator(".position-time")).toContainText("20 min 0 sec");
   await expect(page.locator(".trial-block")).toHaveCount(5);
   for (const trial of await page.locator(".trial-block").all())

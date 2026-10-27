@@ -9,7 +9,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   await page.goto("/?demo=quick");
   await page.getByText("Try it now with simulated data").click();
   await ready(page, 30000);
-  await expect(page.getByText("18,000", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^1[78],\d{3}$/)).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Select cell 1", exact: true }),
   ).toBeVisible();
@@ -110,7 +110,7 @@ test("production assets and Wasm load under the GitHub Pages subpath", async ({
   await page.getByText("Try it now with simulated data").click();
   await ready(page, 30000);
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await expect(page.getByText("18,000", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^1[78],\d{3}$/)).toBeVisible();
 });
 test("mobile welcome stays within the viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
