@@ -11,25 +11,16 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
   await ready(page);
   const source = page.locator('.cell-tile[data-cell="1"]');
   await source.hover();
-  await expect(page.locator(".position-path")).toHaveAttribute(
-    "data-cell",
-    "1",
-  );
+  await expect(page.locator(".position-path")).toHaveAttribute("data-cell", "1");
   const rect = (await source.boundingBox())!;
   await page.keyboard.down("Space");
   await source.locator(".tile-waves").click();
   await page.keyboard.up("Space");
-  const copy = page
-    .getByRole("dialog")
-    .filter({ has: page.locator(".tile-copy") });
+  const copy = page.getByRole("dialog").filter({ has: page.locator(".tile-copy") });
   await expect(copy).toHaveCount(1);
-  const title = (await copy
-    .locator(".floating-titlebar > span")
-    .textContent())!;
+  const title = (await copy.locator(".floating-titlebar > span").textContent())!;
   await expect(copy.getByText(title, { exact: true })).toHaveCount(1);
-  await expect(
-    copy.locator(".floating-content").getByText(title, { exact: true }),
-  ).toHaveCount(0);
+  await expect(copy.locator(".floating-content").getByText(title, { exact: true })).toHaveCount(0);
   const image = copy.locator(".plot-copy"),
     stats = copy.getByLabel("Copied cell statistics"),
     src = await image.getAttribute("src");
@@ -73,9 +64,7 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
   await page.keyboard.up("Space");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator(".plot-copy")).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   // The same Space gesture closes tools without changing the controls underneath.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "File headers", exact: true }).click();
@@ -94,9 +83,7 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
     await page.keyboard.down("Space");
     await page.locator(selector).click();
     await page.keyboard.up("Space");
-    const plot = page
-      .getByRole("dialog")
-      .filter({ has: page.locator(".plot-copy") });
+    const plot = page.getByRole("dialog").filter({ has: page.locator(".plot-copy") });
     await expect(plot).toHaveCount(1);
     await page.keyboard.down("Space");
     await plot.locator(".plot-copy").click();

@@ -34,10 +34,7 @@ export const groupPalette = [
   [250, 128, 114],
 ] as const;
 const blackText = new Set([
-  0, 2, 3, 4, 5, 6, 7, 10, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 26,
-  27, 28, 30,
+  0, 2, 3, 4, 5, 6, 7, 10, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 26, 27, 28, 30,
 ]);
-export const groupRgb8 = (cell: number): readonly number[] =>
-  groupPalette[cell] || [0, 0, 0];
-export const groupTextColor = (cell: number) =>
-  blackText.has(cell) ? "#000" : "#fff";
+export const groupRgb8 = (cell: number): readonly number[] => groupPalette[cell] || [0, 0, 0];
+export const groupTextColor = (cell: number) => (blackText.has(cell) ? "#000" : "#fff");

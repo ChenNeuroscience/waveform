@@ -20,6 +20,15 @@ The Rust crate is dependency-free. It parses cuts/CLu incrementally, decodes sig
 
 Position processing, histograms, occupancy and rate maps run in the same worker. UI updates cannot run large file or analysis loops on the React thread. Responses carry request IDs; React generation checks discard stale display results. New load requests cancel superseded chunk scans at the next asynchronous boundary. Mutations are serialised so files, labels and history cannot be edited concurrently.
 
+## Source layout
+
+- `core/src/`: the Rust engine (parsing, edits, analyses, waveform residency, simulated recordings).
+- `src/worker/`: runs in the Web Worker (`engine.worker.ts`, position parsing, IndexedDB undo history, simulated recording files, Wasm bindings), plus the main-thread bridge (`client.ts`) and the typed request protocol shared by both (`protocol.ts`).
+- `src/shell/`: the desktop layout. `DesktopShell` arranges the toolbar, files, position, feature and tile regions (one file each, each declaring the shell props it uses), and hosts floating tool windows (`panels.tsx`).
+- `src/tiles/`: the cell tile wall, its gestures (drag-merge, split, swap) and the GPU waveform renderer.
+- `src/plots/`: the feature view and its GPU renderer, analysis and path plots, shared WebGL helpers and plot geometry.
+- `src/`: the entry point and `App` (application state and edits), app-level hooks (preferences, browser history, keyboard shortcuts, prepared cut downloads), shared types, the palette and file organisation.
+
 ## Population representation
 
 For N spikes:
@@ -39,7 +48,7 @@ A waveform threshold needs one channel/sample column that the compact amplitude 
 
 ## Display and GPU
 
-The feature view draws every spike from the population arrays: four `u8` amplitudes, the raw `u32` timestamp and the `u16` label (10 bytes per spike, 10 MB at 1M). Amplitudes and timestamps never change for a recording, so the worker sends them only when the recording changes and `client.ts` reattaches them to later views; each edit then transfers just the labels. No millions-of-object JS model is built.
+The feature view draws every spike from the population arrays: four `u8` amplitudes, the raw `u32` timestamp and the `u16` label (10 bytes per spike, 10 MB at 1M). Amplitudes and timestamps never change for a recording, so the worker sends them only when the recording changes and `worker/client.ts` reattaches them to later views; each edit then transfers just the labels. No millions-of-object JS model is built.
 
 One WebGL2 context draws six projections from one VAO/buffer set. Axis selection, visible time range, point size and selected-cell isolation are uniforms. These settings neither reread files nor rebuild population features. Buffers are reused across renders; only changed labels are uploaded after edits. Up to four view buffer sets are cached, with least-recently-used eviction. The drift view adds each spike's (1, normalised time) into an `RG32F` target with additive blending, then colours every pixel by its mean spike time, red at the start of the recording to green at the end. It needs `EXT_color_buffer_float` and `EXT_float_blend`; without them drift is not drawn.
 
@@ -53,7 +62,7 @@ After each label change Rust counting-sorts resident slots by cell and computes 
 
 Sampled waveforms (tetrodes over 1M spikes) are flagged once in the toolbar as “WARNING: waveforms sampled”, not on tiles. Nothing else is sampled. Analyses, autocorrelograms and position overlays use every spike: an autocorrelogram's cost scales with the spike pairs inside its window, not with spike count.
 
-Data pixels retain a common scale in x/y. Rate-map bins are square; trajectory coordinates use physical arena dimensions; feature projections use square viewports and the same transform for lasso picking. Waveforms use a fixed four-channel grid in both density and flag modes; narrow panes scroll. The direction radius is circular and histogram frames keep their proportions. PNG copies preserve the captured pixel aspect. Comparison windows have no resize handle and drag from any point in their content; tool windows keep title-bar dragging and resizing. The grid centres in available pane space; oversized grids remain scrollable from their first row. Paint is the default tool and group chips wrap. Feature slots are 128 px squares separated by 4 px gaps, using shared layout geometry for WebGL viewports, pointer picking and PNG copies; each plot has all four borders. They have only top-left Y / bottom-right X labels (A1–A4); captures bake those labels into their PNG. The position summary stays visible over a faint white backing with a small left margin. It uses speed dwell occupancy with a red vertical line beside the bars and a maximum-speed label; there is no horizontal axis. Recording statistics occupy two small lines at the toolbar’s right edge, replacing the footer. Rendering controls live in Settings; the feature-pane checkboxes and numeric waveform-split form have been removed. The path fills its pane, fits physical x/y uniformly and starts at the top. Duration uses whole minutes and seconds. Clock times prefer the recorded trial_time header, avoiding viewer-timezone changes.
+Data pixels retain a common scale in x/y. Rate-map bins are square; trajectory coordinates use physical arena dimensions; feature projections use square viewports and the same transform for lasso picking. Waveforms use a fixed four-channel grid in both density and flag modes; narrow panes scroll. The direction radius is circular and histogram frames keep their proportions. PNG copies preserve the captured pixel aspect. Comparison windows have no resize handle and drag from any point in their content; tool windows keep title-bar dragging and resizing. The grid centres in available pane space; oversized grids remain scrollable from their first row. Paint is the default tool and group chips wrap. Feature slots are 128 px squares separated by 4 px gaps, using shared layout geometry for WebGL viewports, pointer picking and PNG copies; each plot has all four borders. They have only top-left Y / bottom-right X labels (A1–A4); captures bake those labels into their PNG. The position summary stays visible over a faint white backing with a small left margin. It uses speed dwell occupancy with a red vertical line beside the bars and a maximum-speed label; there is no horizontal axis. Recording statistics occupy two small lines at the toolbar’s right edge, replacing the footer. Drift and density are toolbar toggles (grayscale icons, slate-blue when on); other rendering controls live in Settings; the feature-pane checkboxes and numeric waveform-split form have been removed. The path fills its pane, fits physical x/y uniformly and starts at the top. Duration uses whole minutes and seconds. Clock times prefer the recorded trial_time header, avoiding viewer-timezone changes.
 
 ## Cut histories
 
@@ -70,8 +79,8 @@ Rendering/analysis settings, plot visibility, isolation, divider positions and n
 ## Cache limits and invalidation
 
 - Population cache: approximately 384 MiB target, evicting inactive tetrodes first. This is a retained-cache target, not a hard bound on browser/GPU/temporary memory. Wasm allocator high-water marks, edits, clones and GC can briefly increase memory.
-- Positions: four processed variants keyed by file and LED/jump/smoothing settings.
-- Analysis: up to 100 results keyed by cut identity, revision, cell, position variant and numeric bin/smoothing/window settings. An edit clears derived analysis; unchanged raw tetrode features and GPU geometry are retained.
+- Positions: four processed variants keyed by file and LED/jump/smoothing settings. Each caches its trajectory and its occupancy maps (per bin settings), which are cell-independent: the trajectory is sent once per variant rather than with every cell's analysis, and occupancy is computed once rather than per cell.
+- Analysis: up to 200 results in the worker and 512 in the tile wall, keyed by recording, the cell's membership (spike count and an order-independent 64-bit hash of its spike indices), position variant and numeric bin/smoothing/window settings. Edits therefore recompute only cells whose spikes changed; renumbered cells (for example above a split) reuse their results. Rust rebuilds the hashes lazily after any label change. The worker returns the membership it analysed so results are filed correctly even if an edit was processed first.
 - GPU: four bounded point views; render-only controls reuse buffers.
 - Cell membership: one lazy index per engine, rebuilt after label changes and reused across cell analyses.
 - Waveform tiles: one count texture per cell membership set; mode, colour and scroll changes only recomposite.

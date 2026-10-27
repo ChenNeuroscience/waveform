@@ -16,38 +16,28 @@ async function fixture(page: Page) {
       ][i][c];
     }
   await page.goto("/");
-  await page
-    .getByLabel("Import recording files", { exact: true })
-    .setInputFiles([
-      {
-        name: "paint.1",
-        mimeType: "application/octet-stream",
-        buffer: Buffer.concat([
-          Buffer.from(
-            "num_spikes 3\nnum_chans 4\nsamples_per_spike 50\ntimebase 96000 hz\nduration 10\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start",
-          ),
-          bytes,
-        ]),
-      },
-      {
-        name: "paint_1.cut",
-        mimeType: "text/plain",
-        buffer: Buffer.from("Exact_cut_for: paint spikes: 3\n1 1 2\n"),
-      },
-    ]);
+  await page.getByLabel("Import recording files", { exact: true }).setInputFiles([
+    {
+      name: "paint.1",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.concat([
+        Buffer.from(
+          "num_spikes 3\nnum_chans 4\nsamples_per_spike 50\ntimebase 96000 hz\nduration 10\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start",
+        ),
+        bytes,
+      ]),
+    },
+    {
+      name: "paint_1.cut",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Exact_cut_for: paint spikes: 3\n1 1 2\n"),
+    },
+  ]);
   await ready(page);
 }
 async function labels(page: Page) {
-  const [file] = await Promise.all([
-    page.waitForEvent("download"),
-    exportCut(page),
-  ]);
-  return [
-    ...(await decodeCut(
-      new File([await readFile((await file.path())!)], "paint_1.cut"),
-      3,
-    )),
-  ];
+  const [file] = await Promise.all([page.waitForEvent("download"), exportCut(page)]);
+  return [...(await decodeCut(new File([await readFile((await file.path())!)], "paint_1.cut"), 3))];
 }
 test("paint is the default; spaced projections paint/lasso the right axes and ignore gaps", async ({
   page,
@@ -58,13 +48,9 @@ test("paint is the default; spaced projections paint/lasso the right axes and ig
     exact: true,
   });
   await expect(paint).toHaveClass(/active/);
+  await expect(page.getByRole("button", { name: "Select", exact: true })).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Select", exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page
-      .getByRole("button", { name: "Lasso cut", exact: true })
-      .locator(".lucide-lasso"),
+    page.getByRole("button", { name: "Lasso cut", exact: true }).locator(".lucide-lasso"),
   ).toHaveCount(1);
   const plots = page.locator(".projection-labels > div"),
     first = (await plots.nth(0).boundingBox())!,
@@ -76,26 +62,20 @@ test("paint is the default; spaced projections paint/lasso the right axes and ig
     expect(
       await p.evaluate((el) =>
         ["Top", "Right", "Bottom", "Left"].map((side) =>
-          getComputedStyle(el).getPropertyValue(
-            `border-${side.toLowerCase()}-width`,
-          ),
+          getComputedStyle(el).getPropertyValue(`border-${side.toLowerCase()}-width`),
         ),
       ),
     ).toEqual(["1px", "1px", "1px", "1px"]);
   }
   await destination(page, 3);
   await page.mouse.click(first.x + first.width + 2, first.y + 60);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   // Known amplitudes (A1=20, A3=30) in the second projection; one brush dab.
   await page.mouse.click(
     second.x + 2 + (0.035 + (0.93 * 20) / 255) * 124,
     second.y + 2 + (0.965 - (0.93 * 30) / 255) * 124,
   );
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeEnabled();
   expect(await labels(page)).toEqual([3, 1, 2]);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await ready(page);
@@ -144,15 +124,11 @@ test("all group chips wrap inside the feature pane", async ({ page }) => {
     width: el.clientWidth,
     scroll: el.scrollWidth,
     rows: new Set(
-      [...el.querySelectorAll("button")].map(
-        (button) => button.getBoundingClientRect().top,
-      ),
+      [...el.querySelectorAll("button")].map((button) => button.getBoundingClientRect().top),
     ).size,
   }));
   expect(layout.rows).toBeGreaterThan(1);
   expect(layout.scroll).toBeLessThanOrEqual(layout.width);
-  expect(await strip.evaluate((el) => getComputedStyle(el).overflowX)).toBe(
-    "visible",
-  );
+  expect(await strip.evaluate((el) => getComputedStyle(el).overflowX)).toBe("visible");
   await page.screenshot({ path: "test-results/feature-tools-and-gaps.png" });
 });

@@ -1,18 +1,12 @@
-import type { Header } from "./types";
-export function experimentTiming(
-  headers: Record<string, Header>,
-  fallbackDuration: number,
-) {
+import type { Header } from "../types";
+export function experimentTiming(headers: Record<string, Header>, fallbackDuration: number) {
   const head = { ...headers.tetrode, ...headers.position, ...headers.set };
-  const duration = Math.max(
-      0,
-      parseFloat(head.duration) || fallbackDuration || 0,
-    ),
-    match = head.trial_time?.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  const duration = Math.max(0, parseFloat(head.duration) || fallbackDuration || 0);
+  const match = head.trial_time?.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
   let start: number | undefined;
-  if (match && +match[1] < 24 && +match[2] < 60 && +(match[3] || 0) < 60)
+  if (match && +match[1] < 24 && +match[2] < 60 && +(match[3] || 0) < 60) {
     start = +match[1] * 3600 + +match[2] * 60 + +(match[3] || 0);
-  else if (
+  } else if (
     Number.isFinite(Number(head.lasttrialdatetime)) &&
     Number(head.lasttrialdatetime) > 0
   ) {
@@ -30,3 +24,4 @@ export function experimentTiming(
     date: head.trial_date || "",
   };
 }
+export type Timing = ReturnType<typeof experimentTiming>;

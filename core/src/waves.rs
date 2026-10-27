@@ -15,7 +15,7 @@ pub(crate) struct Waves {
     /// Two u32 halves of an order-independent 64-bit hash of each cell's slot set.
     hashes: Vec<u32>,
 }
-fn mix(s: u64) -> u64 {
+pub(crate) fn mix(s: u64) -> u64 {
     let mut z = s.wrapping_add(0x9e3779b97f4a7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
@@ -56,9 +56,8 @@ impl Engine {
     pub(crate) fn wave_order(&mut self) {
         let m = self.wave_slots();
         let sampled = m < self.labels.len();
-        let label = |e: &Engine, s: usize| {
-            e.labels[if sampled { e.wave_record(s) } else { s }] as usize
-        };
+        let label =
+            |e: &Engine, s: usize| e.labels[if sampled { e.wave_record(s) } else { s }] as usize;
         let mut starts = vec![0u32; MAX_CELLS + 1];
         let mut sums = vec![0u64; MAX_CELLS];
         for s in 0..m {
@@ -104,13 +103,28 @@ pub unsafe extern "C" fn engine_wave_begin(e: *mut Engine, first: usize, count: 
     (*e).wave_begin(first, count)
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_wave_feed(e: *mut Engine, first_record: usize, p: *const u8, n: usize) {
+pub unsafe extern "C" fn engine_wave_feed(
+    e: *mut Engine,
+    first_record: usize,
+    p: *const u8,
+    n: usize,
+) {
     (*e).wave_feed(first_record, slice::from_raw_parts(p, n));
 }
 getter!(engine_wave_batch, engine_wave_batch_len, [waves.batch], u8);
 getter!(engine_wave_order, engine_wave_order_len, [waves.order], u32);
-getter!(engine_wave_starts, engine_wave_starts_len, [waves.starts], u32);
-getter!(engine_wave_hashes, engine_wave_hashes_len, [waves.hashes], u32);
+getter!(
+    engine_wave_starts,
+    engine_wave_starts_len,
+    [waves.starts],
+    u32
+);
+getter!(
+    engine_wave_hashes,
+    engine_wave_hashes_len,
+    [waves.hashes],
+    u32
+);
 
 #[cfg(test)]
 mod tests {
@@ -138,7 +152,12 @@ mod tests {
         for (i, chunk) in raw.chunks(5 * RECORD).enumerate() {
             e.wave_feed(r0 + i * 5, chunk);
         }
-        let got: Vec<u8> = e.waves.batch.chunks(RECORD).map(|r| r[RECORD - 1]).collect();
+        let got: Vec<u8> = e
+            .waves
+            .batch
+            .chunks(RECORD)
+            .map(|r| r[RECORD - 1])
+            .collect();
         let want: Vec<u8> = (first..first + 3).map(|s| e.wave_record(s) as u8).collect();
         assert_eq!(got, want);
     }

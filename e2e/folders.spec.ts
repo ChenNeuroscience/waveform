@@ -38,42 +38,24 @@ test("identical basenames in different folders keep separate cuts and histories"
       await utimes(join(base, "trial_1.cut"), 1, 1);
     }
     await page.goto("/?demo=quick");
-    await page
-      .getByLabel("Import recording folder", { exact: true })
-      .setInputFiles(dir);
+    await page.getByLabel("Import recording folder", { exact: true }).setInputFiles(dir);
     await ready(page);
-    await expect(
-      page.getByRole("button", { name: "Select cell 1", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select cell 1", exact: true })).toBeVisible();
     const trials = page.getByRole("button", { name: "trial 1", exact: true });
     await expect(trials).toHaveCount(2);
     await trials.nth(1).click();
-    await expect(
-      page.getByRole("button", { name: "Select cell 2", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select cell 2", exact: true })).toBeVisible();
     await adjacentSwap(page, 2, 1);
-    await expect(
-      page.getByRole("button", { name: "Select cell 3", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select cell 3", exact: true })).toBeVisible();
     await trials.nth(0).click();
-    await expect(
-      page.getByRole("button", { name: "Select cell 1", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select cell 1", exact: true })).toBeVisible();
     await trials.nth(1).click();
-    await expect(
-      page.getByRole("button", { name: "Select cell 3", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select cell 3", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Undo", exact: true }).click();
-    await expect(
-      page.getByRole("button", { name: "Select cell 2", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select cell 2", exact: true })).toBeVisible();
     await expect(trials).toHaveCount(2);
-    await expect(
-      page.getByRole("button", { name: "~_1 edited.cut", exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Select cell 2", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "~_1 edited.cut", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select cell 2", exact: true })).toBeVisible();
     await expect(page.getByRole("alert")).toHaveCount(0);
   } finally {
     await rm(dir, { recursive: true, force: true });

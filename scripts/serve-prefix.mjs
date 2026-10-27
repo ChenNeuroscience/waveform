@@ -16,10 +16,7 @@ createServer(async (req, res) => {
     res.writeHead(404).end();
     return;
   }
-  const file = resolve(
-    root,
-    decodeURIComponent(pathname.slice(prefix.length) || "index.html"),
-  );
+  const file = resolve(root, decodeURIComponent(pathname.slice(prefix.length) || "index.html"));
   if (!file.startsWith(root + sep)) {
     res.writeHead(403).end();
     return;
@@ -33,6 +30,4 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(404).end();
   }
-}).listen(4174, "127.0.0.1", () =>
-  console.log("Prefix preview: http://127.0.0.1:4174/waveform/"),
-);
+}).listen(4174, "127.0.0.1", () => console.log("Prefix preview: http://127.0.0.1:4174/waveform/"));

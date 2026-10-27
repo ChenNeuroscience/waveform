@@ -1,7 +1,7 @@
 // Browser I/O and ABI bridge. Numeric position/analysis code is in Rust.
-import { parseHeader } from "./files";
+import { parseHeader } from "../files";
 import { streamFile, copyF32, type Core } from "./wasm";
-import type { Header, Settings, AnalysisData } from "./types";
+import type { Header, Settings, AnalysisData, Trajectory } from "../types";
 export interface Position {
   handle: number;
   identity: string;
@@ -14,27 +14,27 @@ export async function parsePosition(
   identity: string,
   base?: Position,
 ): Promise<Position> {
-  if (base)
+  if (base) {
     return {
       handle: w.position_variant(base.handle, s.leds, s.maxSpeed, s.posSmooth),
       identity,
       header: base.header,
     };
+  }
   const { header: h, offset } = parseHeader(
     new Uint8Array(await file.slice(0, 65536).arrayBuffer()),
   );
-  if (h.pos_format !== "t,x1,y1,x2,y2,numpix1,numpix2")
+  if (h.pos_format !== "t,x1,y1,x2,y2,numpix1,numpix2") {
     throw new Error("Unsupported LTX position format.");
-  const n = parseInt(h.num_pos_samples),
-    ppm = parseFloat(h.pixels_per_metre),
-    rate = parseFloat(h.sample_rate),
-    tb = parseFloat(
-      h.timestamp_timebase || h.timebase || h.sample_rate || "50",
-    );
-  const minX = parseFloat(h.window_min_x || "0"),
-    minY = parseFloat(h.window_min_y || "0"),
-    maxX = parseFloat(h.window_max_x),
-    maxY = parseFloat(h.window_max_y);
+  }
+  const n = parseInt(h.num_pos_samples);
+  const ppm = parseFloat(h.pixels_per_metre);
+  const rate = parseFloat(h.sample_rate);
+  const tb = parseFloat(h.timestamp_timebase || h.timebase || h.sample_rate || "50");
+  const minX = parseFloat(h.window_min_x || "0");
+  const minY = parseFloat(h.window_min_y || "0");
+  const maxX = parseFloat(h.window_max_x);
+  const maxY = parseFloat(h.window_max_y);
   if (
     !Number.isSafeInteger(n) ||
     n < 0 ||
@@ -44,8 +44,9 @@ export async function parsePosition(
     !(tb > 0) ||
     !(maxX > minX) ||
     !(maxY > minY)
-  )
+  ) {
     throw new Error("Invalid or truncated position file.");
+  }
   const handle = w.position_new(n, ppm, rate, tb, minX, minY, maxX, maxY);
   try {
     w.position_bearing(handle, parseFloat(h.bearing_colour_1 || "0"));
@@ -57,6 +58,21 @@ export async function parsePosition(
   } catch (e) {
     w.position_free(handle);
     throw e;
+  }
+}
+/** The trajectory for a processed position, computed once in Rust and cached there. */
+export function trajectory(w: Core, pos: Position): Trajectory {
+  const size = w.alloc_bytes(8);
+  try {
+    w.position_size(pos.handle, size);
+    const [arenaWidth, arenaHeight] = new Float32Array(w.memory.buffer, size, 2);
+    return {
+      path: copyF32(w, w.position_path(pos.handle), w.position_path_len(pos.handle)),
+      arenaWidth,
+      arenaHeight,
+    };
+  } finally {
+    w.free_bytes(size, 8);
   }
 }
 export function analyse(
@@ -81,17 +97,9 @@ export function analyse(
     s.speedBin,
     s.speedMax,
   );
-  const meta = new Float64Array(
-    w.memory.buffer,
-    w.engine_analysis_meta(engine),
-    8,
-  ).slice();
-  const array = (name: string) =>
-    copyF32(
-      w,
-      w[`engine_analysis_${name}`](engine),
-      w[`engine_analysis_${name}_len`](engine),
-    );
+  const meta = new Float64Array(w.memory.buffer, w.engine_analysis_meta(engine), 8).slice();
+  const array = (name: "spatial" | "spikes" | "direction" | "speed" | "speed_dwell" | "ac") =>
+    copyF32(w, w[`engine_analysis_${name}`](engine), w[`engine_analysis_${name}_len`](engine));
   return {
     cell: meta[0],
     arenaWidth: meta[6],
@@ -102,7 +110,6 @@ export function analyse(
     refractory: meta[4],
     rate: meta[5],
     spatial: array("spatial"),
-    path: array("path"),
     spikes: array("spikes"),
     direction: array("direction"),
     speed: array("speed"),

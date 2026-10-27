@@ -102,10 +102,20 @@ impl CutParser {
     }
 }
 impl Engine {
-    /// The feature view uses the population arrays directly; only the waveform
-    /// slot order is derived per view.
-    fn prepare_view(&mut self) {
-        self.wave_order();
+    /// Each cell's membership hash, which lets analysis caches survive edits that
+    /// leave a cell's spikes unchanged (including renumbering).
+    fn cell_hashes(&mut self) -> &[u32] {
+        if self.cell_hashes.is_empty() {
+            let mut sums = vec![0u64; MAX_CELLS];
+            for (i, &c) in self.labels.iter().enumerate() {
+                sums[c as usize] = sums[c as usize].wrapping_add(crate::waves::mix(i as u64));
+            }
+            self.cell_hashes = sums
+                .iter()
+                .flat_map(|&h| [h as u32, (h >> 32) as u32])
+                .collect();
+        }
+        &self.cell_hashes
     }
     fn finish_edit(&mut self) -> usize {
         let before = self
@@ -213,11 +223,18 @@ pub unsafe extern "C" fn engine_cut_finish(e: *mut Engine) -> i32 {
     }
     status
 }
+/// Rebuild the waveform slot order after label changes (the feature view uses the
+/// population arrays directly).
 #[no_mangle]
-pub unsafe extern "C" fn engine_prepare_view(e: *mut Engine) {
-    (*e).prepare_view();
+pub unsafe extern "C" fn engine_build_wave_order(e: *mut Engine) {
+    (*e).wave_order();
 }
 getter!(engine_patch, engine_patch_len, [edit.patch], u8);
+/// Two u32 halves per cell (MAX_CELLS * 2 values), always current.
+#[no_mangle]
+pub unsafe extern "C" fn engine_cell_hashes(e: *mut Engine) -> *const u32 {
+    (*e).cell_hashes().as_ptr()
+}
 getter!(engine_output, engine_output_len, [output], u8);
 #[no_mangle]
 pub unsafe extern "C" fn engine_gate_begin(e: *mut Engine, channel: usize, sample: usize) -> i32 {
@@ -259,34 +276,6 @@ pub unsafe extern "C" fn engine_gate_feed(e: *mut Engine, first: usize, p: *cons
         }
         g.column[first + i] = r[g.channel * 54 + 4 + g.sample] as i8;
     }
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_gate_apply(
-    e: *mut Engine,
-    src: *const u16,
-    ns: usize,
-    dest: u16,
-    channel: usize,
-    sample: usize,
-    threshold: i32,
-    above: u32,
-) -> usize {
-    let e = &mut *e;
-    let sources = slice::from_raw_parts(src, ns);
-    let g = e
-        .gates
-        .iter()
-        .find(|g| g.channel == channel && g.sample == sample)
-        .unwrap();
-    let mut changed = 0;
-    for (c, &v) in e.labels.iter_mut().zip(&g.column) {
-        if *c != dest && sources.contains(c) && ((v as i32 >= threshold) == (above != 0)) {
-            *c = dest;
-            changed += 1;
-        }
-    }
-    e.recount();
-    changed
 }
 /// Insert the new half immediately after its source, matching the original tile
 /// split. Higher cell numbers move up together in the same undoable operation.
@@ -533,6 +522,20 @@ mod tests {
             engine_edit_rollback(&mut e);
             assert_eq!(e.labels, vec![1, 1, 1, 1, 2]);
         }
+    }
+    #[test]
+    fn cell_hashes_follow_membership_and_refresh_after_edits() {
+        let mut e = Engine::new(4);
+        e.labels = vec![1, 1, 2, 3];
+        e.recount();
+        let before = e.cell_hashes().to_vec();
+        e.relabel(1, 2, true);
+        let after = e.cell_hashes().to_vec();
+        assert_eq!(after[2..4], before[4..6]);
+        assert_eq!(after[4..6], before[2..4]);
+        assert_eq!(after[6..8], before[6..8]);
+        e.relabel(3, 1, false);
+        assert_ne!(e.cell_hashes()[2..4], after[2..4]);
     }
     #[test]
     fn streaming_cut_is_transactional_and_handles_split_tokens() {

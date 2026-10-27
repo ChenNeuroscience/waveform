@@ -21,9 +21,7 @@ async function demo(page: Page) {
     .click();
   await ready(page);
 }
-test("browser back/forward restores only trial, tetrode and cut choices", async ({
-  page,
-}) => {
+test("browser back/forward restores only trial, tetrode and cut choices", async ({ page }) => {
   await demo(page);
   const url = page.url(),
     initial = await selection(page),
@@ -39,9 +37,7 @@ test("browser back/forward restores only trial, tetrode and cut choices", async 
   const other = await selection(page);
   expect(other.trialId).not.toBe(initial.trialId);
   expect(other.tetNum).toBe(2);
-  await page
-    .getByRole("button", { name: "demo_box-b tetrode 2", exact: true })
-    .click();
+  await page.getByRole("button", { name: "demo_box-b tetrode 2", exact: true }).click();
   await ready(page);
   expect((await selection(page)).cutId).toBe("");
   await page.getByRole("button", { name: "02", exact: true }).click();
@@ -82,13 +78,9 @@ test("browser back/forward restores only trial, tetrode and cut choices", async 
   expect(await selection(page)).toEqual(other);
   await page.goForward();
   await ready(page);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeEnabled();
 });
-test("browser back cancels a split preview before restoring the recording", async ({
-  page,
-}) => {
+test("browser back cancels a split preview before restoring the recording", async ({ page }) => {
   await demo(page);
   const first = await selection(page);
   await page.getByRole("button", { name: "02", exact: true }).click();
@@ -103,7 +95,40 @@ test("browser back cancels a split preview before restoring the recording", asyn
   await expect(page.locator(".split-pair")).toHaveCount(0);
   await page.goForward();
   await ready(page);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
+});
+
+test("arrow keys step trials (up/down), tetrodes (left/right) and a tetrode's cuts (shift)", async ({
+  page,
+}) => {
+  await demo(page);
+  await page.mouse.move(5, 1000);
+  const start = await selection(page);
+  expect(start.tetNum).toBe(1);
+  expect(start.cutId).not.toBe("");
+  const press = async (key: string) => {
+    await page.keyboard.press(key);
+    await ready(page);
+  };
+  await press("ArrowRight");
+  await expect.poll(async () => (await selection(page)).tetNum).toBe(2);
+  expect((await selection(page)).trialId).toBe(start.trialId);
+  await press("ArrowLeft");
+  await expect.poll(async () => (await selection(page)).tetNum).toBe(1);
+  // No tetrode before the first: the selection stays put.
+  await press("ArrowLeft");
+  expect((await selection(page)).tetNum).toBe(1);
+  await press("ArrowDown");
+  await expect.poll(async () => (await selection(page)).trialId).not.toBe(start.trialId);
+  expect((await selection(page)).tetNum).toBe(1);
+  await press("ArrowUp");
+  await expect.poll(async () => (await selection(page)).trialId).toBe(start.trialId);
+  // Shift steps within the tetrode: no cut comes before the cut files.
+  await press("Shift+ArrowLeft");
+  await expect.poll(async () => (await selection(page)).cutId).toBe("");
+  await press("Shift+ArrowLeft");
+  expect((await selection(page)).cutId).toBe("");
+  await press("Shift+ArrowRight");
+  await expect.poll(async () => (await selection(page)).cutId).toBe(start.cutId);
+  expect((await selection(page)).tetNum).toBe(1);
 });

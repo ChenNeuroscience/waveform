@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { usePreference, fitWindowLayout } from "./preferences";
+import { usePreference, fitWindowLayout } from "../preferences";
 import { X } from "lucide-react";
 let top = 100;
 export function FloatingWindow({
@@ -29,28 +29,23 @@ export function FloatingWindow({
   preferenceKey?: string;
   comparison?: boolean;
 }) {
-  const root = useRef<HTMLElement>(null),
-    [geometry, setGeometry] = usePreference(preferenceKey || null, {
-      x,
-      y,
-      width,
-      height,
-    }),
-    [z, setZ] = useState(() => ++top),
-    position = fitWindowLayout(geometry, innerWidth, innerHeight);
+  const root = useRef<HTMLElement>(null);
+  const [geometry, setGeometry] = usePreference(preferenceKey || null, {
+    x,
+    y,
+    width,
+    height,
+  });
+  const [z, setZ] = useState(() => ++top);
+  const position = fitWindowLayout(geometry, innerWidth, innerHeight);
   useEffect(() => {
-    const clamp = () =>
-      setGeometry((g) => fitWindowLayout(g, innerWidth, innerHeight));
+    const clamp = () => setGeometry((g) => fitWindowLayout(g, innerWidth, innerHeight));
     clamp();
     const observer = new ResizeObserver(() => {
       const b = root.current!.getBoundingClientRect();
       setGeometry((g) =>
         Math.abs(g.width - b.width) > 0.5 || Math.abs(g.height - b.height) > 0.5
-          ? fitWindowLayout(
-              { ...g, width: b.width, height: b.height },
-              innerWidth,
-              innerHeight,
-            )
+          ? fitWindowLayout({ ...g, width: b.width, height: b.height }, innerWidth, innerHeight)
           : g,
       );
     });
@@ -60,17 +55,15 @@ export function FloatingWindow({
       observer.disconnect();
       removeEventListener("resize", clamp);
     };
-  }, []);
+  }, [setGeometry]);
   const focus = () => {
     setZ(++top);
     onFocus?.();
   };
   const drag = (e: React.PointerEvent) => {
-    if (
-      e.button !== 0 ||
-      (e.target as HTMLElement).closest("button,input,select,textarea,a")
-    )
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button,input,select,textarea,a")) {
       return;
+    }
     e.preventDefault();
     const origin = {
       x: e.clientX - position.x,
@@ -95,6 +88,16 @@ export function FloatingWindow({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", end);
   };
+  // Space-click (grab mode) closes a window; any other press brings it to front.
+  const pressWindow = (event: React.PointerEvent) => {
+    if (grabMode && event.button === 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    } else {
+      focus();
+    }
+  };
   return (
     <section
       ref={root}
@@ -110,18 +113,9 @@ export function FloatingWindow({
         height: position.height,
         zIndex: z,
       }}
-      onPointerDownCapture={(event) => {
-        if (grabMode && event.button === 0) {
-          event.preventDefault();
-          event.stopPropagation();
-          onClose();
-        } else focus();
-      }}
+      onPointerDownCapture={pressWindow}
     >
-      <header
-        className="floating-titlebar"
-        onPointerDown={comparison ? undefined : drag}
-      >
+      <header className="floating-titlebar" onPointerDown={comparison ? undefined : drag}>
         <span>{title}</span>
         <button aria-label="Close panel" title="Close" onClick={onClose}>
           <X size={13} />

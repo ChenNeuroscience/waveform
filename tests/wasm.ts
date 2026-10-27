@@ -1,12 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { readCut } from "../src/files";
-import type { Core } from "../src/wasm";
+import type { Core } from "../src/worker/wasm";
 export const corePromise = readFile(
   new URL("../public/wasm/waveform_core.wasm", import.meta.url),
 ).then(
   async (bytes) =>
-    (await WebAssembly.instantiate(await WebAssembly.compile(bytes), {}))
-      .exports as Core,
+    (await WebAssembly.instantiate(await WebAssembly.compile(bytes), {})).exports as Core,
 );
 export async function decodeCut(file: File, n: number) {
   const w = await corePromise,
@@ -29,9 +28,7 @@ export function seedEngine(w: Core, timestamps: number[], labels: number[]) {
   new Uint8Array(w.memory.buffer, p, raw.length).set(raw);
   w.engine_push(e, p, raw.length);
   w.free_bytes(p, raw.length);
-  new Uint16Array(w.memory.buffer, w.engine_labels(e), labels.length).set(
-    labels,
-  );
+  new Uint16Array(w.memory.buffer, w.engine_labels(e), labels.length).set(labels);
   w.engine_recount(e);
   return e;
 }

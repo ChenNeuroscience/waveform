@@ -160,7 +160,32 @@ small {
   background: #ffe6e4;
   color: #c02f2f;
 }
-
+/* Rendering toggles (drift, density): the same pills with grayscale icons and a
+   slate-blue "on" state, marking them as display modes rather than plots. */
+.desktop-toolbar > .render-toggle {
+  min-width: 36px;
+  height: 23px;
+  margin: 0 1px;
+  padding: 0 8px;
+  border: 1px solid #d6d9de;
+  border-radius: 999px;
+  background: white;
+  opacity: 0.75;
+}
+.desktop-toolbar > .render-toggle:hover:not(:disabled) {
+  border-color: #b4b9c1;
+  background: #f6f7f9;
+  opacity: 1;
+}
+.desktop-toolbar > .render-toggle.checked {
+  border-color: #9fb5d6;
+  background: #edf2fa;
+  opacity: 1;
+}
+.desktop-toolbar > .render-toggle.checked:hover:not(:disabled) {
+  border-color: #7f9cc7;
+  background: #e2eaf6;
+}
 .desktop-workspace {
   display: grid;
   flex: 1;
@@ -263,8 +288,7 @@ small {
   gap: 2px;
   margin-top: 3px;
 }
-.trial-tetrodes button,
-.trial-cuts button {
+.trial-tetrodes button {
   font-size: 9px;
   min-height: 17px;
   height: 17px;
@@ -272,8 +296,7 @@ small {
   background: #f7f7f7;
   padding: 0 3px;
 }
-.trial-tetrodes button.active,
-.trial-cuts button.active {
+.trial-tetrodes button.active {
   background: #6e2020;
   color: white;
   border-color: #5b1313;
@@ -281,19 +304,6 @@ small {
 .trial-tetrodes button:disabled {
   background: #ddd;
   color: #bbb;
-}
-.trial-cuts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px;
-  margin-top: 3px;
-  font-size: 9px;
-}
-.modified-cut {
-  font-size: 9px;
-  color: #8e4a00;
-  margin-left: 5px;
 }
 .pane-splitter,
 .desktop-splitter {
@@ -347,38 +357,6 @@ small {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-.pane-caption {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 24px;
-  padding: 2px 4px;
-  font-size: 10px;
-  border-bottom: 1px solid #e2e2e2;
-  flex-shrink: 0;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.pane-caption > span:nth-child(2) {
-  margin-left: auto;
-}
-.pane-caption label {
-  display: flex;
-  align-items: center;
-  font-size: 9px;
-  gap: 2px;
-}
-.pane-caption input {
-  width: 48px;
-  padding: 0;
-  margin: 0;
-}
-.pane-caption button {
-  font-size: 9px;
-  min-height: 16px;
-  height: 18px;
-  padding: 1px 2px;
 }
 .position-content {
   display: flex;
@@ -492,8 +470,6 @@ small {
   align-items: flex-start;
   gap: 2px;
   max-width: 100%;
-}
-.painting-set {
   flex: 1;
   min-width: 0;
 }
@@ -661,24 +637,6 @@ small {
   min-height: 16px;
   height: 16px;
 }
-.x-label {
-  position: absolute;
-  bottom: 3px;
-  left: 20px;
-  right: 3px;
-  text-align: center;
-  font: 8px Arial;
-  color: #666;
-}
-.y-label {
-  position: absolute;
-  left: 1px;
-  top: 45%;
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  font: 8px Arial;
-  color: #666;
-}
 .lasso-overlay {
   position: absolute;
   inset: 0;
@@ -702,55 +660,11 @@ small {
   min-width: 0;
   background: #f7f7f7;
 }
-.tile-wall-tools {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 27px;
-  height: 27px;
-  padding: 2px 4px;
-  border-bottom: 1px solid #bbb;
-  font-size: 10px;
-  white-space: nowrap;
-  flex-shrink: 0;
-  background: #f5f5f5;
-}
-.tile-wall-tools b {
-  font-size: 11px;
-  font-weight: normal;
-}
-.tile-wall-tools > input {
-  width: 51px;
-  min-width: 25px;
-  font-size: 10px;
-  height: 19px;
-  padding: 2px 3px;
-  background: white;
-  border: 1px solid #bbb;
-}
-.tile-wall-tools > button {
-  height: 20px;
-  min-height: 20px;
-  font-size: 9px;
-  padding: 1px 3px;
-}
-.small-separator {
-  height: 15px;
-  width: 1px;
-  background: #ccc;
-  margin: 0 3px;
-}
-.tools-spacer {
-  flex: 1;
-}
 .tile-wall {
   position: relative;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: #bcbcbc #eee;
   background: white;
 }
 .tile-spacer {
@@ -784,38 +698,11 @@ small {
   overflow: hidden;
 }
 .cell-tile.selected {
-  border-left-color: #2e66a3;
   box-shadow: inset 0 0 0 1px #9bb4d0;
 }
 .tile-waves {
   position: relative;
-  flex-shrink: 0;
   pointer-events: none;
-}
-.wave-channel-names {
-  position: absolute;
-  inset-inline: 0;
-  top: 3px;
-  display: block;
-  text-align: center;
-  font-size: 8px;
-  color: #aaa;
-  white-space: pre;
-  opacity: 0;
-}
-.cell-tile:hover .wave-channel-names {
-  opacity: 1;
-}
-.tile-wave-caption {
-  position: absolute;
-  bottom: 13px;
-  left: 4px;
-  font-size: 8px;
-  color: #999;
-  opacity: 0;
-}
-.cell-tile:hover .tile-wave-caption {
-  opacity: 1;
 }
 .tile-numeric-plots {
   flex: 1;
@@ -929,42 +816,6 @@ small {
   color: #777;
   text-align: center;
 }
-.pinned-comparisons {
-  position: relative;
-  font-size: 9px;
-}
-.pinned-comparisons summary {
-  cursor: pointer;
-}
-.pinned-comparisons > div {
-  position: absolute;
-  right: 0;
-  top: 24px;
-  width: 420px;
-  max-height: 80vh;
-  overflow: auto;
-  background: #fff;
-  border: 1px solid #aaa;
-  z-index: 12;
-  box-shadow: 0 3px 12px #0002;
-  padding: 3px;
-}
-.pinned-comparisons section {
-  border: 1px solid #ccc;
-  margin: 3px;
-}
-.pinned-comparisons header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #eee;
-  padding: 2px 4px;
-  font-size: 10px;
-}
-.pinned-comparisons img {
-  width: 100%;
-  display: block;
-}
 .desktop-notice {
   position: fixed;
   left: 10px;
@@ -1004,7 +855,6 @@ small {
 .start-drop {
   max-width: 540px;
   width: 100%;
-  text-align: center;
   margin: 12vh auto 30px;
 }
 .start-drop h1 {
@@ -1068,13 +918,6 @@ small {
   color: #777;
   text-decoration: underline;
 }
-.demo-link {
-  font-size: 10px;
-  color: #888;
-  text-decoration: underline;
-  min-height: 18px;
-  padding: 1px;
-}
 .start-drop > small {
   display: block;
   margin-top: 23px;
@@ -1102,14 +945,6 @@ small {
   font-size: 13px;
   color: #777;
 }
-.pane-backdrop {
-  position: fixed;
-  inset: 0;
-  background: #0002;
-  z-index: 20;
-  display: flex;
-  justify-content: flex-end;
-}
 .drawer {
   width: 365px;
   max-width: 100vw;
@@ -1118,23 +953,6 @@ small {
   display: flex;
   flex-direction: column;
   box-shadow: -3px 0 15px #0002;
-}
-.drawer-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 7px 9px;
-  background: #e9e9e9;
-  border-bottom: 1px solid #aaa;
-}
-.drawer-heading h2 {
-  font-size: 13px;
-  font-weight: normal;
-  margin: 0;
-}
-.icon {
-  padding: 2px;
-  min-height: 20px;
 }
 .drawer-content {
   padding: 5px 11px 18px;
@@ -1320,17 +1138,7 @@ kbd {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.loading-bar {
-  font-size: 10px;
-}
-.spin {
-  animation: spin 1.2s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
+
 @media (max-width: 900px) {
   .desktop-toolbar {
     gap: 1px;
@@ -1350,15 +1158,6 @@ kbd {
   .tile-caption {
     font-size: 7px;
     gap: 7px;
-  }
-  .pane-caption {
-    gap: 4px;
-  }
-  .pane-caption label {
-    display: none;
-  }
-  .pinned-comparisons > div {
-    width: 330px;
   }
 }
 @media (max-width: 500px) {
@@ -1407,6 +1206,7 @@ kbd {
 }
 /* Original desktop interactions */
 .tile-waves {
+  flex-shrink: 0;
   pointer-events: auto;
 }
 .cell-tile.merge-target {
@@ -1566,15 +1366,8 @@ kbd {
   color: white;
 }
 .trial-tetrodes {
-  flex-wrap: nowrap;
   overflow-x: auto;
   align-items: flex-start;
-  min-height: 19px;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
-}
-.trial-block {
-  padding-bottom: 4px;
 }
 .start-screen {
   position: relative;
@@ -1589,6 +1382,7 @@ kbd {
   pointer-events: none;
 }
 .start-drop {
+  text-align: center;
   max-width: 600px;
   margin: 0 auto;
   color: #888;
@@ -1627,9 +1421,6 @@ kbd {
 .start-drop .supported-formats code {
   font-weight: bold;
 }
-.demo-link {
-  margin-top: 2px;
-}
 .desktop-workspace {
   min-width: 577px;
 }
@@ -1664,10 +1455,10 @@ kbd {
 
 /* The waveform data grid is 4 × 128 by 128; all axes share one scale. */
 .tile-wall {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #bcbcbc #eee;
   overflow-x: auto;
-}
-.tile-spacer {
-  min-width: 792px;
 }
 .tile-numeric-plots {
   flex: none;
@@ -1721,7 +1512,6 @@ kbd {
 .plot-copy {
   object-fit: contain;
 }
-
 .position-speed {
   bottom: auto;
   height: 141px;
@@ -1730,9 +1520,7 @@ kbd {
   height: 128px;
   flex: none;
 }
-
 .splitting .desktop-toolbar,
-.splitting .tile-wall-tools,
 .splitting .floating-window {
   filter: grayscale(1);
   opacity: 0.55;
@@ -1759,20 +1547,6 @@ kbd {
   height: 81px;
 }
 .tile-caption {
-  left: auto;
-  right: 26px;
-  top: 5px;
-  bottom: auto;
-  height: auto;
-  width: max-content;
-  max-width: calc(100% - 30px);
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0;
-  padding: 4px 7px;
-  font: 14px/18px Arial;
-  color: #222;
-  background: #fffffff0;
   visibility: hidden;
   z-index: 4;
 }
@@ -1782,18 +1556,28 @@ kbd {
 .tile-caption span:first-child {
   min-width: 0;
 }
-
-.cell-tile {
-  overflow: visible;
-}
 .cell-tile:hover {
   z-index: 2;
 }
 .tile-caption {
+  left: auto;
+  right: 26px;
+  top: 5px;
+  bottom: auto;
+  height: auto;
+  width: max-content;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  padding: 4px 7px;
+  font: 14px/18px Arial;
+  color: #222;
+  background: #fffffff0;
   max-width: none;
 }
 /* A drag keeps its layout slot and compares cached plot images at one scale. */
 .cell-tile {
+  overflow: visible;
   touch-action: none;
   user-select: none;
 }
@@ -1884,15 +1668,9 @@ kbd {
     transform: translateX(-1px);
   }
 }
-
 .tile-wall[data-dragging] .tile-caption {
   visibility: hidden;
 }
-.tile-wall[data-dragging] .tile-wave-caption,
-.tile-wall[data-dragging] .wave-channel-names {
-  opacity: 0;
-}
-
 .tile-copy {
   position: relative;
   background: white;
@@ -1931,6 +1709,9 @@ kbd {
 
 /* Every tetrode and its cuts form one inline file group, including collapsed groups. */
 .trial-tetrodes {
+  min-height: 19px;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
   flex-wrap: wrap;
   overflow: visible;
 }
@@ -1993,7 +1774,6 @@ kbd {
 .tetrode-file-block > button.local-cut.active:hover {
   background: #227;
 }
-
 .tetrode-file-block.expanded {
   flex-wrap: wrap;
   max-width: 100%;
@@ -2038,6 +1818,7 @@ kbd {
   opacity: 0.45;
 }
 .trial-block {
+  padding-bottom: 4px;
   cursor: pointer;
 }
 .trial-heading .trial-name,
@@ -2119,7 +1900,6 @@ kbd {
   font-size: 52px;
   font-weight: normal;
 }
-
 .tile-wave-canvas,
 .tile-waves {
   border: 0;
@@ -2188,7 +1968,6 @@ kbd {
   z-index: 90;
   box-shadow: 0 0 5px 3px #fc0;
 }
-
 .other-files {
   display: inline-flex;
   align-items: center;
@@ -2197,7 +1976,6 @@ kbd {
   color: #666;
   white-space: nowrap;
 }
-
 .toolbar-status {
   margin-left: auto;
   padding: 0 4px 0 12px;
@@ -2233,7 +2011,6 @@ kbd {
 .comparison-window .floating-content {
   cursor: move;
 }
-
 .demo-files {
   display: flex;
   align-items: center;

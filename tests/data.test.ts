@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { parseHeader, organiseFiles } from "../src/files";
 import { corePromise, decodeCut as readCut, seedEngine } from "./wasm";
-import { analyse, parsePosition } from "../src/position";
+import { analyse, parsePosition, trajectory } from "../src/worker/position";
 import { defaultSettings } from "../src/types";
-import { fitGrid, projectionFrame } from "../src/plot-geometry";
+import { fitGrid, projectionFrame, waveX, waveY, wavePoint } from "../src/plots/plot-geometry";
 describe("LTX import", () => {
   it("keeps folder-scoped File identities across incremental imports", async () => {
     const f = (path: string, text = "") => {
@@ -15,12 +15,7 @@ describe("LTX import", () => {
     };
     const a = f("a/trial.1"),
       b = f("b/trial.1");
-    const first = await organiseFiles([
-      f("a/trial.eeg"),
-      a,
-      b,
-      f("b/trial.fet.1"),
-    ]);
+    const first = await organiseFiles([f("a/trial.eeg"), a, b, f("b/trial.fet.1")]);
     expect(first.trials[0].otherFiles).toEqual(["trial.eeg"]);
     expect(first.trials[1].otherFiles).toEqual(["trial.fet.1"]);
     const next = await organiseFiles(
@@ -50,8 +45,7 @@ describe("LTX import", () => {
     expect(parseHeader(bytes).header.num_spikes).toBe("1");
   });
   it("groups incrementally and associates alternative cut suffixes", async () => {
-    const file = (name: string, text = "") =>
-      new File([text], name, { lastModified: 1 });
+    const file = (name: string, text = "") => new File([text], name, { lastModified: 1 });
     let { trials } = await organiseFiles([
       file("a.set"),
       file("a.1"),
@@ -75,14 +69,9 @@ describe("LTX import", () => {
     expect(r.trials[0].pos?.name).toBe("a.pos");
   });
   it("validates counts and converts legacy clu labels to zero based", async () => {
+    expect([...(await readCut(new File(["3\n1\n2\n3\n"], "trial.clu.1"), 3))]).toEqual([0, 1, 2]);
     expect([
-      ...(await readCut(new File(["3\n1\n2\n3\n"], "trial.clu.1"), 3)),
-    ]).toEqual([0, 1, 2]);
-    expect([
-      ...(await readCut(
-        new File(["Exact_cut_for: a spikes: 3\n0 1 100"], "a_1.cut"),
-        3,
-      )),
+      ...(await readCut(new File(["Exact_cut_for: a spikes: 3\n0 1 100"], "a_1.cut"), 3)),
     ]).toEqual([0, 1, 100]);
     await expect(
       readCut(new File(["Exact_cut_for: a spikes: 3\n0 1"], "a_1.cut"), 3),
@@ -112,13 +101,9 @@ describe("undo delta integrity", () => {
         p = w.alloc_bytes(bytes.length);
       new Uint8Array(w.memory.buffer, p, bytes.length).set(bytes);
       expect(w.engine_patch_apply(e, p, bytes.length, 0)).toBe(0);
-      expect(
-        new Uint16Array(w.memory.buffer, w.engine_labels(e), n).slice(),
-      ).toEqual(before);
+      expect(new Uint16Array(w.memory.buffer, w.engine_labels(e), n).slice()).toEqual(before);
       expect(w.engine_patch_apply(e, p, bytes.length, 1)).toBe(0);
-      expect(
-        new Uint16Array(w.memory.buffer, w.engine_labels(e), n).slice(),
-      ).toEqual(after);
+      expect(new Uint16Array(w.memory.buffer, w.engine_labels(e), n).slice()).toEqual(after);
       w.free_bytes(p, bytes.length);
       w.engine_free(e);
     }
@@ -150,21 +135,14 @@ describe("analysis", () => {
       binCm: 1,
       dirBin: 90,
     };
-    const p = await parsePosition(
-      new File([header, raw], "test.pos"),
-      opts,
-      w,
-      "clock",
-    );
+    const p = await parsePosition(new File([header, raw], "test.pos"), opts, w, "clock");
     const e = seedEngine(w, [960, 2880, 4800], [1, 1, 1]);
     try {
       const a = analyse(w, e, 1, 96000, 0.08, p, opts);
-      expect([...a.path]).toEqual(
+      expect([...trajectory(w, p).path]).toEqual(
         [0.2, 0.1, 0.3, 0.1, 0.4, 0.1, 0.5, 0.1].map(Math.fround),
       );
-      expect([...a.spikes]).toEqual(
-        [0.2, 0.1, 0.3, 0.1, 0.4, 0.1].map(Math.fround),
-      );
+      expect([...a.spikes]).toEqual([0.2, 0.1, 0.3, 0.1, 0.4, 0.1].map(Math.fround));
       expect(a.direction[3]).toBeGreaterThan(0);
       expect(a.spatial[12]).toBeCloseTo(50);
     } finally {
@@ -222,4 +200,16 @@ describe("plot geometry", () => {
       expect(frame.width).toBe(frame.height);
     }
   });
+});
+
+it("waveform frame geometry round-trips between samples and split points", () => {
+  for (const channel of [0, 1, 2, 3])
+    for (const sample of [0, 14, 49])
+      for (const threshold of [-128, -40, 0, 60, 127])
+        expect(wavePoint(waveX(channel, sample), waveY(threshold))).toEqual({
+          channel,
+          sample,
+          threshold,
+        });
+  expect(waveY(0)).toBe(0.5);
 });

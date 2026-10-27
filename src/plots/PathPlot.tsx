@@ -1,0 +1,85 @@
+import { useEffect, useRef } from "react";
+import { fitGrid } from "./plot-geometry";
+import { type Trajectory } from "../types";
+
+export interface SpikeLayer {
+  cell: number;
+  spikes: Float32Array;
+  color: string;
+}
+/** The trajectory with spike overlays. The path is drawn once into an offscreen
+ * canvas (per trajectory and size); layer changes, such as hovering a tile, only
+ * copy it back and draw the spike dots. One visible canvas keeps copies simple. */
+export function PathPlot({ trajectory, layers }: { trajectory: Trajectory; layers: SpikeLayer[] }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const base = useRef<{
+    key: string;
+    trajectory: Trajectory;
+    image: HTMLCanvasElement;
+  } | null>(null);
+  useEffect(() => {
+    const c = canvas.current!;
+    const draw = () => {
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      const w = c.clientWidth;
+      const h = c.clientHeight;
+      const key = `${w}x${h}x${dpr}`;
+      // Use the full pane width and start at its top; retain one physical
+      // scale for x/y, with any unused space below or beside the arena.
+      const box = {
+        ...fitGrid(w, h, trajectory.arenaWidth, trajectory.arenaHeight),
+        y: 0,
+      };
+      // Hidden or not yet laid out: nothing to draw (and a 0×0 offscreen
+      // canvas cannot be copied with drawImage).
+      if (!w || !h) {
+        return;
+      }
+      if (base.current?.key !== key || base.current.trajectory !== trajectory) {
+        const image = document.createElement("canvas");
+        image.width = w * dpr;
+        image.height = h * dpr;
+        const ctx = image.getContext("2d")!;
+        const path = trajectory.path;
+        ctx.scale(dpr, dpr);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = "#333333";
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        for (let i = 0; i < path.length; i += 2) {
+          const x = box.x + path[i] * box.width;
+          const y = box.y + path[i + 1] * box.height;
+          if (i) {
+            ctx.lineTo(x, y);
+          } else {
+            ctx.moveTo(x, y);
+          }
+        }
+        ctx.stroke();
+        base.current = { key, trajectory, image };
+      }
+      c.width = w * dpr;
+      c.height = h * dpr;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(base.current.image, 0, 0);
+      ctx.scale(dpr, dpr);
+      for (const layer of layers) {
+        ctx.fillStyle = layer.color;
+        for (let i = 0; i < layer.spikes.length; i += 2) {
+          ctx.fillRect(
+            box.x + layer.spikes[i] * box.width,
+            box.y + layer.spikes[i + 1] * box.height,
+            1.6,
+            1.6,
+          );
+        }
+      }
+    };
+    draw();
+    const ro = new ResizeObserver(draw);
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, [trajectory, layers]);
+  return <canvas ref={canvas} className="analysis-canvas" aria-label="path plot" />;
+}

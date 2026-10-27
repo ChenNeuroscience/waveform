@@ -13,48 +13,36 @@ async function fixture(page: Page) {
       bytes[offset + 18] = [10, 40, 40, 80, 100, 120][i];
     }
   await page.goto("/");
-  await page
-    .getByLabel("Import recording files", { exact: true })
-    .setInputFiles([
-      ...[1, 2].map((tet) => ({
-        name: `groups.${tet}`,
-        mimeType: "application/octet-stream",
-        buffer: Buffer.concat([
-          Buffer.from(
-            "num_spikes 6\nnum_chans 4\nsamples_per_spike 50\ntimebase 96000 hz\nduration 10\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start",
-          ),
-          bytes,
-        ]),
-      })),
-      {
-        name: "groups_1.cut",
-        mimeType: "text/plain",
-        buffer: Buffer.from("Exact_cut_for: groups spikes: 6\n0 1 2 4 4 6\n"),
-      },
-    ]);
+  await page.getByLabel("Import recording files", { exact: true }).setInputFiles([
+    ...[1, 2].map((tet) => ({
+      name: `groups.${tet}`,
+      mimeType: "application/octet-stream",
+      buffer: Buffer.concat([
+        Buffer.from(
+          "num_spikes 6\nnum_chans 4\nsamples_per_spike 50\ntimebase 96000 hz\nduration 10\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start",
+        ),
+        bytes,
+      ]),
+    })),
+    {
+      name: "groups_1.cut",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Exact_cut_for: groups spikes: 6\n0 1 2 4 4 6\n"),
+    },
+  ]);
   await ready(page);
 }
-const chip = (page: Page, n: number) =>
-  page.locator(`.group-selector button[data-group="${n}"]`);
-const tile = (page: Page, n: number) =>
-  page.locator(`.cell-tile[data-cell="${n}"]`);
+const chip = (page: Page, n: number) => page.locator(`.group-selector button[data-group="${n}"]`);
+const tile = (page: Page, n: number) => page.locator(`.cell-tile[data-cell="${n}"]`);
 async function sources(page: Page) {
   return page
     .locator(".painting-sources button")
-    .evaluateAll((elements) =>
-      elements.map((el) => Number(el.getAttribute("data-group"))),
-    );
+    .evaluateAll((elements) => elements.map((el) => Number(el.getAttribute("data-group"))));
 }
 async function labels(page: Page) {
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    exportCut(page),
-  ]);
+  const [download] = await Promise.all([page.waitForEvent("download"), exportCut(page)]);
   return [
-    ...(await decodeCut(
-      new File([await readFile((await download.path())!)], "groups_1.cut"),
-      6,
-    )),
+    ...(await decodeCut(new File([await readFile((await download.path())!)], "groups_1.cut"), 6)),
   ];
 }
 
@@ -63,15 +51,9 @@ test("set notation restores mouse/hover shortcuts, multiple sources and new dest
 }) => {
   await fixture(page);
   const historyLength = await page.evaluate(() => history.length);
-  await expect(
-    page.getByRole("button", { name: "Merge", exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Swap", exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByLabel("Destination cell", { exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Merge", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Swap", exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Destination cell", { exact: true })).toHaveCount(0);
   await expect(page.locator(".painting-set")).toContainText("←");
   await expect(
     page
@@ -79,9 +61,7 @@ test("set notation restores mouse/hover shortcuts, multiple sources and new dest
       .locator(".lucide-paintbrush"),
   ).toHaveCount(1);
   const layout = await page.locator(".group-selector").evaluate((el) => {
-    const heading = el
-        .querySelector(".feature-group-heading")!
-        .getBoundingClientRect(),
+    const heading = el.querySelector(".feature-group-heading")!.getBoundingClientRect(),
       rest = el.querySelector(".feature-group-strip")!;
     return {
       headingBottom: heading.bottom,
@@ -135,8 +115,7 @@ test("tile clicks bring coincident points to the front without uploading feature
       original = prototype.bufferData;
     (window as any).featureUploads = 0;
     prototype.bufferData = function (...args: any[]) {
-      if ((this.canvas as HTMLCanvasElement).closest(".clusters"))
-        (window as any).featureUploads++;
+      if ((this.canvas as HTMLCanvasElement).closest(".clusters")) (window as any).featureUploads++;
       return (original as any).apply(this, args);
     };
   });
@@ -155,17 +134,13 @@ test("tile clicks bring coincident points to the front without uploading feature
       return [...context.getImageData(x - 1, y - 1, 3, 3).data];
     });
   const has = (bytes: number[], rgb: readonly number[]) =>
-    bytes.some(
-      (_, i) => i % 4 === 0 && rgb.every((v, j) => bytes[i + j] === v),
-    );
+    bytes.some((_, i) => i % 4 === 0 && rgb.every((v, j) => bytes[i + j] === v));
   await expect.poll(async () => has(await pixels(), groupRgb8(1))).toBe(true);
   const originalSources = await sources(page);
   await tile(page, 2).click({ position: { x: 30, y: 65 } });
   await expect.poll(async () => has(await pixels(), groupRgb8(2))).toBe(true);
   expect(await sources(page)).toEqual(originalSources);
-  expect(await page.evaluate(() => (window as any).featureUploads)).toBe(
-    uploads,
-  );
+  expect(await page.evaluate(() => (window as any).featureUploads)).toBe(uploads);
   await tile(page, 1).click({ position: { x: 30, y: 65 } });
   await expect.poll(async () => has(await pixels(), groupRgb8(1))).toBe(true);
   const box = (await page.locator(".clusters canvas").boundingBox())!;
@@ -177,9 +152,7 @@ test("tile clicks bring coincident points to the front without uploading feature
   await expect(page.locator(".painting-destination button")).toHaveText("1");
   await page.keyboard.press("f");
   expect(await sources(page)).toEqual([1]);
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
 });
 
 test("S uses the hovered tile, focuses a centred prompt, accepts clicks or numbers and preserves undo", async ({
@@ -193,9 +166,7 @@ test("S uses the hovered tile, focuses a centred prompt, accepts clicks or numbe
   await tile(page, 4).hover();
   await page.keyboard.press("s");
   await expect(swap).toContainText("Swap group 4: click or type a group");
-  await expect(
-    swap.getByRole("textbox", { name: "Group to swap with" }),
-  ).toBeFocused();
+  await expect(swap.getByRole("textbox", { name: "Group to swap with" })).toBeFocused();
   await swap.getByRole("textbox", { name: "Group to swap with" }).hover();
   await expect(page.locator('.tile-hover-glow[data-cell="4"]')).toBeVisible();
   expect(
@@ -205,26 +176,16 @@ test("S uses the hovered tile, focuses a centred prompt, accepts clicks or numbe
   ).toContain("255, 204, 0");
   const wall = (await page.locator(".right-workspace").boundingBox())!,
     prompt = (await swap.boundingBox())!;
-  expect(
-    Math.abs(prompt.x + prompt.width / 2 - wall.x - wall.width / 2),
-  ).toBeLessThan(1);
-  await expect(
-    swap.getByRole("button", { name: "Swap −1 (empty 3)", exact: true }),
-  ).toBeVisible();
-  await expect(
-    swap.getByRole("button", { name: "Swap +1 (empty 5)", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Undo", exact: true }),
-  ).toBeDisabled();
+  expect(Math.abs(prompt.x + prompt.width / 2 - wall.x - wall.width / 2)).toBeLessThan(1);
+  await expect(swap.getByRole("button", { name: "Swap −1 (empty 3)", exact: true })).toBeVisible();
+  await expect(swap.getByRole("button", { name: "Swap +1 (empty 5)", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(swap).toHaveCount(0);
   expect(await labels(page)).toEqual([0, 1, 2, 4, 4, 6]);
   await tile(page, 4).hover();
   await page.keyboard.press("s");
-  await swap
-    .getByRole("button", { name: "Swap −1 (empty 3)", exact: true })
-    .click();
+  await swap.getByRole("button", { name: "Swap −1 (empty 3)", exact: true }).click();
   await ready(page);
   expect(await labels(page)).toEqual([0, 1, 2, 3, 3, 6]);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
@@ -235,9 +196,7 @@ test("S uses the hovered tile, focuses a centred prompt, accepts clicks or numbe
   expect(await labels(page)).toEqual([0, 1, 2, 3, 3, 6]);
   await tile(page, 1).hover();
   await page.keyboard.press("s");
-  await page
-    .getByRole("button", { name: "Select cell 2", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Select cell 2", exact: true }).click();
   await ready(page);
   expect(await labels(page)).toEqual([0, 2, 1, 3, 3, 6]);
   await expect(swap).toHaveCount(0);
@@ -273,11 +232,7 @@ test("completed merges and swaps jiggle the updated result tiles with the existi
     new MutationObserver((records) => {
       for (const record of records)
         for (const node of record.addedNodes) {
-          if (
-            !(node instanceof HTMLElement) ||
-            !node.matches(".tile-edit-jiggle")
-          )
-            continue;
+          if (!(node instanceof HTMLElement) || !node.matches(".tile-edit-jiggle")) continue;
           (window as any).jiggles.push({
             cell: Number(node.dataset.cell),
             animation: getComputedStyle(node).animationName,
@@ -294,9 +249,7 @@ test("completed merges and swaps jiggle the updated result tiles with the existi
   await page.mouse.up();
   await ready(page);
   await expect
-    .poll(() =>
-      page.evaluate(() => (window as any).jiggles.map((x: any) => x.cell)),
-    )
+    .poll(() => page.evaluate(() => (window as any).jiggles.map((x: any) => x.cell)))
     .toContain(1);
   await expect(page.locator(".tile-edit-jiggle")).toHaveCount(0);
   expect(await labels(page)).toEqual([0, 1, 1, 4, 4, 6]);
@@ -309,11 +262,7 @@ test("completed merges and swaps jiggle the updated result tiles with the existi
   await page.keyboard.press("Enter");
   await ready(page);
   await expect
-    .poll(() =>
-      page.evaluate(() =>
-        (window as any).jiggles.map((x: any) => x.cell).sort(),
-      ),
-    )
+    .poll(() => page.evaluate(() => (window as any).jiggles.map((x: any) => x.cell).sort()))
     .toEqual([4, 6]);
   expect(
     await page.evaluate(() =>
@@ -355,9 +304,7 @@ test("long source sets wrap between full-height braces while tools stay on the t
       chips = [...el.querySelectorAll(".source-chips button")].map((x) =>
         x.getBoundingClientRect(),
       ),
-      braces = [...el.querySelectorAll(".source-brace")].map((x) =>
-        x.getBoundingClientRect(),
-      );
+      braces = [...el.querySelectorAll(".source-brace")].map((x) => x.getBoundingClientRect());
     return {
       toolsY: tools.y,
       firstY: chips[0].y,

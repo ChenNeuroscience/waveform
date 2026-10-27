@@ -29,6 +29,9 @@ pub struct Engine {
     output: Vec<u8>,
     groups: Vec<Vec<u32>>,
     groups_dirty: bool,
+    /// Two u32 halves per cell of an order-independent hash of its full spike set;
+    /// cleared by every label change and rebuilt on first read.
+    cell_hashes: Vec<u32>,
 }
 impl Engine {
     pub fn new(n: usize) -> Self {
@@ -45,6 +48,7 @@ impl Engine {
             output: vec![],
             groups: vec![],
             groups_dirty: true,
+            cell_hashes: vec![],
         }
     }
     pub fn push(&mut self, data: &[u8]) {
@@ -65,6 +69,7 @@ impl Engine {
     }
     pub fn recount(&mut self) {
         self.groups_dirty = true;
+        self.cell_hashes.clear();
         self.counts.fill(0);
         for &c in &self.labels {
             self.counts[c as usize] += 1;
@@ -138,27 +143,6 @@ impl Engine {
             if self.labels[i] != dest
                 && sources.contains(&self.labels[i])
                 && mask[y.min(255) * 256 + x.min(255)] != 0
-            {
-                self.labels[i] = dest;
-                n += 1;
-            }
-        }
-        self.recount();
-        n
-    }
-    pub fn gate(
-        &mut self,
-        sources: &[u16],
-        dest: u16,
-        column: &[i8],
-        threshold: i32,
-        above: bool,
-    ) -> usize {
-        let mut n = 0;
-        for (i, &v) in column.iter().enumerate() {
-            if self.labels[i] != dest
-                && sources.contains(&self.labels[i])
-                && ((v as i32 >= threshold) == above)
             {
                 self.labels[i] = dest;
                 n += 1;
@@ -270,43 +254,6 @@ pub unsafe extern "C" fn engine_polygon(
     )
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_mask(
-    e: *mut Engine,
-    src: *const u16,
-    ns: usize,
-    dest: u16,
-    ax: usize,
-    ay: usize,
-    p: *const u8,
-) -> usize {
-    (*e).mask(
-        slice::from_raw_parts(src, ns),
-        dest,
-        ax,
-        ay,
-        slice::from_raw_parts(p, 65536),
-    )
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_gate(
-    e: *mut Engine,
-    src: *const u16,
-    ns: usize,
-    dest: u16,
-    p: *const i8,
-    threshold: i32,
-    above: u32,
-) -> usize {
-    let n = (*e).labels.len();
-    (*e).gate(
-        slice::from_raw_parts(src, ns),
-        dest,
-        slice::from_raw_parts(p, n),
-        threshold,
-        above != 0,
-    )
-}
-#[no_mangle]
 pub unsafe extern "C" fn engine_sort(e: *mut Engine) -> usize {
     (*e).sort_labels()
 }
@@ -359,14 +306,14 @@ mod tests {
         assert_eq!(e.counts[100], 0);
     }
     #[test]
-    fn waveform_gate_brush_and_sort() {
+    fn brush_mask_and_sort() {
         let mut e = Engine::new(4);
         e.labels = vec![0, 5, 5, 5];
         e.times = vec![1, 2, 3, 4];
         e.amplitudes = vec![0; 16];
         e.recount();
-        assert_eq!(e.gate(&[5], 7, &[-10, 20, 30, -10], 0, true), 2);
-        assert_eq!(e.labels, vec![0, 7, 7, 5]);
+        e.labels = vec![0, 7, 7, 5];
+        e.recount();
         e.sort_labels();
         assert_eq!(e.labels, vec![0, 1, 1, 2]);
         let mask = vec![1u8; 65536];

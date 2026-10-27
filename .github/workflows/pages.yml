@@ -25,6 +25,7 @@ jobs:
         with:
           workspaces: core
       - run: npm ci
+      - run: npm run lint
       - run: npm run test:rust
       - run: npm test
       - run: npm run build

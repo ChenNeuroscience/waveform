@@ -17,14 +17,9 @@ test("hover preserves waveform pixels and aligns the badge; tiles carry no sampl
   await ready(page);
   await expect(page).toHaveTitle(/demo_.* \[Waveform\]/);
   await expect(page.locator(".toolbar-title")).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Export cut", exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export cut", exact: true })).toHaveCount(0);
   await page.locator(".tile-wall").evaluate((el) => (el.scrollTop = 0));
-  await expect(page.locator(".tile-wave-canvas")).toHaveAttribute(
-    "data-density",
-    "ready",
-  );
+  await expect(page.locator(".tile-wave-canvas")).toHaveAttribute("data-density", "ready");
   const tile = page.locator('.cell-tile[data-cell="0"]'),
     badge = tile.locator(".tile-badge button"),
     bounds = (await tile.boundingBox())!;
@@ -41,26 +36,20 @@ test("hover preserves waveform pixels and aligns the badge; tiles carry no sampl
   expect(await badge.boundingBox()).toEqual(beforeBadge);
   const glow = page.locator("body > .tile-hover-glow");
   expect(await glow.boundingBox()).toEqual(bounds);
-  expect(
-    await glow.evaluate((el) => +getComputedStyle(el).zIndex),
-  ).toBeGreaterThan(
+  expect(await glow.evaluate((el) => +getComputedStyle(el).zIndex)).toBeGreaterThan(
     await page
       .locator(".desktop-toolbar")
       .evaluate((el) => parseInt(getComputedStyle(el).zIndex) || 0),
   );
-  expect(
-    await tile
-      .locator(".tile-waves")
-      .evaluate((el) => getComputedStyle(el).borderWidth),
-  ).toBe("0px");
+  expect(await tile.locator(".tile-waves").evaluate((el) => getComputedStyle(el).borderWidth)).toBe(
+    "0px",
+  );
   await expect(tile.locator(".tile-speed canvas")).toBeVisible();
   const speed = (await tile.locator(".tile-speed canvas").boundingBox())!,
     square = beforeBadge!;
   expect(speed.y - square.y - square.height).toBe(5);
   await expect(tile.locator(".stat-label").last()).toHaveText("n spikes");
-  await expect(tile.locator(".tile-caption")).not.toContainText(
-    /ISI|mean rate/i,
-  );
+  await expect(tile.locator(".tile-caption")).not.toContainText(/ISI|mean rate/i);
   await page.screenshot({ path: "test-results/original-hover-style.png" });
   await page.keyboard.down("Space");
   await tile.click({ position: { x: 45, y: 45 } });
@@ -108,8 +97,7 @@ test("feature corner labels survive Space copies; settings and divider positions
     const ink = (x: number, y: number) => {
       const a = ctx.getImageData(x, y, 20, 13).data;
       let n = 0;
-      for (let i = 0; i < a.length; i += 4)
-        if (a[i] < 150 && a[i + 1] < 150 && a[i + 2] < 150) n++;
+      for (let i = 0; i < a.length; i += 4) if (a[i] < 150 && a[i + 1] < 150 && a[i + 2] < 150) n++;
       return n;
     };
     return [ink(2, 2), ink(106, 113)];
@@ -125,12 +113,8 @@ test("feature corner labels survive Space copies; settings and divider positions
     .click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const settings = page.getByRole("dialog", { name: "Settings", exact: true });
-  await settings
-    .getByRole("checkbox", { name: "Isolate selected cell", exact: true })
-    .check();
-  await page
-    .getByRole("slider", { name: "Maximum speed shown", exact: true })
-    .fill("60");
+  await settings.getByRole("checkbox", { name: "Isolate selected cell", exact: true }).check();
+  await page.getByRole("slider", { name: "Maximum speed shown", exact: true }).fill("60");
   const window = (await settings.boundingBox())!;
   await page.mouse.move(window.x + 50, window.y + 12);
   await page.mouse.down();
@@ -138,19 +122,13 @@ test("feature corner labels survive Space copies; settings and divider positions
   await page.mouse.up();
   await expect
     .poll(() =>
-      page.evaluate(
-        () =>
-          JSON.parse(localStorage.getItem("waveform-ui:panes") || "{}").left,
-      ),
+      page.evaluate(() => JSON.parse(localStorage.getItem("waveform-ui:panes") || "{}").left),
     )
     .toBe(600);
   await expect
     .poll(() =>
       page.evaluate(
-        () =>
-          JSON.parse(
-            localStorage.getItem("waveform-ui:window:settings") || "{}",
-          ).x,
+        () => JSON.parse(localStorage.getItem("waveform-ui:window:settings") || "{}").x,
       ),
     )
     .toBeGreaterThan(800);
@@ -160,13 +138,14 @@ test("feature corner labels survive Space copies; settings and divider positions
   await ready(page);
   const left = (await page.locator(".left-workspace").boundingBox())!;
   expect(left.width).toBe(563);
-  await expect(
-    page.getByRole("button", { name: "Waveforms", exact: true }),
-  ).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "Waveforms", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(
-    page.getByRole("slider", { name: "Maximum speed shown", exact: true }),
-  ).toHaveValue("60");
+  await expect(page.getByRole("slider", { name: "Maximum speed shown", exact: true })).toHaveValue(
+    "60",
+  );
   await expect(
     settings.getByRole("checkbox", {
       name: "Isolate selected cell",
@@ -221,17 +200,11 @@ test("browser reload/close modifiers do not toggle plots before the leave warnin
   await ready(page);
   const waves = page.getByRole("button", { name: "Waveforms", exact: true }),
     rate = page.getByRole("button", { name: "Spatial rate", exact: true });
-  for (const modifiers of [
-    { ctrlKey: true },
-    { metaKey: true },
-    { altKey: true },
-  ]) {
+  for (const modifiers of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
     for (const key of ["r", "w"])
       await page.evaluate(
         ({ key, modifiers }) =>
-          window.dispatchEvent(
-            new KeyboardEvent("keydown", { key, bubbles: true, ...modifiers }),
-          ),
+          window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...modifiers })),
         { key, modifiers },
       );
     await expect(waves).toHaveAttribute("aria-pressed", "true");
@@ -274,30 +247,18 @@ test("compact toolbar replaces the footer; feature grid centres without experime
   const toolbar = (await page.locator(".desktop-toolbar").boundingBox())!,
     status = (await details.boundingBox())!;
   expect(status.y).toBeGreaterThanOrEqual(toolbar.y);
-  expect(status.y + status.height).toBeLessThanOrEqual(
-    toolbar.y + toolbar.height,
-  );
+  expect(status.y + status.height).toBeLessThanOrEqual(toolbar.y + toolbar.height);
   expect(status.x).toBeGreaterThan(1000);
-  await expect(page.locator(".feature-pane input[type=checkbox]")).toHaveCount(
-    0,
-  );
+  await expect(page.locator(".feature-pane input[type=checkbox]")).toHaveCount(0);
   await expect(page.locator(".wave-gate")).toHaveCount(0);
-  await expect(
-    page.getByText("Split by waveform sample", { exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByText("Split by waveform sample", { exact: true })).toHaveCount(0);
   const centred = async () => {
     const stage = (await page.locator(".feature-stage").boundingBox())!,
       grid = (await page.locator(".clusters").boundingBox())!;
-    const clientWidth = await page
-      .locator(".feature-stage")
-      .evaluate((el) => el.clientWidth);
-    expect(
-      Math.abs(grid.x - stage.x - (clientWidth - grid.width) / 2),
-    ).toBeLessThanOrEqual(1);
+    const clientWidth = await page.locator(".feature-stage").evaluate((el) => el.clientWidth);
+    expect(Math.abs(grid.x - stage.x - (clientWidth - grid.width) / 2)).toBeLessThanOrEqual(1);
     if (grid.height <= stage.height)
-      expect(
-        Math.abs(grid.y - stage.y - (stage.height - grid.height) / 2),
-      ).toBeLessThanOrEqual(1);
+      expect(Math.abs(grid.y - stage.y - (stage.height - grid.height) / 2)).toBeLessThanOrEqual(1);
     else expect(grid.y).toBe(stage.y); // Overflow must remain scrollable from the first row.
   };
   await centred();

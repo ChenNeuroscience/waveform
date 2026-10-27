@@ -1,9 +1,6 @@
 import { mkdir, open } from "node:fs/promises";
 const dir = process.argv[2];
-if (!dir)
-  throw new Error(
-    "Usage: node scripts/make-stress.mjs /absolute/temporary/directory",
-  );
+if (!dir) throw new Error("Usage: node scripts/make-stress.mjs /absolute/temporary/directory");
 await mkdir(dir, { recursive: true });
 const n = 9_000_000,
   chunk = 32768,

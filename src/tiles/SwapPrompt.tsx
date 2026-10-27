@@ -1,5 +1,15 @@
 import { useState } from "react";
-import type { SwapState } from "./types";
+import type { SwapState } from "../types";
+
+/** Why a typed swap target is invalid, or "" if it is fine. */
+function swapError(value: string, source: number, groups: number) {
+  const target = Number(value);
+  if (!value.trim() || !Number.isInteger(target) || target < 0 || target >= groups) {
+    return `Enter a group number from 0 to ${groups - 1}.`;
+  }
+  return target === source ? "Choose a different group." : "";
+}
+
 export function SwapPrompt({
   state,
   counts,
@@ -11,34 +21,32 @@ export function SwapPrompt({
   onGroup: (group: number) => void;
   onCancel: () => void;
 }) {
-  const [value, setValue] = useState(""),
-    [error, setError] = useState("");
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
   const source = state.source;
+  const cancelOnEscape = (event: React.KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+    }
+  };
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const problem = swapError(value, source, counts.length);
+    if (problem) {
+      setError(problem);
+    } else {
+      onGroup(Number(value));
+    }
+  };
   return (
     <form
       className="swap-prompt"
       role="region"
       aria-label="Swap groups"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          onCancel();
-        }
-      }}
-      onSubmit={(event) => {
-        event.preventDefault();
-        const target = Number(value);
-        if (
-          !value.trim() ||
-          !Number.isInteger(target) ||
-          target < 0 ||
-          target >= counts.length
-        )
-          setError(`Enter a group number from 0 to ${counts.length - 1}.`);
-        else if (target === source) setError("Choose a different group.");
-        else onGroup(target);
-      }}
+      onKeyDown={cancelOnEscape}
+      onSubmit={submit}
     >
       <div className="swap-instructions" role="status">
         Swap group {source}: click or type a group to swap with. Esc to cancel.
