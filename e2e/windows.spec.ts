@@ -113,7 +113,9 @@ test("Copying a cell puts its text and each plot separately on the clipboard", a
   await ready(page);
   await page.locator('.cell-tile[data-cell="1"] .tile-badge button').click();
   await page.keyboard.press("ControlOrMeta+c");
-  await expect(page.getByText("Cell 1 copied to clipboard.")).toBeVisible();
+  await expect
+    .poll(async () => (await readClipboard(page).catch(() => ({ text: "" }))).text)
+    .toMatch(/cell 1 · /);
   const clipboard = await readClipboard(page);
   expect(clipboard.types).not.toContain("image/png");
   expect(clipboard.text).toMatch(/T\d+ · cell 1 · [\d,]+ spikes/);

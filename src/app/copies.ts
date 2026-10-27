@@ -143,11 +143,11 @@ export function useCopies({
 
   /** Put cells on the clipboard. The item is handed over at once (keeping the key
    * press or click that allows it) and filled when the plots are captured; a
-   * newer write makes an older one fail quietly. Resolves whether it succeeded. */
+   * newer write makes an older one fail quietly. */
   const writeClipboard = async (cells: number[]) => {
     const wall = tileWall.current;
     if (!wall || !data) {
-      return false;
+      return;
     }
     const id = ++latestWrite.current;
     const counts = data.counts;
@@ -163,21 +163,17 @@ export function useCopies({
         "text/plain": content.then(({ text }) => new Blob([text], { type: "text/plain" })),
       });
       await navigator.clipboard.write([item]);
-      return true;
     } catch (error) {
       if (id === latestWrite.current && !(error instanceof StaleCopy)) {
         throw error;
       }
-      return false;
     }
   };
 
   /** Copy the selected cell (or download its tile if the clipboard is unavailable). */
   const copyToClipboard = async () => {
     try {
-      if (await writeClipboard([cell])) {
-        onNotice(`Cell ${cell} copied to clipboard.`);
-      }
+      await writeClipboard([cell]);
     } catch {
       captureTile(cell, `${trial?.name} · T${tetNum} · cell ${cell}`)?.toBlob((blob) => {
         if (blob) {
@@ -217,5 +213,6 @@ export function useCopies({
   };
 
   const close = (id: string) => setCopies((cs) => cs.filter((c) => c.id !== id));
-  return { copies, popOut, popPlot, copyToClipboard, copyMode, close };
+  const closeAll = () => setCopies([]);
+  return { copies, popOut, popPlot, copyToClipboard, copyMode, close, closeAll };
 }

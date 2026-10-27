@@ -15,10 +15,13 @@ function savedSelection(value: any): RecordingSelection | null {
     ? value
     : null;
 }
-/** Only recording choices enter browser history. Edits refresh the current entry. */
+/** Only recording choices enter browser history; edits refresh the current entry.
+ * The start screen is an entry too (selection null), so the first recording opened
+ * is pushed after it and Back returns home. */
 export function useRecordingHistory(
   selection: RecordingSelection | null,
-  restore: (selection: RecordingSelection, current: () => boolean) => void | Promise<void>,
+  /** Show a selection, or the start screen for null. */
+  restore: (selection: RecordingSelection | null, current: () => boolean) => void | Promise<void>,
 ) {
   const workspace = useRef(crypto.randomUUID());
   const selected = useRef(selection);
@@ -27,12 +30,22 @@ export function useRecordingHistory(
   const restoring = useRef(false);
   selected.current = selection;
   callback.current = restore;
-  const entry = (next: RecordingSelection) => ({
+  const entry = (next: RecordingSelection | null) => ({
     ...(history.state && typeof history.state === "object" ? history.state : {}),
     waveform: { workspace: workspace.current, selection: next },
   });
+  // Whether the current history entry is this workspace's start screen.
+  const atHome = () => {
+    const state = history.state?.waveform;
+    return state?.workspace === workspace.current && !state.selection;
+  };
   useEffect(() => {
-    if (selection && !restoring.current) {
+    if (restoring.current) {
+      return;
+    }
+    if (selection && atHome()) {
+      history.pushState(entry(selection), "");
+    } else {
       history.replaceState(entry(selection), "");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- replace the history entry only when the selection's identity changes
@@ -41,7 +54,7 @@ export function useRecordingHistory(
     const pop = async (event: PopStateEvent) => {
       const state = event.state?.waveform;
       const next = savedSelection(state?.selection);
-      if (!next || state.workspace !== workspace.current) {
+      if (state?.workspace !== workspace.current || (state.selection && !next)) {
         return;
       }
       const token = ++version.current;
@@ -57,7 +70,8 @@ export function useRecordingHistory(
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
   }, []);
-  return (next: RecordingSelection) => {
+  /** Choose a recording, adding a history entry. */
+  const push = (next: RecordingSelection) => {
     ++version.current;
     restoring.current = false;
     if (same(selected.current, next)) {
@@ -69,4 +83,13 @@ export function useRecordingHistory(
     }
     history.pushState(entry(next), "");
   };
+  /** Go to the start screen, adding a history entry. */
+  const pushHome = () => {
+    ++version.current;
+    restoring.current = false;
+    if (!atHome()) {
+      history.pushState(entry(null), "");
+    }
+  };
+  return { push, pushHome };
 }

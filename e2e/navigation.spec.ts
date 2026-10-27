@@ -132,3 +132,32 @@ test("arrow keys step trials (up/down), tetrodes (left/right) and a tetrode's cu
   await expect.poll(async () => (await selection(page)).cutId).toBe(start.cutId);
   expect((await selection(page)).tetNum).toBe(1);
 });
+test("opening files adds a history entry after the start screen; the icon goes home after confirming", async ({
+  page,
+}) => {
+  await page.goto("/?demo=quick");
+  const start = await length(page);
+  const tryDemo = page.getByRole("button", { name: "Try it now with simulated data", exact: true });
+  await tryDemo.click();
+  await ready(page);
+  expect(await length(page)).toBe(start + 1);
+  await page.goBack();
+  await expect(tryDemo).toBeVisible();
+  await expect(page.locator(".desktop-toolbar")).toHaveCount(0);
+  await tryDemo.click();
+  await ready(page);
+  const home = page.getByRole("button", { name: "Return to the start screen", exact: true });
+  const confirm = page.getByRole("dialog", { name: "Return to the start screen", exact: true });
+  await home.click();
+  await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(confirm).toHaveCount(0);
+  await home.click();
+  await page.keyboard.press("Escape");
+  await expect(confirm).toHaveCount(0);
+  await expect(page.locator(".desktop-toolbar")).toBeVisible();
+  await home.click();
+  await confirm.getByRole("button", { name: "Close files", exact: true }).click();
+  await expect(tryDemo).toBeVisible();
+  // The start screen is a new entry, so Back is still available.
+  expect(await page.evaluate(() => history.state.waveform.selection)).toBeNull();
+});

@@ -153,9 +153,16 @@ test("favicon and compact tile corners; extra filter, time controls and channel 
   await expect(page.getByRole("slider", { name: "Time window start", exact: true })).toHaveCount(0);
   await expect(page.getByRole("slider", { name: "Time window end", exact: true })).toHaveCount(0);
   await expect(page.locator(".wave-channel-names")).toHaveCount(0);
-  const icon = await page.locator("link[rel=icon]").getAttribute("href");
-  const response = await page.request.get(new URL(icon!, page.url()).href);
-  expect(await response.body()).toEqual(await readFile("favicon.ico"));
+  for (const [type, file] of [
+    ["image/svg+xml", "img/icon.svg"],
+    ["", "favicon.ico"],
+  ]) {
+    const link = page.locator(type ? `link[rel=icon][type="${type}"]` : "link[rel=icon][sizes]");
+    const response = await page.request.get(
+      new URL((await link.getAttribute("href"))!, page.url()).href,
+    );
+    expect(await response.body()).toEqual(await readFile(file));
+  }
   const tile = page.locator('.cell-tile[data-cell="1"]'),
     row = (await tile.boundingBox())!,
     waves = (await tile.locator(".tile-waves").boundingBox())!,

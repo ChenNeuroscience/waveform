@@ -404,6 +404,7 @@ export default function App() {
     copyToClipboard,
     copyMode,
     close: closeCopy,
+    closeAll: closeAllCopies,
   } = useCopies({
     trial,
     tetNum,
@@ -516,17 +517,58 @@ export default function App() {
     onFinishing: () => setHoverCell(null),
     status: { setBusy, setProgress, setMessage, setError },
   });
-  const pushSelection = useRecordingHistory(
+  // Close every file and return to the start screen.
+  const resetToStart = () => {
+    ++loadGen.current; // Ignore replies for the closed recording.
+    setTrials([]);
+    setTrialId("");
+    setTetNum(1);
+    setCutId("");
+    setData(null);
+    setBusy(false);
+    setSwap(null);
+    copyMode.end();
+    closeAllCopies();
+    setTileFeedback(null);
+    setDragComparison(null);
+    hoverTile(null);
+    setPanels([]);
+    setPane(null);
+    setError("");
+    setNotice("");
+    lastCuts.current.clear();
+    dirtySessions.current.clear();
+  };
+  const { push: pushSelection, pushHome } = useRecordingHistory(
     trial && tet?.file ? { trialId, tetNum, cutId } : null,
     async (next, current) => {
+      // Back to the start screen loses unexported edits, so ask first.
+      if (!next && dirtySessions.current.size) {
+        if (!confirm("Close these files? Unexported cut edits will be lost.")) {
+          history.forward();
+          return;
+        }
+      }
       if (splitPoint) {
         await finishSplit(true);
       }
-      if (current()) {
+      if (!current()) {
+        return;
+      }
+      if (next) {
         applySelection(next);
+      } else {
+        resetToStart();
       }
     },
   );
+  const goHome = async () => {
+    if (splitPoint) {
+      await finishSplit(true);
+    }
+    pushHome();
+    resetToStart();
+  };
   const selectSource = (group: number, toggle = false) => {
     setSources((current) => nextSources(current, group, toggle));
   };
@@ -797,6 +839,8 @@ export default function App() {
           {toolbar ? (
             <Toolbar
               {...{ data, ready, busy, progress, message, shown }}
+              unexported={dirtySessions.current.size > 0}
+              onHome={goHome}
               onOpenFiles={openFiles}
               onOpenFolder={openFolder}
               onOperation={operation}
