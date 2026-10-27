@@ -25,7 +25,7 @@ export class CutDownloads {
     if (this.pending.has(key)) return this.pending.get(key)!;
     const promise = (async () => {
       const bytes = cut.local
-        ? await request<Blob>("export_cut", {
+        ? await request("export_cut", {
             session: `${tet.id}|${fileIdentity(tet.file!)}|${cut.id}`,
             revision: cut.revision,
             trial: trial.name,

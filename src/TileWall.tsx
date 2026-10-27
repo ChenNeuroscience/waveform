@@ -201,7 +201,7 @@ export function TileWall({
     if (!missing.length) return;
     Promise.all(
       missing.map((cell) =>
-        request<AnalysisData>("analysis", {
+        request("analysis", {
           session: data.session,
           cell,
           pos,
@@ -232,7 +232,7 @@ export function TileWall({
     const g = new WaveGPU(
       waveCanvas.current,
       (asset, first, count) =>
-        request<{ waves: Uint8Array }>("wave_batch", {
+        request("wave_batch", {
           asset,
           first,
           count,

@@ -103,7 +103,7 @@ interface Props {
   onTool: (s: string) => void;
   onToggle: (m: PlotMode, multiple: boolean) => void;
   onPanel: (p: "settings" | "history" | "headers" | "help") => void;
-  onOperation: (type: string, p?: Record<string, unknown>) => void;
+  onOperation: (type: "undo" | "redo") => void;
   onPolygon: (p: number[], a: number, b: number) => void;
   onDemo: () => void;
   onError: () => void;

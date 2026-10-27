@@ -21,6 +21,12 @@ import {
   withF32,
   type Core,
 } from "./wasm";
+import type {
+  PositionRequest,
+  RequestType,
+  WorkerMessage,
+  WorkerResult,
+} from "./protocol";
 interface Asset {
   key: string;
   wasm: Core;
@@ -329,12 +335,12 @@ async function waveformColumn(
       ),
   );
 }
-const positionKey = (m: any) =>
+const positionKey = (m: PositionRequest) =>
   m.pos
     ? `${m.posKey}|${m.settings.leds}|${m.settings.maxSpeed}|${m.settings.posSmooth}`
     : "";
 /** The processed position for a request, parsed once per file and LED/speed settings. */
-async function positionFor(m: any, w: Core) {
+async function positionFor(m: PositionRequest, w: Core) {
   const pk = positionKey(m);
   let pos = positions.get(pk);
   if (m.pos && !pos) {
@@ -349,7 +355,7 @@ async function positionFor(m: any, w: Core) {
   }
   return pos;
 }
-async function handle(m: any): Promise<any> {
+async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
   if (
     splitState &&
     !["split", "analysis", "trajectory", "wave_batch"].includes(m.type)
@@ -459,14 +465,8 @@ async function handle(m: any): Promise<any> {
     w = a.wasm,
     e = a.e;
   let s = active;
-  if (m.session && m.session !== s.key)
+  if ("session" in m && m.session && m.session !== s.key)
     throw new Error("The active cut changed; retry the operation.");
-  if (m.type === "clone_cut") {
-    await saveActive();
-    s = forkSession(s, m.newCut);
-    acceptSession(s);
-    return view(a, s, true);
-  }
   if (m.type === "split") {
     try {
       if (m.phase === "preview") {
@@ -667,11 +667,12 @@ async function handle(m: any): Promise<any> {
   }
   if (m.type === "export") return exportLabels(w, e, a.n, m.trial, m.format);
 
-  throw new Error(`Unknown operation: ${m.type}`);
+  // Unreachable while every request type is handled above (m is `never` here).
+  throw new Error(`Unknown operation: ${(m as { type: string }).type}`);
 }
 let queue = Promise.resolve();
 self.onmessage = (event: MessageEvent) => {
-  const m = event.data;
+  const m = event.data as WorkerMessage | { type: "init"; url: string };
   if (m.type === "init") {
     wasmPromise = fetch(m.url)
       .then(async (r) => {

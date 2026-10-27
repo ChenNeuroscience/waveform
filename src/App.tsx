@@ -28,6 +28,7 @@ import {
   type SwapState,
   type TileFeedback,
 } from "./types";
+import type { EditRequest } from "./protocol";
 const fmt = (n: number) => n.toLocaleString("en-GB");
 const compact = (n: number) =>
   n >= 1e6
@@ -312,7 +313,7 @@ export default function App() {
       setTrajectory(null);
       return;
     }
-    request<Trajectory | null>("trajectory", {
+    request("trajectory", {
       pos: trial.pos,
       posKey: `${trial.id}|${fileId(trial.pos)}`,
       settings,
@@ -336,12 +337,13 @@ export default function App() {
   const comparisonKey = `${data?.session}|${data?.revision}|${trial?.id}|${trial?.pos ? fileId(trial.pos) : ""}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}|${dragComparison?.target}`;
   useEffect(() => {
     let live = true;
-    if (!data || busy || dragComparison?.target == null) return;
+    const target = dragComparison?.target;
+    if (!data || busy || target == null) return;
     const timeout = setTimeout(
       () =>
-        request<AnalysisData>("analysis", {
+        request("analysis", {
           session: data.session,
-          cell: dragComparison.target,
+          cell: target,
           pos: trial?.pos,
           posKey: trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : "",
           settings,
@@ -379,7 +381,7 @@ export default function App() {
     const gen = ++analysisGen.current;
     const t = setTimeout(
       () =>
-        request<AnalysisData>("analysis", {
+        request("analysis", {
           session: data.session,
           cell: displayCell,
           pos: trial?.pos,
@@ -468,9 +470,11 @@ export default function App() {
     const timer = setTimeout(() => prepareCut(trial, tet, cut), 150);
     return () => clearTimeout(timer);
   }, [cut?.id, cut?.revision, busy, splitPoint]);
+  // Edits and undo/redo of the active cut; the first edit of an original also
+  // names the new local cut.
   const operation = async (
-    type: string,
-    payload: Record<string, unknown> = {},
+    type: "edit" | "undo" | "redo",
+    payload: Partial<EditRequest> = {},
   ) => {
     if (!ready) return;
     setSwap(null);
@@ -486,7 +490,7 @@ export default function App() {
           session: data!.session,
           ...(type === "edit" && !cut?.local ? { newCut: newCut() } : {}),
           ...payload,
-        },
+        } as EditRequest,
         (p, m) => {
           if (generation === loadGen.current) {
             setProgress(p);
@@ -673,7 +677,7 @@ export default function App() {
   const exportCut = async () => {
     if (!ready) return;
     try {
-      const b = await request<Blob>("export", {
+      const b = await request("export", {
         session: data!.session,
         format: "cut",
         trial: trial!.name,
@@ -885,7 +889,7 @@ export default function App() {
       const stress =
         new URLSearchParams(location.search).get("demo") === "stress";
       const seed = quick ? 4271 : crypto.getRandomValues(new Uint32Array(1))[0];
-      const files = await request<File[]>(
+      const files = await request(
         "demo",
         { options: { quick, stress, seed } },
         (value, message) => {

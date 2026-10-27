@@ -1,4 +1,5 @@
 import type { ViewData, ViewMessage } from "./types";
+import type { Payload, RequestType, Result } from "./protocol";
 import wasmUrl from "./generated/waveform_core.wasm?url";
 const worker = new Worker(new URL("./engine.worker.ts", import.meta.url), {
   type: "module",
@@ -50,11 +51,11 @@ worker.onerror = (e) => {
     p.reject(new Error(e.message || "Data worker failed."));
   pending.clear();
 };
-export function request<T = ViewData>(
-  type: string,
-  payload: Record<string, unknown> = {},
+export function request<K extends RequestType>(
+  type: K,
+  payload: Payload<K>,
   progress?: (n: number, message: string) => void,
-): Promise<T> {
+): Promise<Result<K>> {
   return new Promise((resolve, reject) => {
     const n = ++id;
     pending.set(n, { resolve, reject, progress });
