@@ -1,7 +1,130 @@
 /** Tool-window panels: settings, help/shortcuts and file headers. */
-import { useState } from "react";
-import { Search } from "lucide-react";
-import type { Settings } from "./types";
+import { useState, type ReactNode } from "react";
+import { History, Redo2, Search, Undo2 } from "lucide-react";
+import type { HistoryEntry, Settings } from "./types";
+
+export type PanelName = "settings" | "history" | "headers" | "help";
+/** Everything the tool panels read or act on, assembled once by App. */
+export interface PanelContext {
+  settings: Settings;
+  update: <K extends keyof Settings>(k: K, v: Settings[K]) => void;
+  resetSettings: () => void;
+  isolate: boolean;
+  setIsolate: (v: boolean) => void;
+  ready: boolean;
+  operation: (type: "undo" | "redo") => void;
+  renumber: () => void;
+  history: { undo: HistoryEntry[]; redo: HistoryEntry[] } | null;
+  headers: Record<string, Record<string, string>>;
+}
+/** Each tool panel's window title, default placement and content. */
+export const TOOL_PANELS: Record<
+  PanelName,
+  {
+    title: string;
+    x: number;
+    y: number;
+    height: number;
+    render: (c: PanelContext) => ReactNode;
+  }
+> = {
+  settings: {
+    title: "Settings",
+    x: 35,
+    y: 65,
+    height: 560,
+    render: (c) => (
+      <SettingsPanel
+        settings={c.settings}
+        update={c.update}
+        onReset={c.resetSettings}
+        isolate={c.isolate}
+        onIsolate={c.setIsolate}
+        ready={c.ready}
+        onRenumber={c.renumber}
+      />
+    ),
+  },
+  history: {
+    title: "Edit history",
+    x: 35,
+    y: 105,
+    height: 460,
+    render: (c) => <HistoryPanel c={c} />,
+  },
+  headers: {
+    title: "File headers",
+    x: 410,
+    y: 65,
+    height: 460,
+    render: (c) => <HeadersPanel headers={c.headers} />,
+  },
+  help: {
+    title: "Keyboard shortcuts",
+    x: 35,
+    y: 65,
+    height: 460,
+    render: () => <HelpPanel />,
+  },
+};
+const fmt = (n: number) => n.toLocaleString("en-GB");
+function HistoryPanel({ c }: { c: PanelContext }) {
+  return (
+    <>
+      <p className="muted">
+        Each cut keeps its own undo and redo history when you switch trials or
+        tetrodes.
+      </p>
+      <div className="history-actions">
+        <button
+          disabled={!c.ready || !c.history?.undo.length}
+          className="secondary"
+          onClick={() => c.operation("undo")}
+        >
+          <Undo2 size={14} /> Undo
+        </button>
+        <button
+          disabled={!c.ready || !c.history?.redo.length}
+          className="secondary"
+          onClick={() => c.operation("redo")}
+        >
+          <Redo2 size={14} /> Redo
+        </button>
+      </div>
+      <div className="history-list">
+        {c.history?.undo.length ? (
+          c.history.undo.map((h, i) => (
+            <div key={h.id}>
+              <span className="history-index">{i + 1}</span>
+              <div>
+                <b>{h.description}</b>
+                <small>{fmt(h.changed)} spikes changed</small>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="empty-history">
+            <History size={27} />
+            <p>No edits yet.</p>
+            <small>Merge, swap, or lasso spikes to start a cut.</small>
+          </div>
+        )}
+        {c.history?.redo
+          .slice()
+          .reverse()
+          .map((h) => (
+            <div className="undone" key={h.id}>
+              <Redo2 size={13} />
+              <div>
+                <b>{h.description}</b>
+                <small>Undone · available to redo</small>
+              </div>
+            </div>
+          ))}
+      </div>
+    </>
+  );
+}
 
 export function SettingsPanel({
   settings,

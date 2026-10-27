@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { History, Redo2, Undo2 } from "lucide-react";
 import { DesktopShell } from "./DesktopShell";
 import type { DragComparison } from "./tile-gestures";
 import { FloatingWindow } from "./FloatingWindow";
@@ -29,7 +28,7 @@ import {
   type TileFeedback,
 } from "./types";
 import { Superseded, type EditRequest } from "./protocol";
-import { HeadersPanel, HelpPanel, SettingsPanel } from "./panels";
+import { TOOL_PANELS, type PanelContext, type PanelName } from "./panels";
 import { useShortcuts } from "./shortcuts";
 const fmt = (n: number) => n.toLocaleString("en-GB");
 function readSettings(): Settings {
@@ -58,8 +57,7 @@ function download(blob: Blob, name: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
-type Pane = "settings" | "history" | "headers" | "help" | null;
-type Panel = Exclude<Pane, null>;
+type Pane = PanelName | null;
 export default function App() {
   const [trials, setTrials] = useState<Trial[]>([]),
     [trialId, setTrialId] = useState(""),
@@ -96,7 +94,7 @@ export default function App() {
           },
     );
   const [pane, setPane] = useState<Pane>(null),
-    [panels, setPanels] = useState<Panel[]>([]),
+    [panels, setPanels] = useState<PanelName[]>([]),
     [grabMode, setGrabMode] = useState(false),
     [hoverCell, setHoverCell] = useState<number | null>(null),
     [dragComparison, setDragComparison] = useState<DragComparison | null>(null),
@@ -865,6 +863,23 @@ export default function App() {
     else files.push(...Array.from(e.dataTransfer.files));
     if (files.length) await importFiles(files);
   };
+  const panelContext: PanelContext = {
+    settings,
+    update,
+    resetSettings: () => setSettings(defaultSettings),
+    isolate,
+    setIsolate,
+    ready,
+    operation: (type) => operation(type),
+    renumber: () =>
+      operation("edit", {
+        action: "sort",
+        dest: 0,
+        description: "Renumber cells by spike count (preserve noise 0)",
+      }),
+    history: data,
+    headers: data?.headers || {},
+  };
   return (
     <DesktopShell
       trials={trials}
@@ -972,119 +987,28 @@ export default function App() {
       onDrag={setDrag}
       onDrop={drop}
     >
-      {panels.map((pane) => (
-        <FloatingWindow
-          key={pane}
-          preferenceKey={`window:${pane}`}
-          grabMode={grabMode}
-          label={
-            {
-              settings: "Settings",
-              history: "Edit history",
-              headers: "File headers",
-              help: "Keyboard shortcuts",
-            }[pane]
-          }
-          title={
-            {
-              settings: "Settings",
-              history: "Edit history",
-              headers: "File headers",
-              help: "Keyboard shortcuts",
-            }[pane]
-          }
-          x={pane === "headers" ? 410 : 35}
-          y={pane === "history" ? 105 : 65}
-          height={pane === "settings" ? 560 : 460}
-          onFocus={() => setPane(pane)}
-          onClose={() => {
-            setPanels((ps) => ps.filter((p) => p !== pane));
-            setPane(null);
-          }}
-        >
-          <div className="drawer-content">
-            {pane === "settings" && (
-              <SettingsPanel
-                settings={settings}
-                update={update}
-                onReset={() => setSettings(defaultSettings)}
-                isolate={isolate}
-                onIsolate={setIsolate}
-                ready={ready}
-                onRenumber={() =>
-                  operation("edit", {
-                    action: "sort",
-                    dest: 0,
-                    description:
-                      "Renumber cells by spike count (preserve noise 0)",
-                  })
-                }
-              />
-            )}
-            {pane === "history" && (
-              <>
-                <p className="muted">
-                  Each cut keeps its own undo and redo history when you switch
-                  trials or tetrodes.
-                </p>
-                <div className="history-actions">
-                  <button
-                    disabled={!ready || !data?.undo.length}
-                    className="secondary"
-                    onClick={() => operation("undo")}
-                  >
-                    <Undo2 size={14} /> Undo
-                  </button>
-                  <button
-                    disabled={!ready || !data?.redo.length}
-                    className="secondary"
-                    onClick={() => operation("redo")}
-                  >
-                    <Redo2 size={14} /> Redo
-                  </button>
-                </div>
-                <div className="history-list">
-                  {data?.undo.length ? (
-                    data.undo.map((h, i) => (
-                      <div key={h.id}>
-                        <span className="history-index">{i + 1}</span>
-                        <div>
-                          <b>{h.description}</b>
-                          <small>{fmt(h.changed)} spikes changed</small>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="empty-history">
-                      <History size={27} />
-                      <p>No edits yet.</p>
-                      <small>
-                        Merge, swap, or lasso spikes to start a cut.
-                      </small>
-                    </div>
-                  )}
-                  {data?.redo
-                    .slice()
-                    .reverse()
-                    .map((h) => (
-                      <div className="undone" key={h.id}>
-                        <Redo2 size={13} />
-                        <div>
-                          <b>{h.description}</b>
-                          <small>Undone · available to redo</small>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </>
-            )}
-            {pane === "headers" && (
-              <HeadersPanel headers={data?.headers || {}} />
-            )}
-            {pane === "help" && <HelpPanel />}
-          </div>
-        </FloatingWindow>
-      ))}
+      {panels.map((name) => {
+        const panel = TOOL_PANELS[name];
+        return (
+          <FloatingWindow
+            key={name}
+            preferenceKey={`window:${name}`}
+            grabMode={grabMode}
+            label={panel.title}
+            title={panel.title}
+            x={panel.x}
+            y={panel.y}
+            height={panel.height}
+            onFocus={() => setPane(name)}
+            onClose={() => {
+              setPanels((ps) => ps.filter((p) => p !== name));
+              setPane(null);
+            }}
+          >
+            <div className="drawer-content">{panel.render(panelContext)}</div>
+          </FloatingWindow>
+        );
+      })}
       {copies.map((c) => (
         <FloatingWindow
           key={c.id}
