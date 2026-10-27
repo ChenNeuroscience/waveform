@@ -1464,24 +1464,43 @@ kbd {
   min-width: 5px;
 }
 .tetrode-file-block > button {
-  font-size: 0;
-  width: 5px;
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  justify-content: flex-start;
+  max-width: 5px;
   min-width: 5px;
   height: 17px;
   min-height: 17px;
   padding: 0;
   border: 1px solid #888;
   background: #eee;
+  /* Collapsed slivers keep their label, hidden, so selecting a tetrode can
+     animate them open: max-width animates where width: auto cannot. */
+  transition:
+    max-width 0.22s ease,
+    min-width 0.22s ease,
+    padding 0.22s ease,
+    color 0.18s ease,
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+/* Scoped to .trial-tetrodes to outrank the later cut text colours. */
+.trial-tetrodes .tetrode-file-block:not(.expanded) > button {
+  color: transparent;
 }
 .tetrode-file-block > button.cut-file {
   background: #e4ddd0;
 }
 .tetrode-file-block.expanded > button {
-  font-size: 9px;
-  width: auto;
+  max-width: 160px;
   min-width: 25px;
-  white-space: nowrap;
   padding: 0 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tetrode-file-block > button {
+    transition: none;
+  }
 }
 .tetrode-file-block > button.active {
   background: #6e2020;
@@ -1885,6 +1904,35 @@ kbd {
 }
 .tetrode-file-block > button.local-cut:active {
   cursor: grabbing;
+}
+/* A raw tetrode selected without a cut is neutral, unlike a selected cut. */
+.tetrode-file-block > button.active:not(.cut-file) {
+  background: #444;
+  border-color: #222;
+  color: white;
+}
+/* Hover deepens each button's own colour (the generic blue hover would hide
+   which kind of file it is); selected buttons lighten slightly instead. */
+.tetrode-file-block > button:hover:not(:disabled) {
+  background: #d6d6d6;
+  border-color: #333;
+}
+.tetrode-file-block > button.cut-file:hover:not(:disabled) {
+  background: #f99;
+  border-color: #300;
+}
+.tetrode-file-block > button.local-cut:hover:not(:disabled) {
+  background: #99e;
+  border-color: #003;
+}
+.tetrode-file-block > button.active:not(.cut-file):hover {
+  background: #5a5a5a;
+}
+.tetrode-file-block > button.cut-file.active:hover {
+  background: #722;
+}
+.tetrode-file-block > button.local-cut.active:hover {
+  background: #227;
 }
 
 .tetrode-file-block.expanded {
