@@ -9,7 +9,7 @@ import { experimentTiming } from "../src/position-info";
 import { groupRgb8, groupTextColor } from "../src/palette";
 it("matches every original palette byte and every badge contrast colour", async () => {
   const html = await readFile(
-    new URL("../palettes.html", import.meta.url),
+    new URL("./fixtures/v1-palettes.html", import.meta.url),
     "utf8",
   );
   const original = new Function(
