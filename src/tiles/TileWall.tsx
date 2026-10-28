@@ -74,7 +74,7 @@ function tileSizes(shown: VisiblePlots) {
   const tileWidth = wavePixels + numericWidth + 3;
   // Without numeric plots the badge sits over the waveforms' right edge.
   const waveFrameWidth = numericWidth ? wavePixels : Math.max(0, wavePixels - 24);
-  const waveFrameHeight = waveFrameWidth / 4;
+  const waveFrameHeight = shown.waveforms ? ROW : 0;
   return {
     tuningWidth,
     numericWidth,
@@ -280,7 +280,13 @@ export function TileWall({
         }
         const canvas = document.createElement("canvas");
         const maxRate = mode === "spatial" ? settings.maxRate : 0;
-        drawAnalysis(canvas, size.width, size.height, { data: a, mode, maxRate, compact: true });
+        drawAnalysis(canvas, size.width, size.height, {
+          data: a,
+          mode,
+          maxRate,
+          rateMapSteps: settings.rateMapSteps,
+          compact: true,
+        });
         plots.push({ name, canvas });
       }
       return { cell, stats: cellStatEntries(a, !!pos, data.counts[cell]), plots };
@@ -610,7 +616,13 @@ export function TileWall({
                       title={`Spatial peak: ${a?.peak.toFixed(2) || "—"} Hz`}
                     >
                       {a && pos ? (
-                        <AnalysisPlot data={a} mode="spatial" maxRate={settings.maxRate} compact />
+                        <AnalysisPlot
+                          data={a}
+                          mode="spatial"
+                          maxRate={settings.maxRate}
+                          rateMapSteps={settings.rateMapSteps}
+                          compact
+                        />
                       ) : (
                         <span className="plot-unavailable">{pos ? "…" : "No .pos"}</span>
                       )}

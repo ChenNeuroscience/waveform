@@ -1,11 +1,13 @@
 import { useEffect, useRef } from "react";
 import { fitGrid } from "./plot-geometry";
 import { type AnalysisData, type PlotMode } from "../types";
+import { rateMapColour, rateMapPalette } from "../palette";
 
 export interface AnalysisDrawing {
   data: AnalysisData;
   mode: PlotMode;
   maxRate: number;
+  rateMapSteps?: number;
   compact?: boolean;
   speedAlignment?: "left" | "right";
   positionSpeed?: boolean;
@@ -20,6 +22,7 @@ export function drawAnalysis(
     data,
     mode,
     maxRate,
+    rateMapSteps = 5,
     compact = false,
     speedAlignment = "right",
     positionSpeed = false,
@@ -45,20 +48,23 @@ export function drawAnalysis(
   }
   if (mode === "spatial") {
     const scale = maxRate || data.peak || 1;
+    const palette = rateMapPalette(rateMapSteps);
     const box = fitGrid(w, h, data.width, data.height);
-    const ww = box.unit;
-    const hh = box.unit;
+    // Whole device-pixel boundaries keep adjacent bins from blending extra colours.
+    const xs = Array.from(
+      { length: data.width + 1 },
+      (_, x) => Math.round((box.x + x * box.unit) * dpr) / dpr,
+    );
+    const ys = Array.from(
+      { length: data.height + 1 },
+      (_, y) => Math.round((box.y + y * box.unit) * dpr) / dpr,
+    );
     for (let i = 0; i < data.spatial.length; i++) {
       const v = data.spatial[i];
-      ctx.fillStyle = Number.isFinite(v)
-        ? `hsl(${240 - Math.min(1, v / scale) * 240} 100% 50%)`
-        : "#ffffff";
-      ctx.fillRect(
-        box.x + (i % data.width) * ww,
-        box.y + Math.floor(i / data.width) * hh,
-        ww + 0.5,
-        hh + 0.5,
-      );
+      ctx.fillStyle = rateMapColour(v, scale, palette);
+      const x = i % data.width;
+      const y = Math.floor(i / data.width);
+      ctx.fillRect(xs[x], ys[y], xs[x + 1] - xs[x], ys[y + 1] - ys[y]);
     }
   } else if (mode === "direction") {
     const a = data.direction;
@@ -146,16 +152,16 @@ export function drawAnalysis(
 
 export function AnalysisPlot(props: AnalysisDrawing) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const { data, mode, maxRate, compact, speedAlignment, positionSpeed } = props;
+  const { data, mode, maxRate, rateMapSteps, compact, speedAlignment, positionSpeed } = props;
   useEffect(() => {
     const c = canvas.current!;
-    const drawing = { data, mode, maxRate, compact, speedAlignment, positionSpeed };
+    const drawing = { data, mode, maxRate, rateMapSteps, compact, speedAlignment, positionSpeed };
     const draw = () => drawAnalysis(c, c.clientWidth, c.clientHeight, drawing);
     draw();
     const ro = new ResizeObserver(draw);
     ro.observe(c);
     return () => ro.disconnect();
-  }, [data, mode, maxRate, compact, speedAlignment, positionSpeed]);
+  }, [data, mode, maxRate, rateMapSteps, compact, speedAlignment, positionSpeed]);
   return (
     <canvas
       ref={canvas}

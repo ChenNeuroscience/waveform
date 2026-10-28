@@ -28,6 +28,7 @@ export interface Settings {
   binCm: number;
   smooth: number;
   maxRate: number;
+  rateMapSteps: number;
   acWindow: number;
   leds: number;
   maxSpeed: number;
@@ -43,6 +44,7 @@ export const defaultSettings: Settings = {
   binCm: 3,
   smooth: 1,
   maxRate: 0,
+  rateMapSteps: 5,
   acWindow: 100,
   leds: 2,
   maxSpeed: 4,

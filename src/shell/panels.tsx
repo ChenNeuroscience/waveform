@@ -184,6 +184,14 @@ export function SettingsPanel({
         onChange={(v) => update("maxRate", v)}
       />
       <Slider
+        label="Rate-map colour steps"
+        value={settings.rateMapSteps}
+        min={2}
+        max={32}
+        step={1}
+        onChange={(v) => update("rateMapSteps", v)}
+      />
+      <Slider
         label="Autocorrelation window"
         value={settings.acWindow}
         min={20}
