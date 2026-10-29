@@ -70,3 +70,21 @@ export function rateMapColour(rate: number, maximum: number, palette: readonly s
   const index = maximum > 0 ? Math.floor((rate / (maximum * (1 + 1e-7))) * palette.length) : 0;
   return palette[Math.max(0, Math.min(palette.length - 1, index))];
 }
+
+// MATLAB jet(64): sample each channel's clipped triangular ramp at (i+1)/64.
+// Keep its fixed correlation scale separate from the five-step firing-rate map.
+const jetPalette = Array.from({ length: 64 }, (_, i) => {
+  const t = (4 * (i + 1)) / 64;
+  const channels = [3, 2, 1].map((offset) =>
+    Math.round(255 * Math.max(0, Math.min(1, 1.5 - Math.abs(t - offset)))),
+  );
+  return `rgb(${channels.join(",")})`;
+});
+
+/** Pearson r in [-1,1]; invalid overlap bins stay white. */
+export function correlationColour(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "#ffffff";
+  }
+  return jetPalette[Math.max(0, Math.min(63, Math.floor(((value + 1) / 2) * 64)))];
+}

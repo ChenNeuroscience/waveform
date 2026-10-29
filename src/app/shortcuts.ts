@@ -25,7 +25,7 @@ export interface ShortcutContext {
   openFiles: () => void;
   operation: (type: "undo" | "redo") => void;
   copyPlot: () => void;
-  /** Holding Cmd/Ctrl C for a second opens copy mode. */
+  /** Holding Cmd/Ctrl C for half a second opens copy mode. */
   startCopyMode: (hovered: number | null) => void;
   selectAllCopies: () => void;
   endCopyMode: () => void;
@@ -91,12 +91,13 @@ const ARROWS = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
 const plotKeys: Record<string, PlotMode> = {
   w: "waveforms",
   r: "spatial",
+  a: "sc",
   c: "direction",
   v: "speed",
   t: "ac",
 };
 /** How long Cmd/Ctrl C is held (through key repeats) to open copy mode. */
-const COPY_HOLD_MS = 1000;
+const COPY_HOLD_MS = 500;
 
 export function useShortcuts(context: ShortcutContext) {
   const latest = useRef(context);

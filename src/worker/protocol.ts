@@ -1,7 +1,7 @@
 /** The worker request protocol: each request type's payload and result, shared by
  * the client (client.ts) and the worker (engine.worker.ts) so a renamed request or
  * field fails to compile rather than at runtime. */
-import type { AnalysisData, Settings, Trajectory, ViewData, ViewMessage } from "../types";
+import type { AnalysisData, Header, Settings, Trajectory, ViewData, ViewMessage } from "../types";
 
 /** A request dropped because a newer one replaced it (another recording, a newer
  * analysis batch, an outdated export). Callers ignore these rather than report them. */
@@ -61,16 +61,30 @@ export interface CopyRecording {
   cutKey?: string;
   pos?: File;
   posKey: string;
+  set?: File;
 }
 export interface CopyTrialAnalysis {
   trialId: string;
   cells: { cell: number; spikes: number; data: AnalysisData | null }[];
+  /** Included only for path copies, even when no cells are selected. */
+  position?: {
+    trajectory: Trajectory | null;
+    overview: AnalysisData;
+    header: Header;
+    duration: number;
+  };
 }
 
 /** [payload, result] for each request type. */
 export interface Requests {
   copy_analysis: [
-    { recordings: CopyRecording[]; cells: number[]; settings: Settings },
+    {
+      recordings: CopyRecording[];
+      cells: number[];
+      settings: Settings;
+      spatialAc?: boolean;
+      path?: boolean;
+    },
     CopyTrialAnalysis[],
   ];
   demo: [{ options: { quick?: boolean; stress?: "1m" | "9m"; seed: number } }, File[]];
@@ -96,7 +110,8 @@ export interface Requests {
   wave_batch: [{ asset: string; first: number; count: number }, { waves: Uint8Array }];
   trajectory: [PositionRequest, Trajectory | null];
   analysis: [
-    Partial<Session> & PositionRequest & { cell: number; summary?: boolean; batch?: string },
+    Partial<Session> &
+      PositionRequest & { cell: number; summary?: boolean; batch?: string; spatialAc?: boolean },
     AnalysisData,
   ];
 }

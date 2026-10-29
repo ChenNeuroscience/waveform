@@ -274,15 +274,23 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         throw new Superseded("Superseded clipboard selection.");
       }
       const session = sessions.get(`${recording.assetKey}|${recording.cutKey || "unsorted"}`);
-      const saved = session
-        ? await get<Uint16Array>(await dbPromise, `labels:${session.key}`)
-        : undefined;
-      if (session?.localCut && !saved) {
+      const live = m.path && session?.key === active?.key ? activeAsset : undefined;
+      const saved =
+        session && !live
+          ? await get<Uint16Array>(await dbPromise, `labels:${session.key}`)
+          : undefined;
+      if (session?.localCut && !saved && !live) {
         throw new Error("Modified cut state is unavailable.");
       }
-      const file = recordingSource(w, recording.file);
-      evict(Math.ceil(file.size / 216) * 12 + 30000000);
-      const a = await readRecording(w, file, saved ? undefined : recording.cut, { current });
+      let a = live;
+      if (!a) {
+        const file = recordingSource(w, recording.file);
+        evict(Math.ceil(file.size / 216) * 12 + 30000000);
+        const recordingData = await readRecording(w, file, saved ? undefined : recording.cut, {
+          current,
+        });
+        a = { ...recordingData, key: recording.assetKey, wasm: w, last: performance.now() };
+      }
       try {
         if (saved) {
           if (saved.length !== a.n) {
@@ -301,18 +309,42 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         const duration = parseFloat(a.header.duration) || (times[a.n - 1] || 0) / timebase;
         const cells = m.cells.map((cell) => {
           const data = counts[cell]
-            ? analyse(w, a.e, cell, timebase, duration, pos, m.settings)
+            ? analyse(w, a.e, cell, timebase, duration, pos, m.settings, m.spatialAc)
             : null;
-          // Clipboard charts do not need per-spike position overlays.
+          // Tile charts omit per-spike overlays; path copies retain selected dots.
           return {
             cell,
             spikes: counts[cell],
-            data: data && { ...data, spikes: new Float32Array() },
+            data: data && (m.path ? data : { ...data, spikes: new Float32Array() }),
           };
         });
-        results.push({ trialId: recording.trialId, cells });
+        const overview = m.path
+          ? cells.find((c) => c.data)?.data ||
+            analyse(w, a.e, 0, timebase, duration, pos, m.settings)
+          : undefined;
+        const header = overview
+          ? {
+              ...a.header,
+              ...pos?.header,
+              ...(recording.set ? textHeader(await recording.set.text()) : {}),
+            }
+          : a.header;
+        results.push({
+          trialId: recording.trialId,
+          cells,
+          position: overview
+            ? {
+                trajectory: pos ? trajectory(w, pos) : null,
+                overview: { ...overview, spikes: new Float32Array() },
+                header,
+                duration,
+              }
+            : undefined,
+        });
       } finally {
-        w.engine_free(a.e);
+        if (!live) {
+          w.engine_free(a.e);
+        }
       }
     }
     return results;
@@ -593,7 +625,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     // revision, so edits only recompute cells whose membership changed.
     const hashes = new Uint32Array(w.memory.buffer, w.engine_cell_hashes(e), 2048);
     const membership = `${counts(a)[m.cell]}:${hashes[m.cell * 2]}:${hashes[m.cell * 2 + 1]}`;
-    const key = `${a.key}|${membership}|${positionKey(m)}|${opts.binCm}|${opts.smooth}|${opts.acWindow}|${opts.dirBin}|${opts.speedBin}|${opts.speedMax}`;
+    const key = `${a.key}|${membership}|${positionKey(m)}|${opts.binCm}|${opts.smooth}|${opts.acWindow}|${opts.dirBin}|${opts.speedBin}|${opts.speedMax}|SC:${m.spatialAc ? opts.scMinOverlap : "off"}`;
     let result = analyses.get(key);
     if (result) {
       analyses.delete(key);
@@ -606,6 +638,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         parseFloat(a.header.duration) || (times(a)[a.n - 1] || 0) / parseFloat(a.header.timebase),
         pos,
         opts,
+        m.spatialAc,
       );
       if (analyses.size >= 200) {
         analyses.delete(analyses.keys().next().value!);

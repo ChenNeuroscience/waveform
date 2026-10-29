@@ -1,4 +1,4 @@
-//! Chunk-fed LTX decoding and exact population cut operations. No dependencies.
+//! Chunk-fed LTX decoding and exact population cut operations.
 //!
 //! ABI safety contract: engine pointers must be live pointers from engine_new; byte
 //! allocations must be freed once with their original length; inputs must be in-bounds
@@ -9,8 +9,10 @@ macro_rules! getter{($ptr:ident,$len:ident,[$($field:ident).+],$typ:ty)=>{
  #[no_mangle]pub unsafe extern "C" fn $ptr(e:*mut Engine)->*const $typ{let e=&*e;e.$($field).+.as_ptr()}
  #[no_mangle]pub unsafe extern "C" fn $len(e:*mut Engine)->usize{let e=&*e;e.$($field).+.len()}
 };}
+mod dsp;
 mod position;
 mod processing;
+mod spatial_ac;
 mod synthetic;
 mod waves;
 pub const RECORD: usize = 216;

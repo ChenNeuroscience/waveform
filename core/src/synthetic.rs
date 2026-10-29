@@ -157,9 +157,79 @@ fn trajectory(seed: u32, duration: usize) -> Vec<[u16; 5]> {
 enum Tuning {
     /// Gaussian place field over a GRID x GRID map of the 1 m arena.
     Place(Vec<f32>),
+    Grid(Vec<f32>),
     /// Gaussian head-direction tuning over 360 one-degree bins.
     Direction(Vec<f32>),
     Flat(f32),
+}
+
+struct GridSpec {
+    spacing: f32,
+    orientation: f32,
+    phase: [f32; 2],
+    baseline: f32,
+    peak: f32,
+}
+
+/// Keep grid membership stable across trials, including both sorted cells on T7.
+fn grid_cells(family: u32, tetrode: u32, cells: usize) -> Vec<bool> {
+    let mut selected = vec![false; cells + 1];
+    if !(5..=8).contains(&tetrode) {
+        return selected;
+    }
+    let count = if tetrode == 7 {
+        2
+    } else {
+        2 + hash(family ^ tetrode.wrapping_mul(131) ^ 0x6a1d) as usize % 4
+    };
+    let mut candidates: Vec<_> = (1..=cells).collect();
+    if tetrode != 7 {
+        candidates.sort_by_key(|&cell| {
+            hash(family ^ tetrode.wrapping_mul(131) ^ (cell as u32).wrapping_mul(977))
+        });
+    }
+    for cell in candidates.into_iter().take(count) {
+        selected[cell] = true;
+    }
+    selected
+}
+impl GridSpec {
+    fn rate(&self, x: f32, y: f32) -> f32 {
+        let (sin, cos) = self.orientation.sin_cos();
+        let rx = (x * cos + y * sin) / self.spacing;
+        let ry = (-x * sin + y * cos) / self.spacing;
+        // Invert the 60-degree lattice basis, then wrap into its unit phase tile.
+        let v = ry / (3f32.sqrt() / 2.);
+        let u = (rx - v / 2. - self.phase[0]).rem_euclid(1.);
+        let v = (v - self.phase[1]).rem_euclid(1.);
+        // The phase tile is oblique: use physical distance to the nearest periodic
+        // image, so fields are circular and remain continuous across tile edges.
+        let mut distance = f32::INFINITY;
+        for a in [-1., 0., 1.] {
+            for b in [-1., 0., 1.] {
+                let (du, dv) = (u + a, v + b);
+                distance = distance.min(du * du + du * dv + dv * dv);
+            }
+        }
+        self.baseline + self.peak * (-distance / (2. * 0.13f32.powi(2))).exp()
+    }
+}
+fn grid_spec(family: u32, trial_seed: u32, tetrode: u32, cell: usize) -> GridSpec {
+    let r = |k: u32| {
+        unit(hash(
+            family ^ tetrode.wrapping_mul(131) ^ (cell as u32).wrapping_mul(977) ^ k,
+        ))
+    };
+    let orientation = unit(hash(family ^ 0x6a01)) * std::f32::consts::PI / 3.
+        + (unit(hash(trial_seed ^ 0x6a02)) - 0.5) * std::f32::consts::PI / 30.;
+    let base = 0.36 * (0.97 + 0.06 * unit(hash(trial_seed ^ 0x6a03)));
+    GridSpec {
+        spacing: base * 1.4f32.powi(tetrode.saturating_sub(5) as i32),
+        orientation,
+        phase: [r(0x6a04), r(0x6a05)],
+        baseline: 0.05 + 0.25 * r(0x6a06),
+        peak: 4. + 16. * r(0x6a07),
+    }
 }
 pub struct Synthetic {
     seed: u32,
@@ -179,7 +249,7 @@ pub struct Synthetic {
     /// unequal channels move the cluster across the feature projections.
     trend: Vec<[f32; 4]>,
 }
-fn tuning(seed: u32, cell: usize) -> Tuning {
+fn tuning(seed: u32, cell: usize, tetrode: u32) -> Tuning {
     let r = |k: u32| {
         unit(hash(
             seed ^ 0x7a11 ^ (cell as u32).wrapping_mul(977) ^ k << 24,
@@ -188,8 +258,14 @@ fn tuning(seed: u32, cell: usize) -> Tuning {
     match hash(seed ^ 0x3c6e ^ cell as u32) % 4 {
         0 | 1 => {
             let (cx, cy) = (0.1 + 0.8 * r(1), 0.1 + 0.8 * r(2));
-            let sigma = 0.07 + 0.08 * r(3);
-            let (peak, base) = (4. + 16. * r(4), 0.05 + 0.25 * r(5));
+            let peak = 4. + 16. * r(4);
+            // Broader fields and substantial background activity make the
+            // non-grid spatial cells on T5–8 less sharply tuned.
+            let (sigma, base) = if (5..=8).contains(&tetrode) {
+                (0.16 + 0.12 * r(3), peak * (0.2 + 0.2 * r(5)))
+            } else {
+                (0.07 + 0.08 * r(3), 0.05 + 0.25 * r(5))
+            };
             Tuning::Place(
                 (0..GRID * GRID)
                     .map(|i| {
@@ -230,6 +306,17 @@ fn poisson(mean: f64, u: f64) -> u32 {
 }
 impl Synthetic {
     fn new(seed: u32, cells: usize, total: usize, duration: usize, tetrode: u32) -> Self {
+        Self::new_trial(seed, 0, cells, total, duration, tetrode)
+    }
+    fn new_trial(
+        family: u32,
+        trial: u32,
+        cells: usize,
+        total: usize,
+        duration: usize,
+        tetrode: u32,
+    ) -> Self {
+        let seed = family.wrapping_add(trial.wrapping_mul(173));
         let cells = cells.clamp(1, 100);
         let positions = TRAJECTORIES.with(|cache| {
             let mut cache = cache.borrow_mut();
@@ -289,12 +376,36 @@ impl Synthetic {
             };
         }
         noise_table();
+        let grid_cells = grid_cells(family, tetrode, cells);
         let mut synthetic = Self {
             seed,
             cells,
             total,
             positions,
-            tunings: (0..=cells).map(|cell| tuning(seed, cell)).collect(),
+            tunings: (0..=cells)
+                .map(|cell| {
+                    if grid_cells[cell] {
+                        let spec = grid_spec(
+                            family,
+                            family.wrapping_add(trial.wrapping_mul(173)),
+                            tetrode,
+                            cell,
+                        );
+                        Tuning::Grid(
+                            (0..GRID * GRID)
+                                .map(|i| {
+                                    spec.rate(
+                                        ((i % GRID) as f32 + 0.5) / GRID as f32,
+                                        ((i / GRID) as f32 + 0.5) / GRID as f32,
+                                    )
+                                })
+                                .collect(),
+                        )
+                    } else {
+                        tuning(seed, cell, tetrode)
+                    }
+                })
+                .collect(),
             modulation: (0..=cells)
                 .map(|cell| {
                     let r = |k: u32| {
@@ -328,7 +439,7 @@ impl Synthetic {
         let mut sum = 0.;
         for (t, [_, a, b, _]) in self.tunings.iter().zip(&self.modulation) {
             sum += match t {
-                Tuning::Place(map) => map[bin],
+                Tuning::Place(map) | Tuning::Grid(map) => map[bin],
                 Tuning::Direction(curve) => curve[degree],
                 Tuning::Flat(rate) => *rate,
             } * (1. + a * cos + b * sin);
@@ -481,6 +592,23 @@ pub extern "C" fn synthetic_new(
         seed, cells, total, duration, tetrode,
     )))
 }
+/// Trial-specific trajectories and grid geometry, with stable module/cell identities.
+#[no_mangle]
+pub extern "C" fn synthetic_new_trial(
+    seed: u32,
+    trial: u32,
+    cells: usize,
+    total: usize,
+    duration: usize,
+    tetrode: u32,
+) -> *mut Synthetic {
+    if total == 0 || total > 20_000_000 || duration == 0 || duration > 36000 {
+        return std::ptr::null_mut();
+    }
+    Box::into_raw(Box::new(Synthetic::new_trial(
+        seed, trial, cells, total, duration, tetrode,
+    )))
+}
 /// The simulated spike count (Poisson, so close to but not exactly the requested total).
 #[no_mangle]
 pub unsafe extern "C" fn synthetic_spikes(s: *const Synthetic) -> usize {
@@ -542,6 +670,114 @@ pub unsafe extern "C" fn synthetic_position(s: *const Synthetic, out: *mut u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn later_tetrodes_have_broader_place_fields_and_higher_background() {
+        let mut places = 0;
+        for cell in 1..=48 {
+            match (tuning(4271, cell, 1), tuning(4271, cell, 5)) {
+                (Tuning::Place(sharp), Tuning::Place(diffuse)) => {
+                    places += 1;
+                    let minimum = diffuse.iter().copied().fold(f32::INFINITY, f32::min);
+                    let maximum = diffuse.iter().copied().fold(0., f32::max);
+                    assert!(minimum > maximum * 0.16);
+                    assert!(diffuse.iter().zip(&sharp).all(|(a, b)| a > b));
+                    let half_area = |map: &[f32]| {
+                        let low = map.iter().copied().fold(f32::INFINITY, f32::min);
+                        let high = map.iter().copied().fold(0., f32::max);
+                        map.iter().filter(|&&v| v > (low + high) / 2.).count()
+                    };
+                    assert!(half_area(&diffuse) > half_area(&sharp));
+                }
+                (Tuning::Direction(a), Tuning::Direction(b)) => assert_eq!(a, b),
+                (Tuning::Flat(a), Tuning::Flat(b)) => assert_eq!(a, b),
+                _ => panic!("Only the sharpness of place tuning should change"),
+            }
+        }
+        assert!(places > 10);
+    }
+    #[test]
+    fn only_a_few_grid_cells_are_selected_and_membership_survives_trial_changes() {
+        for family in [9, 4271, 1729] {
+            for tetrode in 1..=8 {
+                let membership = grid_cells(family, tetrode, 12);
+                let n = membership.iter().filter(|&&selected| selected).count();
+                if tetrode < 5 {
+                    assert_eq!(n, 0);
+                } else {
+                    assert!((2..=5).contains(&n));
+                    for trial in 0..3 {
+                        let s = Synthetic::new_trial(family, trial, 12, 500, 10, tetrode);
+                        let actual: Vec<_> = s
+                            .tunings
+                            .iter()
+                            .map(|t| matches!(t, Tuning::Grid(_)))
+                            .collect();
+                        assert_eq!(actual, membership);
+                    }
+                }
+                if tetrode == 7 {
+                    assert!(membership[1] && membership[2]);
+                }
+            }
+        }
+    }
+    #[test]
+    fn grid_modules_and_cell_phases_remain_related_across_trials() {
+        for trial in 0..5 {
+            let seed = 4271 + trial * 173;
+            let reference = grid_spec(4271, seed, 5, 1);
+            assert!((0.349..0.371).contains(&reference.spacing));
+            for tetrode in 5..=8 {
+                for cell in 1..=12 {
+                    let spec = grid_spec(4271, seed, tetrode, cell);
+                    let initial = grid_spec(4271, 4271, tetrode, cell);
+                    assert_eq!(spec.phase, initial.phase);
+                    assert_eq!(spec.orientation, reference.orientation);
+                    assert!(
+                        (spec.spacing / reference.spacing - 1.4f32.powi(tetrode as i32 - 5)).abs()
+                            < 1e-5
+                    );
+                }
+            }
+        }
+        let a = grid_spec(4271, 4271, 5, 1);
+        let b = grid_spec(4271, 4444, 5, 1);
+        assert_ne!(a.orientation, b.orientation);
+        assert_ne!(a.spacing, b.spacing);
+        assert_ne!(a.phase, grid_spec(4271, 4271, 5, 2).phase);
+    }
+    #[test]
+    fn grid_rate_is_periodic_on_a_rotated_triangular_lattice() {
+        let spec = grid_spec(4271, 4271, 5, 1);
+        let (sin, cos) = spec.orientation.sin_cos();
+        let point = |u: f32, v: f32| {
+            let x = spec.spacing * (u + v / 2.);
+            let y = spec.spacing * v * 3f32.sqrt() / 2.;
+            (x * cos - y * sin, x * sin + y * cos)
+        };
+        let (u, v) = (spec.phase[0], spec.phase[1]);
+        for (a, b) in [
+            (0., 0.),
+            (1., 0.),
+            (0., 1.),
+            (-1., 1.),
+            (-1., 0.),
+            (0., -1.),
+            (1., -1.),
+        ] {
+            let (x, y) = point(u + a, v + b);
+            assert!((spec.rate(x, y) - spec.baseline - spec.peak).abs() < 1e-4);
+        }
+        let (x, y) = point(u + 0.5, v + 0.5);
+        assert!(spec.rate(x, y) < spec.baseline + spec.peak * 0.01);
+        let s = Synthetic::new_trial(4271, 1, 12, 1000, 20, 5);
+        assert!((2..=5).contains(
+            &s.tunings[1..]
+                .iter()
+                .filter(|t| matches!(t, Tuning::Grid(_)))
+                .count()
+        ));
+    }
     fn spikes(s: &Synthetic) -> Vec<(usize, u32)> {
         let mut out = vec![];
         s.each_spike(0, s.total, |_, cell, t| out.push((cell, t)));
@@ -636,7 +872,7 @@ mod tests {
                     / (ticks.len() as f64 / s.positions.len() as f64)
             };
             match t {
-                Tuning::Place(map) => {
+                Tuning::Place(map) | Tuning::Grid(map) => {
                     let i = (0..map.len())
                         .max_by(|&a, &b| map[a].total_cmp(&map[b]))
                         .unwrap();

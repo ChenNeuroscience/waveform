@@ -796,6 +796,11 @@ small {
   border-left: 1px solid #eee;
   padding: 2px;
 }
+.tile-sc {
+  flex: none;
+  width: 128px;
+  padding: 2px 24px 2px 2px;
+}
 .tile-tuning {
   flex: 1;
   min-width: 0;
@@ -2020,6 +2025,7 @@ kbd {
 .tile-waves,
 .tile-wave-canvas,
 .tile-spatial,
+.tile-sc,
 .tile-tuning,
 .tile-ac {
   border: 0;

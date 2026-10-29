@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { AnalysisPlot } from "../plots/AnalysisPlot";
-import { PathPlot } from "../plots/PathPlot";
+import { PathPlot, type SpikeLayer } from "../plots/PathPlot";
 import {
   color,
   type AnalysisData,
@@ -25,6 +25,8 @@ export function PositionPane({
   dragComparison,
   grabMode,
   onPopPlot,
+  onHover,
+  copyLayers,
 }: {
   data: ViewData | null;
   trial: Trial | undefined;
@@ -37,6 +39,8 @@ export function PositionPane({
   dragComparison: DragComparison | null;
   grabMode: boolean;
   onPopPlot: (kind: "path", x: number, y: number) => void;
+  onHover: (hovered: boolean) => void;
+  copyLayers: SpikeLayer[] | null;
 }) {
   const timing = experimentTiming(data?.headers || {}, data?.duration || 0);
   const pathCell = dragComparison?.source ?? hoverCell;
@@ -47,13 +51,15 @@ export function PositionPane({
       : null;
   // Stable unless the overlaid analyses change, so unrelated renders (hover,
   // progress, selection) do not repaint the full-resolution trajectory.
-  const pathLayers = useMemo(
+  const hoverLayers = useMemo(
     () =>
       [primary, secondary]
         .filter((a): a is AnalysisData => !!a)
         .map((a) => ({ cell: a.cell, spikes: a.spikes, color: color(a.cell) })),
     [primary, secondary],
   );
+  const pathLayers = copyLayers ?? hoverLayers;
+  const hover = { onPointerEnter: () => onHover(true), onPointerLeave: () => onHover(false) };
   // Space-click copies the path into a floating window.
   const grabPath = (e: React.PointerEvent) => {
     if (grabMode && e.button === 0) {
@@ -64,7 +70,7 @@ export function PositionPane({
   };
   if (!analysis || !trajectory || !trial?.pos) {
     return (
-      <section className="position-pane">
+      <section className="position-pane" {...hover}>
         <div className="position-content">
           <span className="pane-placeholder">
             {trial?.pos ? "Processing position…" : "Drop a matching .pos file for position plots."}
@@ -74,7 +80,7 @@ export function PositionPane({
     );
   }
   return (
-    <section className="position-pane">
+    <section className="position-pane" {...hover}>
       <div className="position-content">
         <div className="position-info">
           <div className="position-time" title={timing.date}>

@@ -271,6 +271,7 @@ fn smooth(a: &mut [f32], k: usize) {
 pub(crate) struct Analysis {
     meta: [f64; 8],
     spatial: Vec<f32>,
+    sc: Vec<f32>,
     spikes: Vec<f32>,
     direction: Vec<f32>,
     speed: Vec<f32>,
@@ -477,6 +478,7 @@ fn analyse(
             pos.map(|p| p.height as f64).unwrap_or(0.),
         ],
         spatial,
+        sc: vec![],
         spikes,
         direction,
         speed,
@@ -604,6 +606,18 @@ getter!(
     speed_dwell
 );
 getter!(engine_analysis_ac, engine_analysis_ac_len, ac);
+/// Computed only when the spatial autocorrelation plot is requested.
+#[no_mangle]
+pub unsafe extern "C" fn engine_analyse_sc(e: *mut Engine, minimum: usize) {
+    let a = &mut (*e).analysis;
+    a.sc = crate::spatial_ac::autocorrelation(
+        &a.spatial,
+        a.meta[1] as usize,
+        a.meta[2] as usize,
+        minimum,
+    );
+}
+getter!(engine_analysis_sc, engine_analysis_sc_len, sc);
 #[cfg(test)]
 mod tests {
     use super::*;

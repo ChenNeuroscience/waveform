@@ -64,7 +64,7 @@ function tileCells(counts: Uint32Array, splitPoint: SplitPoint | null) {
 function tileSizes(shown: VisiblePlots) {
   const wavePixels = shown.waveforms ? ROW * 4 : 0;
   const tuningWidth = shown.ac ? 128 : (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0);
-  const numericWidth = (shown.spatial ? 128 : 0) + tuningWidth;
+  const numericWidth = (shown.spatial ? 128 : 0) + tuningWidth + (shown.sc ? 128 : 0);
   const tileWidth = wavePixels + numericWidth + 3;
   // Without numeric plots the badge sits over the waveforms' right edge.
   const waveFrameWidth = numericWidth ? wavePixels : Math.max(0, wavePixels - 24);
@@ -122,6 +122,7 @@ export function TileWall({
   splitPoint,
   swap,
   copying,
+  copyingPath = false,
   feedback,
   grabMode,
   busy,
@@ -147,6 +148,7 @@ export function TileWall({
   swap: SwapState | null;
   /** The copy-mode selection, or null outside copy mode. */
   copying: number[] | null;
+  copyingPath?: boolean;
   feedback: TileFeedback | null;
   grabMode: boolean;
   busy: boolean;
@@ -210,7 +212,7 @@ export function TileWall({
   const waveScope = `${data.session}|${data.revision}`;
   const waveKey = `${waveScope}|${signature}|${settings.density}|${settings.drift}|${waveFrameWidth}`;
   const wavesReady = wavesDone === waveKey;
-  const analysisKey = `${data.key}|${posKey}|${analysisSettingsKey(settings)}`;
+  const analysisKey = `${data.key}|${posKey}|${analysisSettingsKey(settings)}|SC:${shown.sc ? settings.scMinOverlap : "off"}`;
   // Cancels in-flight tile gestures whenever the cut or analyses change.
   const scope = `${data.session}|${data.revision}|${analysisKey}`;
   const analysisFor = (cell: number) => cache.current.get(membershipKey(data, cell));
@@ -238,7 +240,15 @@ export function TileWall({
     const missing = cells.filter((cell) => !analysisFor(cell));
     const results = await Promise.all(
       missing.map((cell) =>
-        request("analysis", { session: data.session, cell, pos, posKey, settings, summary: true }),
+        request("analysis", {
+          session: data.session,
+          cell,
+          pos,
+          posKey,
+          settings,
+          summary: true,
+          spatialAc: shown.sc,
+        }),
       ),
     );
     for (const result of results) {
@@ -334,6 +344,7 @@ export function TileWall({
           posKey,
           settings,
           summary: true,
+          spatialAc: shown.sc,
           batch,
         }),
       ),
@@ -544,7 +555,7 @@ export function TileWall({
                   "swap-source": swap?.source === cell,
                   "merge-target": gestures.target === cell,
                   "tile-muted": (!!splitPoint || !!copying) && !marked,
-                  "tile-marked": marked,
+                  "tile-marked": marked && !(copying && copyingPath),
                   "drag-origin": dragOrigin,
                 })}
                 data-cell={cell}
@@ -586,7 +597,7 @@ export function TileWall({
                   {shown.spatial && (
                     <div
                       className="tile-spatial"
-                      style={{ paddingRight: tuningWidth ? 2 : 24 }}
+                      style={{ paddingRight: tuningWidth || shown.sc ? 2 : 24 }}
                       title={`Spatial peak: ${a?.peak.toFixed(2) || "—"} Hz`}
                     >
                       {a && pos ? (
@@ -597,6 +608,19 @@ export function TileWall({
                           rateMapSteps={settings.rateMapSteps}
                           compact
                         />
+                      ) : (
+                        <span className="plot-unavailable">{pos ? "…" : "No .pos"}</span>
+                      )}
+                    </div>
+                  )}
+                  {shown.sc && (
+                    <div
+                      className="tile-sc"
+                      style={{ paddingRight: tuningWidth ? 2 : 24 }}
+                      title="Spatial autocorrelation: jet palette, −1 to +1; blank where overlap is insufficient"
+                    >
+                      {a && pos ? (
+                        <AnalysisPlot data={a} mode="sc" maxRate={0} compact />
                       ) : (
                         <span className="plot-unavailable">{pos ? "…" : "No .pos"}</span>
                       )}

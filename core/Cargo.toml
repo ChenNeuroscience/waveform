@@ -3,6 +3,8 @@ name = "waveform-core"
 version = "2.0.0"
 edition = "2021"
 license = "MIT"
+[dependencies]
+rustfft = { version = "6.4.1", features = ["wasm_simd"] }
 [lib]
 crate-type = ["cdylib", "rlib"]
 [profile.release]

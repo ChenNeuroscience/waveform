@@ -1,6 +1,17 @@
 import { expect, it } from "vitest";
-import { rateMapColour, rateMapPalette } from "../src/palette";
+import { correlationColour, rateMapColour, rateMapPalette } from "../src/palette";
 import { defaultSettings } from "../src/types";
+
+it("uses MATLAB jet(64) for signed correlations, with white invalid bins", () => {
+  expect(correlationColour(-1)).toBe("rgb(0,0,143)");
+  expect(correlationColour(-0.5)).toBe("rgb(0,143,255)");
+  expect(correlationColour(0)).toBe("rgb(143,255,112)");
+  expect(correlationColour(0.5)).toBe("rgb(255,112,0)");
+  expect(correlationColour(1)).toBe("rgb(128,0,0)");
+  expect(correlationColour(NaN)).toBe("#ffffff");
+  expect(correlationColour(-2)).toBe(correlationColour(-1));
+  expect(correlationColour(2)).toBe(correlationColour(1));
+});
 
 it("defaults to the exact five spatial colours from waveform-v1", () => {
   expect(rateMapPalette(defaultSettings.rateMapSteps)).toEqual([

@@ -123,8 +123,9 @@ export async function demoFiles(
     );
     for (let tet = 1; tet <= 8; tet++) {
       const cells = options.quick ? 12 : options.stress ? 100 : [24, 36, 48][(tet - 1) % 3];
-      const context = w.synthetic_new(
-        (options.seed + trial * 173) >>> 0,
+      const context = w.synthetic_new_trial(
+        options.seed,
+        trial,
         cells,
         sizes[trial][tet - 1],
         duration,

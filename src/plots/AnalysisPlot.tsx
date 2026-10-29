@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { fitGrid } from "./plot-geometry";
 import { type AnalysisData, type PlotMode } from "../types";
-import { rateMapColour, rateMapPalette } from "../palette";
+import { correlationColour, rateMapColour, rateMapPalette } from "../palette";
 
 export interface AnalysisDrawing {
   data: AnalysisData;
@@ -46,24 +46,27 @@ export function drawAnalysis(
     w = mode === "ac" ? 128 : 24;
     h = mode === "ac" ? 32 : 80;
   }
-  if (mode === "spatial") {
+  if (mode === "spatial" || mode === "sc") {
+    const values = mode === "sc" ? data.spatialAc || new Float32Array() : data.spatial;
+    const columns = mode === "sc" ? data.width * 2 - 1 : data.width;
+    const rows = mode === "sc" ? data.height * 2 - 1 : data.height;
     const scale = maxRate || data.peak || 1;
     const palette = rateMapPalette(rateMapSteps);
-    const box = fitGrid(w, h, data.width, data.height);
+    const box = fitGrid(w, h, columns, rows);
     // Whole device-pixel boundaries keep adjacent bins from blending extra colours.
     const xs = Array.from(
-      { length: data.width + 1 },
+      { length: columns + 1 },
       (_, x) => Math.round((box.x + x * box.unit) * dpr) / dpr,
     );
     const ys = Array.from(
-      { length: data.height + 1 },
+      { length: rows + 1 },
       (_, y) => Math.round((box.y + y * box.unit) * dpr) / dpr,
     );
-    for (let i = 0; i < data.spatial.length; i++) {
-      const v = data.spatial[i];
-      ctx.fillStyle = rateMapColour(v, scale, palette);
-      const x = i % data.width;
-      const y = Math.floor(i / data.width);
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      ctx.fillStyle = mode === "sc" ? correlationColour(v) : rateMapColour(v, scale, palette);
+      const x = i % columns;
+      const y = Math.floor(i / columns);
       ctx.fillRect(xs[x], ys[y], xs[x + 1] - xs[x], ys[y + 1] - ys[y]);
     }
   } else if (mode === "direction") {
@@ -166,7 +169,13 @@ export function AnalysisPlot(props: AnalysisDrawing) {
     <canvas
       ref={canvas}
       className="analysis-canvas"
-      aria-label={mode === "ac" ? "Temporal autocorrelogram" : `${mode} plot`}
+      aria-label={
+        mode === "ac"
+          ? "Temporal autocorrelogram"
+          : mode === "sc"
+            ? "Spatial autocorrelogram"
+            : `${mode} plot`
+      }
     />
   );
 }

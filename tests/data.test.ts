@@ -180,6 +180,22 @@ describe("analysis", () => {
     expect(result.spatial[3]).toBe(0.5);
     expect(result.ac.reduce((a, b) => a + b, 0)).toBe(0);
     expect(result.rate).toBe(1);
+    expect(result.spatialAc).toBeUndefined();
+    const withSc = analyse(
+      w,
+      e,
+      1,
+      1000,
+      3,
+      { handle: pos, identity: "test", header: {} },
+      { ...defaultSettings, binCm: 5, smooth: 0, scMinOverlap: 2 },
+      true,
+    );
+    expect(withSc.spatialAc).toHaveLength(9);
+    expect(withSc.spatialAc![4]).toBeCloseTo(1);
+    expect(Number.isNaN(withSc.spatialAc![0])).toBe(true);
+    analyse(w, e, 1, 1000, 3, undefined, defaultSettings);
+    expect(w.engine_analysis_sc_len(e)).toBe(0);
     w.position_free(pos);
     w.engine_free(e);
   });
