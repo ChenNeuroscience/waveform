@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT"
 [dependencies]
 rustfft = { version = "6.4.1", features = ["wasm_simd"] }
+nalgebra = { version = "0.35.0", default-features = false, features = ["std"] }
 [lib]
 crate-type = ["cdylib", "rlib"]
 [profile.release]

@@ -120,6 +120,7 @@ test("tile clicks bring coincident points to the front without uploading feature
     };
   });
   await fixture(page);
+  await page.getByRole("button", { name: "Fixed colours", exact: true }).click();
   const uploads = await page.evaluate(() => (window as any).featureUploads);
   const pixels = () =>
     page.locator(".clusters canvas").evaluate((el) => {

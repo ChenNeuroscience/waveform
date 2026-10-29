@@ -1,7 +1,16 @@
 /** The worker request protocol: each request type's payload and result, shared by
  * the client (client.ts) and the worker (engine.worker.ts) so a renamed request or
  * field fails to compile rather than at runtime. */
-import type { AnalysisData, Header, Settings, Trajectory, ViewData, ViewMessage } from "../types";
+import type {
+  AnalysisData,
+  Header,
+  Settings,
+  Trajectory,
+  ViewData,
+  ViewMessage,
+  FeatureMode,
+  PcaFeatures,
+} from "../types";
 
 /** A request dropped because a newer one replaced it (another recording, a newer
  * analysis batch, an outdated export). Callers ignore these rather than report them. */
@@ -22,6 +31,8 @@ interface RegionEdit {
   ax: number;
   ay: number;
   polygon: number[];
+  /** Identify the displayed PCA basis so a stale plot cannot cut another basis. */
+  featureKey?: string;
 }
 export type EditRequest = Session & {
   dest: number;
@@ -77,6 +88,10 @@ export interface CopyTrialAnalysis {
 
 /** [payload, result] for each request type. */
 export interface Requests {
+  features: [
+    { asset: string; mode: FeatureMode; samples: number; knownKey?: string },
+    (Omit<PcaFeatures, "values"> & { values?: Float32Array }) | null,
+  ];
   copy_analysis: [
     {
       recordings: CopyRecording[];

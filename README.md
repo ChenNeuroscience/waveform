@@ -6,6 +6,12 @@ Waveform is a browser-based GUI for working with extra-neuronal tetrode waveform
 
 **[Open Waveform](https://chenneuroscience.github.io/waveform/)**, or try it with the simulated data on its start screen.
 
+The cluster pane's feature-space buttons switch between peak-to-trough amplitudes (waveform/height icon) and the first four principal components of the combined four-channel waveform (point-cloud/axes icon), showing all six pairings. PCA uses a bounded sample for fitting and projects every spike; its sample size is configurable in Settings. Brush, lasso and source picking work in either feature space.
+
+Press **Q** to switch amplitudes/principal components, and **L** to switch brush/lasso. The shared colour control selects **fixed cell colours**, **density**, or **drift** for both waveforms and cluster plots; **P** cycles through them. Density uses the same colour ramp in both views.
+
+The Waveform icon opens a file menu: **Add folder…**, **Add files…**, and **Clear files**. Adding files preserves the current workspace; clearing returns straight to the start screen.
+
 > [!WARNING]
 > This version (October 2026) was rebuilt with AI under human oversight. It likely still has bugs and feature gaps that are being ironed out. The previous version is on the [waveform-v1 branch](https://github.com/ChenNeuroscience/waveform/tree/waveform-v1).
 

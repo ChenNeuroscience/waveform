@@ -16,7 +16,7 @@ flowchart LR
 
 React owns UI state and display arrays, never the waveform file. A module worker owns the Rust engines (one Wasm instance), file references, cut sessions and analysis caches; requests are serialised there, so labels and history cannot be edited concurrently. The worker request protocol is typed in `src/worker/protocol.ts`, and the Wasm exports in `src/worker/wasm.ts` (a unit test checks the table against the compiled module).
 
-The Rust crate (`core/`) parses tetrodes and cut/CLu files incrementally, computes peak-to-peak amplitudes, applies every edit (lasso, brush, waveform gate, merge, swap, renumber), produces undo patches and exports, processes position, computes analyses, and selects and groups the GPU-resident waveform records. RustFFT provides FFTs through the reusable `dsp` module, including WebAssembly SIMD acceleration. JavaScript does browser I/O, scheduling and buffer transfers.
+The Rust crate (`core/`) parses tetrodes and cut/CLu files incrementally, computes peak-to-peak amplitudes, applies every edit (lasso, brush, waveform gate, merge, swap, renumber), produces undo patches and exports, processes position, computes analyses, and selects and groups the GPU-resident waveform records. RustFFT provides FFTs through the reusable `dsp` module, including WebAssembly SIMD acceleration. Nalgebra provides covariance multiplication and symmetric eigendecomposition for waveform PCA, using the same dependency version/features as prekk. JavaScript does browser I/O, scheduling and buffer transfers.
 
 ## Source layout
 
@@ -44,13 +44,23 @@ A waveform threshold needs one channel/sample column; the first gate on a column
 
 ## GPU rendering
 
-**Feature view.** Every spike is drawn from the population arrays (10 bytes per spike). Amplitudes and timestamps are sent once per recording and reattached by `worker/client.ts`; edits transfer only labels, which update one buffer in place. Axes, time range, point size and isolation are uniforms. Drift adds (1, normalised time) per spike into an `RG32F` target and colours each pixel by mean spike time, red (start) to green (end).
+**Feature view.** Every spike is drawn from the population arrays (10 bytes per spike). Amplitudes and timestamps are sent once per recording and reattached by `worker/client.ts`; edits transfer only labels, which update one buffer in place. Axes, time range, point size and isolation are uniforms. Density and drift accumulate (count, summed time) per pixel, with the same texture formats and fallbacks as waveform rendering. Density shares the waveform colour ramp through `plots/density-colours.ts`, with scaling appropriate to point footprints; drift uses mean spike time, red (start) to green (end). Cached counts survive colour-mode switches and unrelated cell focus changes; coordinates, point size, geometry or isolation changes invalidate them.
+
+The cluster pane can instead use four global waveform PCs, fitted across all 200 signed sample values (four channels × 50 samples, excluding timestamps). `core/src/pca.rs` plans reproducible, jittered sample blocks across the recording, fits a centred covariance using nalgebra, then projects the complete file in bounded chunks. Constant input dimensions are excluded; PCs are ordered by descending variance with deterministic signs, and scores are scaled to 0–1 over the full population. Degenerate axes stay at 0.5. The default fit uses up to 5,000 spikes, configurable from 500 to 20,000. No full waveform population is retained.
+
+PCA adds four float32 coordinates (16 bytes per spike) only when requested. `worker/pca.ts` handles its file reads and cancellation. The basis depends on the recording and fit sample size, so cuts and undo do not refit it; the UI caches one result and confirms the worker's basis before reuse. GPU buffers accept byte amplitudes or float PCs, and both CPU picking and Rust brush/lasso cuts use exactly the displayed coordinates. Region edits carry the PCA basis key to reject stale selections after a refit. Both spaces show the same six channel/component pairings.
 
 **Waveforms.** Up to 1M records are resident: all spikes up to 1M, otherwise 1M evenly spaced ones (flagged once in the toolbar). Records keep the file's 216-byte layout in an `R8I` texture array that the shader reads directly; the tile wall loads them in ~4 MB layers. Each cell renders once, in per-frame budgets, into a texture of per-pixel (line count, summed spike time), cached by a hash of the cell's resident records; frames only composite those textures into tiles. Flag, density and drift colour the same counts, so switching is instant, and edits re-render only cells whose membership changed.
 
 Drift and exact counts need `EXT_color_buffer_float` and `EXT_float_blend`; without them drift is not drawn and density counts saturate. Nothing else is sampled: analyses, autocorrelograms and the position overlays use every spike.
 
 Waveform frame geometry (shared by the shader, split marker and gestures) lives in `plots/plot-geometry.ts`.
+
+Plot buttons, rendering options and feature-pane choices share `shell/ToggleButton.tsx`: small-radius corners, neutral pressed fill, stronger border/icon, and `aria-pressed`. Mutually exclusive choices (colour mode, tetrode, feature space and brush/lasso) use joined segments; independent plot toggles retain gaps. Trials use square stacked rows with the same neutral selected fill and horizontal rules. In copy mode, excluded trials are faded and desaturated; included trials retain normal file colours and selected-cut styling. The displayed trial keeps a stronger background. The feature-tool pairs are separated from each other and from the source/destination controls, with matching row centres even when sources wrap. The feature-space icons have full accessible names and tooltips (Amplitudes / Principal components).
+
+`Settings.renderMode` is one of fixed/density/drift, shared by waveform and feature plots; saved independent drift/density booleans migrate to this single choice. P cycles the modes; D has no binding. Q switches amplitudes/principal components; L switches brush/lasso. App text selection is disabled except for editable fields and header content; selected header text retains native Cmd/Ctrl-C rather than invoking plot copying.
+
+`shell/FileMenu.tsx` holds the Waveform icon's keyboard-accessible dropdown, with Add folder…, Add files… and Clear files. Both pickers add to the workspace through `FileInputs.tsx`; Clear files returns directly to the start screen without a confirmation dialog. Closed menus leave app shortcuts available.
 
 ## Clipboard comparisons
 

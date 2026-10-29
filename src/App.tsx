@@ -20,7 +20,7 @@ import {
 } from "./tiles/TileWall";
 import { PanelTopOpen } from "lucide-react";
 import { CutDownloads, cutDownloadKey, writeCutDrag } from "./app/cut-downloads";
-import { usePreference } from "./preferences";
+import { usePreference, restoreSettings } from "./preferences";
 import { useRecordingHistory, type RecordingSelection } from "./app/navigation";
 import { request } from "./worker/client";
 import {
@@ -35,27 +35,21 @@ import {
   type SplitPoint,
   type SwapState,
   type TileFeedback,
+  type FeatureMode,
 } from "./types";
 import { Superseded, type EditRequest } from "./worker/protocol";
 import { TOOL_PANELS, type PanelContext, type PanelName } from "./shell/panels";
 import { useShortcuts } from "./app/shortcuts";
 import { useAnalyses } from "./app/analyses";
 import { useCopies } from "./app/copies";
+import { useFeatureSpace } from "./app/features";
 import { useSplit } from "./app/split";
 import { CopyWindow } from "./shell/CopyWindow";
 import { downloadBlob, organiseFiles } from "./files";
 function readSettings(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem("waveform-desktop-settings") || "{}");
-    return Object.fromEntries(
-      Object.entries(defaultSettings).map(([key, value]) => [
-        key,
-        typeof saved[key] === typeof value &&
-        (typeof value !== "number" || Number.isFinite(saved[key]))
-          ? saved[key]
-          : value,
-      ]),
-    ) as Settings;
+    return restoreSettings(saved);
   } catch {
     return defaultSettings;
   }
@@ -171,6 +165,12 @@ export default function App() {
   const [sources, setSources] = useState<number[]>([1]);
   const [dest, setDest] = useState(2);
   const [tool, setTool] = useState("brush");
+  const [featurePreference, setFeatureMode] = usePreference<FeatureMode>(
+    "feature-mode",
+    "amplitudes",
+  );
+  const featureMode = featurePreference === "pca" ? "pca" : "amplitudes";
+  const featureSpace = useFeatureSpace(data, featureMode, settings.pcaSamples);
   const [isolate, setIsolate] = usePreference("isolate", false);
   const [shown, setShown] = usePreference<VisiblePlots>("plots", {
     waveforms: true,
@@ -617,6 +617,9 @@ export default function App() {
     }
   };
   const polygon = (points: number[], ax: number, ay: number) => {
+    if (!featureSpace.coordinates) {
+      return;
+    }
     if (!sources.length) {
       setNotice("Select one or more source cells in feature space.");
       return;
@@ -628,7 +631,8 @@ export default function App() {
       ax,
       ay,
       polygon: points,
-      description: `${tool === "brush" ? "Brush" : "Lasso"} ${sources.join(", ")} → ${dest}`,
+      featureKey: featureMode === "pca" ? featureSpace.coordinates.key : undefined,
+      description: `${tool === "brush" ? "Brush" : "Lasso"}${featureMode === "pca" ? " (PCs)" : ""} ${sources.join(", ")} → ${dest}`,
     });
   };
   const exportCut = async () => {
@@ -652,6 +656,7 @@ export default function App() {
   // Actions are wrapped so they are looked up when a key is pressed (some are
   // declared further down this component).
   useShortcuts({
+    toggleFeatures: () => setFeatureMode((mode) => (mode === "pca" ? "amplitudes" : "pca")),
     ready,
     dragging: !!dragComparison,
     swap,
@@ -847,7 +852,6 @@ export default function App() {
           {toolbar ? (
             <Toolbar
               {...{ data, ready, busy, progress, message, shown }}
-              unexported={dirtySessions.current.size > 0}
               onHome={goHome}
               onOpenFiles={openFiles}
               onOpenFolder={openFolder}
@@ -856,9 +860,8 @@ export default function App() {
               onToggle={showPlot}
             >
               <RenderingToggles
-                drift={settings.drift}
-                density={settings.density}
-                onToggle={(mode) => update(mode, !settings[mode])}
+                mode={settings.renderMode}
+                onChange={(mode) => update("renderMode", mode)}
               />
             </Toolbar>
           ) : (
@@ -910,6 +913,11 @@ export default function App() {
               <Divider part="position" onDrag={panes.dragDivider} />
               <FeaturePane
                 {...{ data, settings, cell, isolate, painting, grabMode }}
+                mode={featureMode}
+                onMode={setFeatureMode}
+                coordinates={featureSpace.coordinates}
+                featureMessage={featureSpace.message}
+                featureError={featureSpace.error}
                 canPaint={ready && !swap}
                 splitting={!!splitPoint}
                 onHover={setHoverCell}

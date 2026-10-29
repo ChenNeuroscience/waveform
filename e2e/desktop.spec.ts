@@ -214,6 +214,8 @@ test("plot data keeps its proportions when panes and the window resize", async (
   await page.goto("/?demo=quick");
   await page.getByText("Try it now with simulated data").click();
   await ready(page);
+  // Inspect the square point pass; density/drift finish with a full-grid resolve.
+  await page.getByRole("button", { name: "Fixed colours", exact: true }).click();
   const viewport = async () =>
     page
       .locator(".clusters canvas")

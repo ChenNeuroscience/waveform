@@ -10,6 +10,7 @@ macro_rules! getter{($ptr:ident,$len:ident,[$($field:ident).+],$typ:ty)=>{
  #[no_mangle]pub unsafe extern "C" fn $len(e:*mut Engine)->usize{let e=&*e;e.$($field).+.len()}
 };}
 mod dsp;
+mod pca;
 mod position;
 mod processing;
 mod spatial_ac;
@@ -34,6 +35,7 @@ pub struct Engine {
     /// Two u32 halves per cell of an order-independent hash of its full spike set;
     /// cleared by every label change and rebuilt on first read.
     cell_hashes: Vec<u32>,
+    pca: pca::Pca,
 }
 impl Engine {
     pub fn new(n: usize) -> Self {
@@ -51,6 +53,7 @@ impl Engine {
             groups: vec![],
             groups_dirty: true,
             cell_hashes: vec![],
+            pca: Default::default(),
         }
     }
     pub fn push(&mut self, data: &[u8]) {
@@ -95,8 +98,12 @@ impl Engine {
     fn axis(&self, i: usize, axis: usize) -> f32 {
         if axis < 4 {
             self.amplitudes[i * 4 + axis] as f32 / 255.
-        } else {
+        } else if axis == 4 {
             self.times[i] as f32 / self.times.last().copied().unwrap_or(1).max(1) as f32
+        } else if (5..9).contains(&axis) && self.pca.ready {
+            self.pca.values[i * 4 + axis - 5]
+        } else {
+            0.5
         }
     }
     pub fn relabel(&mut self, source: u16, dest: u16, swap: bool) -> usize {

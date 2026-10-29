@@ -1,7 +1,15 @@
 import { it, expect } from "vitest";
-import { fitPaneLayout, fitWindowLayout, defaultLayout } from "../src/preferences";
+import { fitPaneLayout, fitWindowLayout, defaultLayout, restoreSettings } from "../src/preferences";
 import { experimentTiming } from "../src/shell/position-info";
 import { groupRgb8, groupTextColor } from "../src/palette";
+it("restores one colour mode from the previous competing switches", () => {
+  expect(restoreSettings({ drift: true, density: true }).renderMode).toBe("drift");
+  expect(restoreSettings({ drift: false, density: true }).renderMode).toBe("density");
+  expect(restoreSettings({ drift: false, density: false }).renderMode).toBe("fixed");
+  expect(restoreSettings({ renderMode: "fixed", drift: true }).renderMode).toBe("fixed");
+  expect(restoreSettings({ renderMode: "unknown" }).renderMode).toBe("density");
+  expect(restoreSettings(null).renderMode).toBe("density");
+});
 it("has a colour and a black or white badge text colour for every group", () => {
   for (let i = 0; i < 256; i++) {
     expect(groupRgb8(i)).toHaveLength(3);

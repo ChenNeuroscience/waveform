@@ -9,7 +9,7 @@ import {
   featurePlotOrigin,
 } from "./plot-geometry";
 import { ClusterGPU, projections } from "./cluster-gpu";
-import { type ViewData, type Settings } from "../types";
+import { type ViewData, type Settings, type FeatureCoordinates } from "../types";
 
 // Feature axes span the middle FEATURE_SPAN of each square projection frame
 // (FEATURE_MARGIN either side), matching the cluster shader's x*1.86-.93.
@@ -28,6 +28,7 @@ function plotUnder([x, y]: number[], columns: number) {
  * focused group on ties and skipping hidden spikes. */
 function nearestGroup(
   data: ViewData,
+  coordinates: FeatureCoordinates,
   [px, py]: number[],
   plot: number,
   columns: number,
@@ -37,6 +38,7 @@ function nearestGroup(
   const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
   const origin = featurePlotOrigin(plot, columns);
   const timeScale = 1 / Math.max(1, data.times[data.times.length - 1] || 0);
+  const scale = coordinates.values instanceof Uint8Array ? 1 / 255 : 1;
   let group: number | null = null;
   let best = 25;
   for (let i = 0; i < data.labels.length; i++) {
@@ -45,8 +47,8 @@ function nearestGroup(
     if ((isolate && label !== selected) || time < range[0] || time > range[1]) {
       continue;
     }
-    const fx = FEATURE_MARGIN + (FEATURE_SPAN * data.features[i * 4 + ax]) / 255;
-    const fy = 1 - FEATURE_MARGIN - (FEATURE_SPAN * data.features[i * 4 + ay]) / 255;
+    const fx = FEATURE_MARGIN + FEATURE_SPAN * coordinates.values[i * 4 + ax] * scale;
+    const fy = 1 - FEATURE_MARGIN - FEATURE_SPAN * coordinates.values[i * 4 + ay] * scale;
     const x = origin.x + frame.x + fx * frame.width;
     const y = origin.y + frame.y + fy * frame.height;
     const distance = (px - x) ** 2 + (py - y) ** 2;
@@ -62,7 +64,9 @@ function nearestGroup(
 function toFeatureSpace(points: number[][], plot: number, columns: number) {
   const origin = featurePlotOrigin(plot, columns);
   const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
-  const clamp = (v: number) => Math.max(0, Math.min(1, v));
+  // Permit the visible margin around the unit box, so a lasso can enclose
+  // extrema at exactly 0 or 1 (particularly common after PCA scaling).
+  const clamp = (v: number) => Math.max(-0.05, Math.min(1.05, v));
   return points.flatMap(([x, y]) => [
     clamp(((x - origin.x - frame.x) / frame.width - FEATURE_MARGIN) / FEATURE_SPAN),
     clamp(1 - ((y - origin.y - frame.y) / frame.height - FEATURE_MARGIN) / FEATURE_SPAN),
@@ -71,6 +75,7 @@ function toFeatureSpace(points: number[][], plot: number, columns: number) {
 
 export function Clusters({
   data,
+  coordinates,
   settings,
   selected,
   isolate,
@@ -80,6 +85,7 @@ export function Clusters({
   onPick,
 }: {
   data: ViewData;
+  coordinates: FeatureCoordinates;
   settings: Settings;
   selected: number;
   isolate: boolean;
@@ -125,14 +131,14 @@ export function Clusters({
       if (plot === null) {
         return;
       }
-      const group = nearestGroup(data, p, plot, columns, { selected, isolate, range });
+      const group = nearestGroup(data, coordinates, p, plot, columns, { selected, isolate, range });
       if (group !== null) {
         onPick(group, key === "f", event.shiftKey);
       }
     };
     window.addEventListener("keydown", pick, true);
     return () => window.removeEventListener("keydown", pick, true);
-  }, [data, selected, isolate, range, columns, tool, onPick, axes]);
+  }, [data, coordinates, selected, isolate, range, columns, tool, onPick, axes]);
   useEffect(() => {
     const c = canvas.current!;
     const restore = () => setVersion((v) => v + 1);
@@ -165,14 +171,25 @@ export function Clusters({
       if (!gpu.current && canvas.current) {
         gpu.current = new ClusterGPU(canvas.current);
       }
-      gpu.current?.draw(data, settings, selected, isolate, range, axes, columns);
+      gpu.current?.draw(data, coordinates, settings, selected, isolate, range, axes, columns);
     } catch (e) {
       setError(String(e));
     }
-    // Only point size and drift affect the points; other settings (rate maps,
+    // Only point size and colour mode affect the points; other settings (rate maps,
     // analysis windows) must not redraw the whole population.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only point size and drift among the settings affect the drawn points
-  }, [data, settings.pointSize, settings.drift, selected, isolate, range, axes, version, columns]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only point size and colour mode among the settings affect the drawn points
+  }, [
+    data,
+    coordinates,
+    settings.pointSize,
+    settings.renderMode,
+    selected,
+    isolate,
+    range,
+    axes,
+    version,
+    columns,
+  ]);
   const grid = featureGridSize(columns);
   const point = (e: React.PointerEvent) => {
     const b = e.currentTarget.getBoundingClientRect();
@@ -213,6 +230,9 @@ export function Clusters({
       className="clusters"
       ref={wrapper}
       data-columns={columns}
+      data-features={coordinates.mode}
+      data-colour-mode={settings.renderMode}
+      data-feature-key={coordinates.key}
       style={grid}
       onPointerDown={startStroke}
       onPointerMove={extendStroke}
@@ -232,9 +252,19 @@ export function Clusters({
         }}
       >
         {axes.map(([x, y], i) => (
-          <div key={i} data-x-axis={`A${x + 1}`} data-y-axis={`A${y + 1}`}>
-            <span className="axis-y">A{y + 1}</span>
-            <span className="axis-x">A{x + 1}</span>
+          <div
+            key={i}
+            data-x-axis={`${coordinates.mode === "pca" ? "PC" : "A"}${x + 1}`}
+            data-y-axis={`${coordinates.mode === "pca" ? "PC" : "A"}${y + 1}`}
+          >
+            <span className="axis-y">
+              {coordinates.mode === "pca" ? "PC" : "A"}
+              {y + 1}
+            </span>
+            <span className="axis-x">
+              {coordinates.mode === "pca" ? "PC" : "A"}
+              {x + 1}
+            </span>
           </div>
         ))}
       </div>

@@ -155,6 +155,15 @@ export function SettingsPanel({
         onChange={(v) => update("pointSize", v)}
       />
       <Toggle label="Isolate selected cell" checked={isolate} onChange={onIsolate} />
+      <Slider
+        label="PCA fit sample size"
+        value={settings.pcaSamples}
+        min={500}
+        max={20000}
+        step={500}
+        unit="spikes"
+        onChange={(v) => update("pcaSamples", v)}
+      />
       <h3>Spatial & temporal analysis</h3>
       <Slider
         label="Spatial bin width"
@@ -286,6 +295,7 @@ export function HelpPanel() {
         Import a selection of LTX files or a folder to begin. Add cut files at any time.
       </p>
       <h3>Navigation</h3>
+      <Shortcut keys="⌘ / Ctrl O" text="Add files…" />
       <Shortcut keys="0–9" text="Jump to tetrode (ones digit)" />
       <Shortcut keys="O" text="Toggle tetrode tens digit" />
       <Shortcut keys="↑ / ↓" text="Previous / next trial" />
@@ -296,7 +306,7 @@ export function HelpPanel() {
       <h3>Cut editing</h3>
       <Shortcut keys="Drag tile" text="Merge higher cell number into lower" />
       <Shortcut keys="Right drag" text="Adjust a split preview from either waveform tile" />
-      <Shortcut keys="L" text="Lasso source spikes into destination" />
+      <Shortcut keys="L" text="Switch brush / lasso cutting" />
       <Shortcut keys="E / F" text="Group under pointer as destination / source" />
       <Shortcut keys="Shift F" text="Toggle the group under the pointer in the source set" />
       <Shortcut
@@ -321,13 +331,17 @@ export function HelpPanel() {
         text="After 500 ms: click cells and trials to include them; over the position pane, cells add spike dots. Esc finishes."
       />
       <h3>Views</h3>
+      <Shortcut keys="Q" text="Switch amplitudes / principal components" />
       <Shortcut keys="Hover tile" text="Show cell spikes on the position path" />
       <Shortcut keys="Hold Space" text="Click a plot to copy it; click a window to close it" />
       <Shortcut
         keys="W / R / A / C / V / T"
         text="Show only waves / spatial / spatial autocorrelation / direction / speed / temporal autocorrelation; Shift adds or removes"
       />
-      <Shortcut keys="D / P" text="Time colours (features and waveforms) / waveform density" />
+      <Shortcut
+        keys="P"
+        text="Cycle fixed colours / density / drift for waveforms and cluster plots"
+      />
       <Shortcut
         keys="Esc"
         text="Close panel or leave the lasso; otherwise hide / show the toolbar"
@@ -413,7 +427,7 @@ export function HeadersPanel({ headers }: { headers: Record<string, Record<strin
         />
       </div>
       {Object.entries(headers).map(([file, h]) => (
-        <div key={file}>
+        <div key={file} data-text-selectable>
           <h3>{file}</h3>
           <dl className="headers-list">
             {Object.entries(h)

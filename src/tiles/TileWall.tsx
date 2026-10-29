@@ -210,7 +210,7 @@ export function TileWall({
   };
   const signature = visible.join(",");
   const waveScope = `${data.session}|${data.revision}`;
-  const waveKey = `${waveScope}|${signature}|${settings.density}|${settings.drift}|${waveFrameWidth}`;
+  const waveKey = `${waveScope}|${signature}|${settings.renderMode}|${waveFrameWidth}`;
   const wavesReady = wavesDone === waveKey;
   const analysisKey = `${data.key}|${posKey}|${analysisSettingsKey(settings)}|SC:${shown.sc ? settings.scMinOverlap : "off"}`;
   // Cancels in-flight tile gestures whenever the cut or analyses change.
@@ -397,11 +397,10 @@ export function TileWall({
       data,
       cells: visible,
       layout,
-      density: settings.density,
-      drift: settings.drift,
+      mode: settings.renderMode,
       readyKey: waveKey,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- waveKey covers the visible cells, density, drift and frame width
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- waveKey covers the visible cells, colour mode and frame width
   }, [data, waveKey, columns, tileStride, gpuGeneration]);
   const waveWidth = shown.waveforms ? `${ROW * 4}px` : "0px";
   useEffect(() => {
@@ -457,7 +456,7 @@ export function TileWall({
     scope,
     signature,
     selected,
-    settings.density,
+    settings.renderMode,
     shown.waveforms,
   ]);
   const isSplitTile = (cell: number) =>
@@ -533,7 +532,8 @@ export function TileWall({
         >
           {shown.waveforms && (
             <canvas
-              data-density={settings.density && wavesReady ? "ready" : "pending"}
+              data-colour-mode={settings.renderMode}
+              data-density={settings.renderMode === "density" && wavesReady ? "ready" : "pending"}
               data-waves={wavesReady ? "ready" : "pending"}
               ref={waveCanvas}
               className="tile-wave-canvas"

@@ -67,6 +67,8 @@ test("feature corner labels survive Space copies; settings and divider positions
   page,
 }) => {
   await demo(page);
+  // The density composite uses a full-grid viewport; inspect the point pass here.
+  await page.getByRole("button", { name: "Fixed colours", exact: true }).click();
   const labels = page.locator(".projection-labels > div");
   await expect(labels).toHaveCount(6);
   await expect(labels.first().locator(".axis-y")).toHaveText("A2");

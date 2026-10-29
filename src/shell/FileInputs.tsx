@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 
-/** The hidden file and folder pickers behind "open files" / "open folder". */
+/** The file and folder pickers used to add recordings to the current workspace. */
 export function FileInputs({
   fileInput,
   folderInput,

@@ -2,6 +2,7 @@
  * latest state and actions through a ref, so it never acts on a stale render. */
 import { useEffect, useRef, type RefObject } from "react";
 import type { PlotMode, Settings, SwapState, SplitPoint, Trial } from "../types";
+import { RENDERING_MODES } from "../types";
 
 export interface ShortcutContext {
   ready: boolean;
@@ -45,6 +46,7 @@ export interface ShortcutContext {
   /** Choose a cut of the current tetrode ("" for no cut). */
   chooseCut: (cutId: string) => void;
   showPlot: (mode: PlotMode, multiple: boolean) => void;
+  toggleFeatures: () => void;
 }
 /** The item `delta` steps from `current` in `items`, or undefined past either end. */
 function step<T>(items: T[], current: T, delta: number) {
@@ -107,7 +109,7 @@ export function useShortcuts(context: ShortcutContext) {
     let copyPressed = 0;
     const key = (e: KeyboardEvent) => {
       const c = latest.current;
-      if ((e.target as HTMLElement).matches("input,select,textarea")) {
+      if ((e.target as HTMLElement).matches('input,select,textarea,[contenteditable="true"]')) {
         return;
       }
       if (c.dragging) {
@@ -115,6 +117,20 @@ export function useShortcuts(context: ShortcutContext) {
         return;
       }
       const cmd = e.ctrlKey || e.metaKey;
+      const selection = window.getSelection();
+      const selectedElement =
+        selection?.anchorNode instanceof Element
+          ? selection.anchorNode
+          : selection?.anchorNode?.parentElement;
+      if (
+        cmd &&
+        e.key.toLowerCase() === "c" &&
+        selection &&
+        !selection.isCollapsed &&
+        selectedElement?.closest("[data-text-selectable]")
+      ) {
+        return;
+      }
       if (c.copying) {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -209,11 +225,18 @@ export function useShortcuts(context: ShortcutContext) {
       if (e.key === "z") {
         c.togglePane("history");
       }
-      if (e.key === "d") {
-        c.update("drift", !c.settings.drift);
+      if (e.key.toLowerCase() === "p" && !e.repeat) {
+        e.preventDefault();
+        c.update(
+          "renderMode",
+          RENDERING_MODES[
+            (RENDERING_MODES.indexOf(c.settings.renderMode) + 1) % RENDERING_MODES.length
+          ],
+        );
       }
-      if (e.key === "p") {
-        c.update("density", !c.settings.density);
+      if (e.key.toLowerCase() === "q" && c.ready && !e.repeat) {
+        e.preventDefault();
+        c.toggleFeatures();
       }
       const group = c.ready && !e.repeat ? c.hoverCell : null;
       if (e.key.toLowerCase() === "e" && group !== null) {
@@ -222,8 +245,9 @@ export function useShortcuts(context: ShortcutContext) {
       if (e.key.toLowerCase() === "f" && group !== null) {
         c.selectSource(group, e.shiftKey);
       }
-      if (e.key === "l") {
-        c.setTool("lasso");
+      if (e.key.toLowerCase() === "l" && c.ready && !e.repeat) {
+        e.preventDefault();
+        c.setTool(c.tool === "lasso" ? "brush" : "lasso");
       }
       if (e.key === "Enter" && c.ready) {
         e.preventDefault();

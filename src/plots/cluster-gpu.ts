@@ -1,6 +1,7 @@
 import { program } from "./webgl";
+import { DENSITY_COLOUR_GLSL } from "./density-colours";
 import { groupPalette } from "../palette";
-import type { Settings, ViewData } from "../types";
+import type { FeatureCoordinates, Settings, ViewData } from "../types";
 import { projectionFrame, featurePlotOrigin, FEATURE_PLOT } from "./plot-geometry";
 
 /** The six feature-space projections drawn as GPU points, plus the drift view. */
@@ -25,12 +26,18 @@ precision highp float;in vec4 shade;in float time;out vec4 outColor;void main(){
 // Drift: accumulate (count, summed time) per pixel, then colour each pixel by its
 // mean spike time, red at the start of the recording to green at the end.
 const accumulate = `#version 300 es
-precision highp float;in vec4 shade;in float time;out vec4 sums;void main(){if(shade.a==0.||distance(gl_PointCoord,vec2(.5))>.5)discard;sums=vec4(1.,time,0.,0.);}`;
+precision highp float;uniform float unit;in vec4 shade;in float time;out vec4 sums;void main(){if(shade.a==0.||distance(gl_PointCoord,vec2(.5))>.5)discard;sums=vec4(unit,time*unit,0.,0.);}`;
 const resolveVertex = `#version 300 es
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0.,1.);}`;
 const resolveFragment = `#version 300 es
-precision highp float;uniform sampler2D sums;out vec4 c;
-void main(){vec2 s=texelFetch(sums,ivec2(gl_FragCoord.xy),0).rg;if(s.r<.5)discard;float t=s.g/s.r;c=vec4(1.-t,t,0.,1.);}`;
+precision highp float;uniform sampler2D sums;uniform float unit;uniform float total;uniform int mode;out vec4 c;
+${DENSITY_COLOUR_GLSL}
+void main(){
+ vec2 s=texelFetch(sums,ivec2(gl_FragCoord.xy),0).rg/unit;
+ if(s.r<.5)discard;
+ float t=s.g/s.r;
+ c=vec4(mode==1?vec3(1.-t,t,0.):densityColour(sqrt(s.r/max(1.,total)*1000.)),1.);
+}`;
 export const projections = [
   [0, 1],
   [0, 2],
@@ -51,6 +58,14 @@ export class ClusterGPU {
     h: number;
   } | null = null;
   empty: WebGLVertexArrayObject;
+  private timed = false;
+  private countFormat: number;
+  private unit = 1;
+  private countsFor: {
+    key: string;
+    points: FeatureCoordinates["values"];
+    labels: Uint16Array | null;
+  } | null = null;
   cache = new Map<
     string,
     {
@@ -58,6 +73,7 @@ export class ClusterGPU {
       buffers: WebGLBuffer[];
       n: number;
       labels: Uint16Array;
+      features: Uint8Array | Float32Array;
       timeScale: number;
     }
   >();
@@ -74,15 +90,17 @@ export class ClusterGPU {
     this.gl = gl;
     this.p = program(gl, vertex, fragment);
     this.empty = gl.createVertexArray()!;
-    // Mean-time drift needs additive blending into a float target; where that is
-    // unsupported, drift is not drawn and points keep their cell colours.
-    if (gl.getExtension("EXT_color_buffer_float") && gl.getExtension("EXT_float_blend")) {
-      this.sums = program(gl, vertex, accumulate);
-      this.resolve = program(gl, resolveVertex, resolveFragment);
-    }
+    // Use the same accumulation formats and fallback as the waveform renderer.
+    const float = gl.getExtension("EXT_color_buffer_float");
+    this.timed = !!(float && gl.getExtension("EXT_float_blend"));
+    this.countFormat = this.timed ? gl.RG32F : float ? gl.R16F : gl.RGBA8;
+    this.unit = float ? 1 : 1 / 255;
+    this.sums = program(gl, vertex, accumulate);
+    this.resolve = program(gl, resolveVertex, resolveFragment);
   }
   draw(
     data: ViewData,
+    coordinates: FeatureCoordinates,
     s: Settings,
     selected: number,
     isolate: boolean,
@@ -105,9 +123,16 @@ export class ClusterGPU {
       const buffers = [gl.createBuffer()!, gl.createBuffer()!, gl.createBuffer()!];
       gl.bindVertexArray(vao);
       gl.bindBuffer(gl.ARRAY_BUFFER, buffers[0]);
-      gl.bufferData(gl.ARRAY_BUFFER, data.features, gl.STATIC_DRAW);
+      gl.bufferData(gl.ARRAY_BUFFER, coordinates.values, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(0);
-      gl.vertexAttribPointer(0, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+      gl.vertexAttribPointer(
+        0,
+        4,
+        coordinates.values instanceof Uint8Array ? gl.UNSIGNED_BYTE : gl.FLOAT,
+        coordinates.values instanceof Uint8Array,
+        0,
+        0,
+      );
       gl.bindBuffer(gl.ARRAY_BUFFER, buffers[1]);
       gl.bufferData(gl.ARRAY_BUFFER, data.times, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(1);
@@ -121,6 +146,7 @@ export class ClusterGPU {
         buffers,
         n: data.labels.length,
         labels: data.labels,
+        features: coordinates.values,
         timeScale: 1 / Math.max(1, data.times[data.times.length - 1] || 0),
       };
       this.cache.set(key, cached);
@@ -134,77 +160,113 @@ export class ClusterGPU {
     } else {
       this.cache.delete(key);
       this.cache.set(key, cached);
+      if (cached.features !== coordinates.values) {
+        gl.bindVertexArray(cached.vao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, cached.buffers[0]);
+        gl.bufferData(gl.ARRAY_BUFFER, coordinates.values, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(
+          0,
+          4,
+          coordinates.values instanceof Uint8Array ? gl.UNSIGNED_BYTE : gl.FLOAT,
+          coordinates.values instanceof Uint8Array,
+          0,
+          0,
+        );
+        cached.features = coordinates.values;
+      }
       if (cached.labels !== data.labels) {
         gl.bindBuffer(gl.ARRAY_BUFFER, cached.buffers[2]);
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.labels);
         cached.labels = data.labels;
       }
     }
-    const mean = s.drift && this.sums && this.resolve;
-    const p = mean ? this.sums! : this.p;
-    gl.useProgram(p);
-    gl.bindVertexArray(cached.vao);
-    if (mean) {
-      this.bindTarget(w, h);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.disable(gl.DEPTH_TEST);
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.ONE, gl.ONE);
-    } else {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.clearColor(1, 1, 1, 1);
-      // Keep the focused group's points in front without sorting or uploading
-      // the population buffers again. Equal-depth groups retain their draw order.
-      gl.enable(gl.DEPTH_TEST);
-      gl.depthFunc(gl.LEQUAL);
-      gl.depthMask(true);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    const aggregate = s.renderMode === "density" || (s.renderMode === "drift" && this.timed);
+    const countsKey = `${key}|${s.pointSize}|${w}|${h}|${dpr}|${columns}|${range}|${isolate ? selected : "all"}`;
+    const labels = isolate ? data.labels : null;
+    const reuseCounts =
+      aggregate &&
+      this.countsFor?.key === countsKey &&
+      this.countsFor.points === coordinates.values &&
+      this.countsFor.labels === labels;
+    const p = aggregate ? this.sums! : this.p;
+    if (!reuseCounts) {
+      gl.useProgram(p);
+      gl.bindVertexArray(cached.vao);
+      if (aggregate) {
+        this.bindTarget(w, h);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.disable(gl.DEPTH_TEST);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);
+      } else {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.clearColor(1, 1, 1, 1);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        gl.depthMask(true);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      }
+      gl.enable(gl.SCISSOR_TEST);
+      const u = (n: string) => gl.getUniformLocation(p, n);
+      gl.uniform1f(u("size"), s.pointSize * dpr);
+      gl.uniform1f(u("opacity"), 1);
+      if (aggregate) {
+        gl.uniform1f(u("unit"), this.unit);
+      }
+      gl.uniform1i(u("selected"), selected);
+      gl.uniform1i(u("isolate"), isolate ? 1 : 0);
+      gl.uniform2f(u("range"), range[0], range[1]);
+      gl.uniform1f(u("timeScale"), cached.timeScale);
+      axes.forEach(([ax, ay], i) => {
+        const origin = featurePlotOrigin(i, columns);
+        const x = Math.round(origin.x * dpr);
+        const y = Math.round(h - (origin.y + FEATURE_PLOT) * dpr);
+        const hh = Math.round(FEATURE_PLOT * dpr);
+        const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
+        gl.viewport(
+          x + frame.x * dpr,
+          y + hh - (frame.y + frame.height) * dpr,
+          frame.width * dpr,
+          frame.height * dpr,
+        );
+        gl.scissor(
+          x + frame.x * dpr,
+          y + hh - (frame.y + frame.height) * dpr,
+          frame.width * dpr,
+          frame.height * dpr,
+        );
+        gl.uniform1i(u("ax"), ax);
+        gl.uniform1i(u("ay"), ay);
+        gl.drawArrays(gl.POINTS, 0, cached!.n);
+      });
+      gl.disable(gl.SCISSOR_TEST);
+      if (aggregate) {
+        this.countsFor = { key: countsKey, points: coordinates.values, labels };
+      }
     }
-    gl.enable(gl.SCISSOR_TEST);
-    const u = (n: string) => gl.getUniformLocation(p, n);
-    gl.uniform1f(u("size"), s.pointSize * dpr);
-    gl.uniform1f(u("opacity"), 1);
-    gl.uniform1i(u("selected"), selected);
-    gl.uniform1i(u("isolate"), isolate ? 1 : 0);
-    gl.uniform2f(u("range"), range[0], range[1]);
-    gl.uniform1f(u("timeScale"), cached.timeScale);
-    axes.forEach(([ax, ay], i) => {
-      const origin = featurePlotOrigin(i, columns);
-      const x = Math.round(origin.x * dpr);
-      const y = Math.round(h - (origin.y + FEATURE_PLOT) * dpr);
-      const hh = Math.round(FEATURE_PLOT * dpr);
-      const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
-      gl.viewport(
-        x + frame.x * dpr,
-        y + hh - (frame.y + frame.height) * dpr,
-        frame.width * dpr,
-        frame.height * dpr,
-      );
-      gl.scissor(
-        x + frame.x * dpr,
-        y + hh - (frame.y + frame.height) * dpr,
-        frame.width * dpr,
-        frame.height * dpr,
-      );
-      gl.uniform1i(u("ax"), ax);
-      gl.uniform1i(u("ay"), ay);
-      gl.drawArrays(gl.POINTS, 0, cached!.n);
-    });
-    gl.disable(gl.SCISSOR_TEST);
-    if (mean) {
+    if (aggregate) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.disable(gl.DEPTH_TEST);
       gl.viewport(0, 0, w, h);
       gl.clearColor(1, 1, 1, 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.disable(gl.BLEND);
-      gl.useProgram(this.resolve);
+      gl.useProgram(this.resolve!);
       gl.bindVertexArray(this.empty);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.target!.texture);
       gl.uniform1i(gl.getUniformLocation(this.resolve!, "sums"), 0);
+      gl.uniform1i(gl.getUniformLocation(this.resolve!, "mode"), s.renderMode === "drift" ? 1 : 0);
+      gl.uniform1f(gl.getUniformLocation(this.resolve!, "unit"), this.unit);
+      // Point footprints cover far less of a projection than waveform traces.
+      // Scale their count fraction accordingly, using the identical colour ramp.
+      gl.uniform1f(
+        gl.getUniformLocation(this.resolve!, "total"),
+        (isolate ? data.counts[selected] : data.n) * s.pointSize ** 2,
+      );
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
   }
@@ -220,10 +282,14 @@ export class ClusterGPU {
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RG32F, w, h);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, this.countFormat, w, h);
       const fbo = gl.createFramebuffer()!;
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        throw new Error("Feature density target is unavailable.");
+      }
+      this.countsFor = null;
       this.target = { texture, fbo, w, h };
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.target.fbo);

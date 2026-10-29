@@ -458,6 +458,7 @@ pub unsafe extern "C" fn engine_resident_bytes(e: *mut Engine) -> usize {
         + e.times.capacity() * 4
         + e.amplitudes.capacity()
         + e.labels.capacity() * 2
+        + e.pca.bytes()
         + e.wave_bytes()
         + e.edit
             .preview
