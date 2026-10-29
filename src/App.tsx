@@ -707,7 +707,8 @@ export default function App() {
     setMessage("Preparing simulated recordings…");
     try {
       const quick = new URLSearchParams(location.search).get("demo") === "quick";
-      const stress = new URLSearchParams(location.search).get("demo") === "stress";
+      const demo = new URLSearchParams(location.search).get("demo");
+      const stress = demo === "stress" ? "1m" : demo === "stress-9m" ? "9m" : undefined;
       const seed = quick ? 4271 : crypto.getRandomValues(new Uint32Array(1))[0];
       const files = await request(
         "demo",

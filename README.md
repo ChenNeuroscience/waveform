@@ -2,7 +2,7 @@
 
 [![Waveform video introduction](img/demo_youtube.png)](https://www.youtube.com/watch?v=36o69CPu-1E)
 
-Waveform is a browser-based GUI for working with extra-neuronal tetrode waveform data. Drop in a folder of LTX files (`.set`, `.pos`, tetrode and cut files) to see every cell's waveforms, feature-space projections, rate maps, tuning and temporal autocorrelograms, then merge, split, paint and relabel cells and export the cut. 
+Waveform is a browser-based GUI for working with extra-neuronal tetrode waveform data. Drop in a folder of LTX files (`.set`, `.pos`, tetrode and cut files) to see every cell's waveforms, feature-space projections, rate maps, tuning and temporal autocorrelograms, then merge, split, paint and relabel cells and export the cut.
 
 **[Open Waveform](https://chenneuroscience.github.io/waveform/)**, or try it with the simulated data on its start screen.
 
@@ -32,6 +32,8 @@ npm run build
 npx playwright install chromium
 npm run test:e2e     # browser tests (Playwright)
 ```
+
+The default browser stress test uses 1M spikes. To opt into the 9M case, run `WAVEFORM_STRESS_9M=1 npm run test:e2e -- e2e/synthetic.spec.ts`; it is skipped in ordinary runs and CI.
 
 GitHub Actions runs these checks on every push and pull request, and deploys `main` to GitHub Pages.
 

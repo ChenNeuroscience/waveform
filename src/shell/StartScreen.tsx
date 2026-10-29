@@ -69,8 +69,10 @@ export function StartScreen(p: {
               {new URLSearchParams(location.search).get("demo") === "quick"
                 ? "Quick preview"
                 : new URLSearchParams(location.search).get("demo") === "stress"
-                  ? "9 million spikes · 100 cells · stress test"
-                  : "~50k spikes/tetrode · 20 minutes · 5 trials"}
+                  ? "1 million spikes · 100 cells · stress test"
+                  : new URLSearchParams(location.search).get("demo") === "stress-9m"
+                    ? "9 million spikes · 100 cells · optional stress test"
+                    : "~50k spikes/tetrode · 20 minutes · 5 trials"}
             </small>
           </span>
         </button>
