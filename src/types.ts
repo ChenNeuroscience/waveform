@@ -30,6 +30,7 @@ export interface Settings {
   maxRate: number;
   rateMapSteps: number;
   acWindow: number;
+  scMinOverlap: number;
   leds: number;
   maxSpeed: number;
   posSmooth: number;
@@ -46,6 +47,7 @@ export const defaultSettings: Settings = {
   maxRate: 0,
   rateMapSteps: 5,
   acWindow: 100,
+  scMinOverlap: 20,
   leds: 2,
   maxSpeed: 4,
   posSmooth: 0.3,
@@ -53,7 +55,7 @@ export const defaultSettings: Settings = {
   speedBin: 4,
   speedMax: 45,
 };
-export type PlotMode = "waveforms" | "spatial" | "direction" | "speed" | "ac";
+export type PlotMode = "waveforms" | "spatial" | "direction" | "speed" | "ac" | "sc";
 export interface HistoryEntry {
   id: string;
   description: string;
@@ -132,6 +134,8 @@ export interface AnalysisData {
   speed: Float32Array;
   speedDwell: Float32Array;
   ac: Float32Array;
+  /** Full linear spatial autocorrelation, (2*width-1) by (2*height-1), if requested. */
+  spatialAc?: Float32Array;
   refractory: number;
   rate: number;
 }

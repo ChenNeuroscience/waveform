@@ -134,7 +134,7 @@ export function Toolbar(p: {
         <Settings2 size={17} />
       </button>
       <span className="tool-separator" />
-      {(["waveforms", "spatial", "direction", "speed", "ac"] as PlotMode[]).map((m) => (
+      {(["waveforms", "spatial", "sc", "direction", "speed", "ac"] as PlotMode[]).map((m) => (
         <button
           key={m}
           className={`plot-toggle ${p.shown[m] ? "checked" : ""}`}
@@ -145,6 +145,7 @@ export function Toolbar(p: {
               direction: "Head direction",
               speed: "Speed",
               ac: "Autocorrelation",
+              sc: "Spatial autocorrelation",
             }[m]
           }
           aria-pressed={p.shown[m]}
@@ -155,6 +156,7 @@ export function Toolbar(p: {
               direction: "Head direction [C]",
               speed: "Speed tuning [V]",
               ac: "Autocorrelation [T]",
+              sc: "Spatial autocorrelogram [A]",
             }[m] + " · Shift-click to show several"
           }
           onClick={(e) => p.onToggle(m, e.shiftKey)}
@@ -166,6 +168,7 @@ export function Toolbar(p: {
               direction: "DIR",
               speed: "SPD",
               ac: "TC",
+              sc: "SC",
             }[m]
           }
         </button>

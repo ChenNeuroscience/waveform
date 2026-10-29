@@ -201,6 +201,15 @@ export function SettingsPanel({
         onChange={(v) => update("acWindow", v)}
       />
       <Slider
+        label="Spatial AC minimum overlap"
+        value={settings.scMinOverlap}
+        min={2}
+        max={200}
+        step={1}
+        unit="bins"
+        onChange={(v) => update("scMinOverlap", v)}
+      />
+      <Slider
         label="Direction bin width"
         value={settings.dirBin}
         min={2}
@@ -303,17 +312,20 @@ export function HelpPanel() {
       <Shortcut keys="⌘ / Ctrl Z" text="Undo" />
       <Shortcut keys="⌘ / Ctrl ⇧ Z" text="Redo" />
       <Shortcut keys="⌘ / Ctrl S" text="Export .cut" />
-      <Shortcut keys="⌘ / Ctrl C" text="Copy the selected cell's stats and plots" />
+      <Shortcut
+        keys="⌘ / Ctrl C"
+        text="Copy the hovered position pane, or the selected cell's stats and plots"
+      />
       <Shortcut
         keys="Hold ⌘ / Ctrl C"
-        text="Copy mode: click tiles to pick several, or select all; Esc finishes"
+        text="After 500 ms: click cells and trials to include them; over the position pane, cells add spike dots. Esc finishes."
       />
       <h3>Views</h3>
       <Shortcut keys="Hover tile" text="Show cell spikes on the position path" />
       <Shortcut keys="Hold Space" text="Click a plot to copy it; click a window to close it" />
       <Shortcut
-        keys="W / R / C / V / T"
-        text="Show only waves / spatial / direction / speed / autocorrelation; Shift adds or removes"
+        keys="W / R / A / C / V / T"
+        text="Show only waves / spatial / spatial autocorrelation / direction / speed / temporal autocorrelation; Shift adds or removes"
       />
       <Shortcut keys="D / P" text="Time colours (features and waveforms) / waveform density" />
       <Shortcut

@@ -4,6 +4,7 @@ import type { AnalysisData, PlotMode, Settings } from "../types";
 
 export const TILE_PLOTS = [
   { mode: "spatial", selector: ".tile-spatial", name: "Spatial rate map" },
+  { mode: "sc", selector: ".tile-sc", name: "Spatial autocorrelation" },
   { mode: "direction", selector: ".tile-direction", name: "Head direction" },
   { mode: "speed", selector: ".tile-speed", name: "Speed" },
   { mode: "ac", selector: ".tile-ac", name: "Autocorrelation" },

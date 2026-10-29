@@ -83,6 +83,7 @@ export function analyse(
   duration: number,
   pos: Position | undefined,
   s: Settings,
+  spatialAc = false,
 ): AnalysisData {
   w.engine_analyse(
     engine,
@@ -97,6 +98,9 @@ export function analyse(
     s.speedBin,
     s.speedMax,
   );
+  if (spatialAc) {
+    w.engine_analyse_sc(engine, s.scMinOverlap);
+  }
   const meta = new Float64Array(w.memory.buffer, w.engine_analysis_meta(engine), 8).slice();
   const array = (name: "spatial" | "spikes" | "direction" | "speed" | "speed_dwell" | "ac") =>
     copyF32(w, w[`engine_analysis_${name}`](engine), w[`engine_analysis_${name}_len`](engine));
@@ -115,5 +119,8 @@ export function analyse(
     speed: array("speed"),
     speedDwell: array("speed_dwell"),
     ac: array("ac"),
+    spatialAc: spatialAc
+      ? copyF32(w, w.engine_analysis_sc(engine), w.engine_analysis_sc_len(engine))
+      : undefined,
   };
 }

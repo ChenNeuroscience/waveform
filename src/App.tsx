@@ -75,6 +75,7 @@ function onlyPlot(mode: PlotMode): VisiblePlots {
     direction: false,
     speed: false,
     ac: false,
+    sc: false,
     [mode]: true,
   };
 }
@@ -177,6 +178,7 @@ export default function App() {
     direction: true,
     speed: true,
     ac: true,
+    sc: false,
   });
 
   // The toolbar (Esc hides and shows it), tool windows (the focused one is `pane`)
@@ -221,6 +223,7 @@ export default function App() {
   const cutDownloads = useRef(new CutDownloads());
   // The tile under the pointer (for S to swap), without re-rendering on hover.
   const hoveredTile = useRef<number | null>(null);
+  const positionHovered = useRef(false);
   const tileWall = useRef<TileWallHandle>(null);
 
   // Show only the chosen plot; with Shift, toggle it among the others.
@@ -666,10 +669,10 @@ export default function App() {
     setGrabMode,
     openFiles: () => fileInput.current?.click(),
     operation: (type) => operation(type),
-    copyPlot: copyToClipboard,
+    copyPlot: () => copyToClipboard(positionHovered.current ? "path" : "cells"),
     startCopyMode: (hovered) => {
       setGrabMode(false);
-      copyMode.start(hovered);
+      copyMode.start(hovered, positionHovered.current ? "path" : "cells");
     },
     selectAllCopies: () => copyMode.selectAll(),
     endCopyMode: () => copyMode.end(),
@@ -897,6 +900,12 @@ export default function App() {
                 {...{ data, trial, settings, trajectory, analysis, comparisonAnalysis }}
                 {...{ hoverCell, dragComparison, grabMode }}
                 onPopPlot={popPlot}
+                onHover={(hovered) => {
+                  positionHovered.current = hovered;
+                }}
+                copyLayers={
+                  copyMode.cells !== null && copyMode.kind === "path" ? copyMode.pathLayers : null
+                }
               />
               <Divider part="position" onDrag={panes.dragDivider} />
               <FeaturePane
@@ -936,11 +945,13 @@ export default function App() {
               )}
               {copyMode.cells && (
                 <TilePrompt
-                  label="Copy cells"
+                  label={copyMode.kind === "path" ? "Copy position paths" : "Copy cells"}
                   instructions={
-                    copyMode.trialIds.length > 1
-                      ? `Copy mode: ${copyMode.cells.length} cells across ${copyMode.trialIds.length} trials. Click tiles or trials to toggle them. Esc to finish.`
-                      : `Copy mode: click tiles to add or remove them (${copyMode.cells.length} ${copyMode.cells.length === 1 ? "cell" : "cells"} on the clipboard). Click more trials to compare. Esc to finish.`
+                    copyMode.kind === "path"
+                      ? `Copy paths: click cells to add or remove spike dots (${copyMode.cells.length} selected). Click more trials to include their paths. Esc to finish.`
+                      : copyMode.trialIds.length > 1
+                        ? `Copy mode: ${copyMode.cells.length} cells across ${copyMode.trialIds.length} trials. Click tiles or trials to toggle them. Esc to finish.`
+                        : `Copy mode: click tiles to add or remove them (${copyMode.cells.length} ${copyMode.cells.length === 1 ? "cell" : "cells"} on the clipboard). Click more trials to compare. Esc to finish.`
                   }
                 >
                   {copyMode.preparing && <div role="status">Preparing clipboard…</div>}
@@ -956,6 +967,7 @@ export default function App() {
                 <TileWall
                   ref={tileWall}
                   copying={copyMode.cells}
+                  copyingPath={copyMode.kind === "path"}
                   {...{ data, settings, trial, shown, splitPoint, swap, grabMode }}
                   selected={cell}
                   feedback={tileFeedback}
