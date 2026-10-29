@@ -73,7 +73,7 @@ export interface Requests {
     { recordings: CopyRecording[]; cells: number[]; settings: Settings },
     CopyTrialAnalysis[],
   ];
-  demo: [{ options: { quick?: boolean; stress?: boolean; seed: number } }, File[]];
+  demo: [{ options: { quick?: boolean; stress?: "1m" | "9m"; seed: number } }, File[]];
   load: [
     {
       file: File;

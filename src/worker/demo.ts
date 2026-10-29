@@ -85,7 +85,7 @@ export function recordingSource(wasm: Core, file: File): File {
 /** Generate cuts/position files; raw tetrode bytes are synthesised only when read. */
 export async function demoFiles(
   w: Core,
-  options: { quick?: boolean; stress?: boolean; seed: number },
+  options: { quick?: boolean; stress?: "1m" | "9m"; seed: number },
   progress: (fraction: number, message: string) => void,
 ): Promise<File[]> {
   const files: File[] = [];
@@ -99,7 +99,9 @@ export async function demoFiles(
           : 36000
         : options.stress
           ? trial === 0 && tet === 0
-            ? 9000000
+            ? options.stress === "9m"
+              ? 9_000_000
+              : 1_000_000
             : 50000
           : tet === 0
             ? 50000
