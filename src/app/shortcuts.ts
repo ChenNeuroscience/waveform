@@ -115,12 +115,16 @@ export function useShortcuts(context: ShortcutContext) {
       }
       const cmd = e.ctrlKey || e.metaKey;
       if (c.copying) {
-        e.preventDefault();
         if (e.key === "Escape") {
+          e.preventDefault();
           c.endCopyMode();
         }
         if (cmd && e.key === "a") {
+          e.preventDefault();
           c.selectAllCopies();
+        }
+        if (cmd && e.key === "c") {
+          e.preventDefault();
         }
         return;
       }

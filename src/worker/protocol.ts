@@ -52,8 +52,27 @@ export interface PositionRequest {
   settings: Settings;
 }
 
+/** A secondary trial to analyse for the clipboard without activating its recording. */
+export interface CopyRecording {
+  trialId: string;
+  file: File;
+  assetKey: string;
+  cut?: File;
+  cutKey?: string;
+  pos?: File;
+  posKey: string;
+}
+export interface CopyTrialAnalysis {
+  trialId: string;
+  cells: { cell: number; spikes: number; data: AnalysisData | null }[];
+}
+
 /** [payload, result] for each request type. */
 export interface Requests {
+  copy_analysis: [
+    { recordings: CopyRecording[]; cells: number[]; settings: Settings },
+    CopyTrialAnalysis[],
+  ];
   demo: [{ options: { quick?: boolean; stress?: boolean; seed: number } }, File[]];
   load: [
     {

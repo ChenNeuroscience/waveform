@@ -8,6 +8,7 @@ import { parsePosition, analyse, trajectory, type Position } from "./position";
 import { openStore, put, get } from "./history";
 import { streamFile, copyU8, copyU16, copyU32, withU16, withF32, type Core } from "./wasm";
 import { Superseded } from "./protocol";
+import { readRecording } from "./recording";
 import type { PositionRequest, RequestType, WorkerMessage, WorkerResult } from "./protocol";
 interface Asset {
   key: string;
@@ -36,6 +37,7 @@ const positions = new Map<string, Position>();
 const analyses = new Map<string, AnalysisData>();
 let wasmPromise: Promise<Core>;
 let latestLoad = 0;
+let latestCopy = 0;
 let active: Session | undefined;
 let activeAsset: Asset | undefined;
 const dbPromise = openStore();
@@ -120,78 +122,20 @@ async function loadAsset(
     cached.last = performance.now();
     return cached;
   }
-  const start = performance.now();
-  const head = new Uint8Array(await file.slice(0, 65536).arrayBuffer());
-  const { header, offset } = parseHeader(head);
-  let n = parseInt(header.num_spikes);
-  if (
-    header.spike_format !== "t,ch1,t,ch2,t,ch3,t,ch4" ||
-    parseInt(header.samples_per_spike || "50") !== 50 ||
-    parseInt(header.num_chans || "4") !== 4 ||
-    parseInt(header.bytes_per_sample || "1") !== 1 ||
-    parseInt(header.bytes_per_timestamp || "4") !== 4
-  ) {
-    throw new Error(
-      "Supported tetrodes have 4 channels, 50 signed 8-bit samples, and 32-bit timestamps.",
-    );
-  }
-  if (new TextDecoder().decode(head.subarray(offset, offset + 10)).startsWith("\r\ndata_end")) {
-    n = 0;
-  }
-  if (
-    !Number.isSafeInteger(n) ||
-    n < 0 ||
-    n > 20_000_000 ||
-    file.size < offset + n * 216 ||
-    !(parseFloat(header.timebase) > 0)
-  ) {
-    throw new Error("Invalid/truncated tetrode or unsupported spike count.");
-  }
-  evict(n * 12 + 30000000);
+  evict(Math.ceil(file.size / 216) * 12 + 30000000);
   const wasm = await wasmPromise;
-  const e = wasm.engine_new(n);
-  const a: Asset = {
-    key,
-    wasm,
-    e,
-    n,
-    header,
-    offset,
-    file,
-    ms: 0,
-    last: performance.now(),
-  };
-  try {
-    if (cut) {
-      await readCut(cut, n, wasm, e);
-    }
-    await streamFile(
-      wasm,
-      file,
-      offset,
-      n * 216,
-      32768 * 216,
-      (p, bytes) => {
-        if (id !== latestLoad) {
-          throw new Superseded("Superseded by another recording.");
-        }
-        wasm.engine_push(e, p, bytes);
-      },
-      (fraction) =>
-        progress(
-          id,
-          fraction,
-          `Preparing ${Math.round(fraction * n).toLocaleString()} / ${n.toLocaleString()} spikes`,
-        ),
-    );
-    wasm.engine_recount(e);
-    a.ms = performance.now() - start;
-    assets.set(key, a);
-    return a;
-  } catch (error) {
-    wasm.engine_free(e);
-    throw error;
-  }
+  const recording = await readRecording(wasm, file, cut, {
+    current: () => id === latestLoad,
+    progress: (fraction, n) =>
+      progress(
+        id,
+        fraction,
+        `Preparing ${Math.round(fraction * n).toLocaleString()} / ${n.toLocaleString()} spikes`,
+      ),
+  });
+  const a: Asset = { ...recording, key, wasm, last: performance.now() };
+  assets.set(key, a);
+  return a;
 }
 function view(a: Asset, s: Session, cached: boolean): ViewMessage {
   const w = a.wasm;
@@ -314,6 +258,64 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
   }
   if (m.type === "demo") {
     return demoFiles(await wasmPromise, m.options, (n, message) => progress(m.id, n, message));
+  }
+  if (m.type === "copy_analysis") {
+    if (m.cells.some((cell) => !Number.isInteger(cell) || cell < 0 || cell >= 1024)) {
+      throw new Error("Invalid clipboard cell selection.");
+    }
+    const load = latestLoad;
+    const current = () => m.id === latestCopy && load === latestLoad;
+    const results = [];
+    const w = await wasmPromise;
+    // Only one temporary population is resident at a time. This never builds a
+    // waveform order, sends a view, or changes the active engine/cut/headers.
+    for (const recording of m.recordings) {
+      if (!current()) {
+        throw new Superseded("Superseded clipboard selection.");
+      }
+      const session = sessions.get(`${recording.assetKey}|${recording.cutKey || "unsorted"}`);
+      const saved = session
+        ? await get<Uint16Array>(await dbPromise, `labels:${session.key}`)
+        : undefined;
+      if (session?.localCut && !saved) {
+        throw new Error("Modified cut state is unavailable.");
+      }
+      const file = recordingSource(w, recording.file);
+      evict(Math.ceil(file.size / 216) * 12 + 30000000);
+      const a = await readRecording(w, file, saved ? undefined : recording.cut, { current });
+      try {
+        if (saved) {
+          if (saved.length !== a.n) {
+            throw new Error("Saved cut does not match its recording.");
+          }
+          new Uint16Array(w.memory.buffer, w.engine_labels(a.e), a.n).set(saved);
+          w.engine_recount(a.e);
+        }
+        const pos = await positionFor({ ...recording, settings: m.settings }, w);
+        if (!current()) {
+          throw new Superseded("Superseded clipboard selection.");
+        }
+        const counts = new Uint32Array(w.memory.buffer, w.engine_counts(a.e), 1024).slice();
+        const timebase = parseFloat(a.header.timebase);
+        const times = new Uint32Array(w.memory.buffer, w.engine_times(a.e), a.n);
+        const duration = parseFloat(a.header.duration) || (times[a.n - 1] || 0) / timebase;
+        const cells = m.cells.map((cell) => {
+          const data = counts[cell]
+            ? analyse(w, a.e, cell, timebase, duration, pos, m.settings)
+            : null;
+          // Clipboard charts do not need per-spike position overlays.
+          return {
+            cell,
+            spikes: counts[cell],
+            data: data && { ...data, spikes: new Float32Array() },
+          };
+        });
+        results.push({ trialId: recording.trialId, cells });
+      } finally {
+        w.engine_free(a.e);
+      }
+    }
+    return results;
   }
   if (m.type === "load") {
     await saveActive();
@@ -638,6 +640,9 @@ self.onmessage = (event: MessageEvent) => {
   if (m.type === "load") {
     latestLoad = m.id;
   }
+  if (m.type === "copy_analysis") {
+    latestCopy = m.id;
+  }
   if (m.type === "analysis" && m.batch) {
     latestAnalysisBatch = m.batch;
   }
@@ -645,6 +650,9 @@ self.onmessage = (event: MessageEvent) => {
     try {
       if (m.type === "load" && m.id !== latestLoad) {
         throw new Superseded("Superseded by another recording.");
+      }
+      if (m.type === "copy_analysis" && m.id !== latestCopy) {
+        throw new Superseded("Superseded clipboard selection.");
       }
       if (m.type === "analysis" && m.batch && m.batch !== latestAnalysisBatch) {
         throw new Superseded("Superseded analysis.");
