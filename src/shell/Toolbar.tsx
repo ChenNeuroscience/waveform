@@ -1,11 +1,31 @@
 import type { ReactNode } from "react";
-import { Undo2, Redo2, Keyboard, Settings2, History, List } from "lucide-react";
+import { Undo2, Redo2, Keyboard, Settings as SettingsIcon, History } from "lucide-react";
 import type { PlotMode, ViewData } from "../types";
 import type { VisiblePlots } from "../tiles/TileWall";
 import type { PanelName } from "./panels";
 import { experimentTiming } from "./position-info";
 import { ToggleButton } from "./ToggleButton";
 import { FileMenu } from "./FileMenu";
+
+/** A file with paired key/value lines, for recording header metadata. */
+function HeadersIcon() {
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 2v6h6M7 11h2m3 0h5M7 15h2m3 0h5M7 19h2m3 0h5" />
+    </svg>
+  );
+}
 
 /** File menu, undo/redo, panels, plot toggles and the recording status line. */
 export function Toolbar(p: {
@@ -27,11 +47,7 @@ export function Toolbar(p: {
   const timing = experimentTiming(p.data?.headers || {}, p.data?.duration || 0);
   return (
     <div className="desktop-toolbar" role="toolbar" aria-label="Waveform tools">
-      <FileMenu
-        onHome={p.onHome}
-        onOpenFiles={p.onOpenFiles}
-        onOpenFolder={p.onOpenFolder}
-      />
+      <FileMenu onHome={p.onHome} onOpenFiles={p.onOpenFiles} onOpenFolder={p.onOpenFolder} />
       <span className="tool-separator" />
       <button
         title="Keyboard shortcuts [K]"
@@ -66,10 +82,10 @@ export function Toolbar(p: {
         aria-label="File headers"
         onClick={() => p.onPanel("headers")}
       >
-        <List size={17} />
+        <HeadersIcon />
       </button>
       <button title="Settings" aria-label="Settings" onClick={() => p.onPanel("settings")}>
-        <Settings2 size={17} />
+        <SettingsIcon size={17} />
       </button>
       <span className="tool-separator" />
       {(["waveforms", "spatial", "sc", "direction", "speed", "ac"] as PlotMode[]).map((m) => (

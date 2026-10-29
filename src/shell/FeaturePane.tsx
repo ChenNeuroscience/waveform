@@ -72,7 +72,6 @@ export function FeaturePane({
   data,
   settings,
   cell,
-  isolate,
   painting,
   canPaint,
   splitting,
@@ -89,7 +88,6 @@ export function FeaturePane({
   data: ViewData | null;
   settings: Settings;
   cell: number;
-  isolate: boolean;
   painting: Painting;
   /** Data is ready and no swap is pending. */
   canPaint: boolean;
@@ -176,7 +174,6 @@ export function FeaturePane({
             coordinates={coordinates}
             settings={settings}
             selected={cell}
-            isolate={isolate}
             range={FULL_RANGE}
             tool={canPaint ? tool : "disabled"}
             onPolygon={onPolygon}

@@ -160,24 +160,6 @@ impl Engine {
         self.recount();
         n
     }
-    pub fn sort_labels(&mut self) -> usize {
-        let mut groups: Vec<usize> = (1..MAX_CELLS).filter(|&c| self.counts[c] > 0).collect();
-        groups.sort_by_key(|&c| std::cmp::Reverse(self.counts[c]));
-        let mut map = vec![0u16; MAX_CELLS];
-        for (i, &c) in groups.iter().enumerate() {
-            map[c] = (i + 1) as u16;
-        }
-        let mut n = 0;
-        for c in &mut self.labels {
-            let next = map[*c as usize];
-            if next != *c {
-                n += 1;
-                *c = next;
-            }
-        }
-        self.recount();
-        n
-    }
 }
 fn inside(x: f32, y: f32, p: &[f32]) -> bool {
     let mut hit = false;
@@ -262,10 +244,6 @@ pub unsafe extern "C" fn engine_polygon(
         slice::from_raw_parts(p, n),
     )
 }
-#[no_mangle]
-pub unsafe extern "C" fn engine_sort(e: *mut Engine) -> usize {
-    (*e).sort_labels()
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,18 +293,15 @@ mod tests {
         assert_eq!(e.counts[100], 0);
     }
     #[test]
-    fn brush_mask_and_sort() {
+    fn brush_mask_preserves_other_labels() {
         let mut e = Engine::new(4);
-        e.labels = vec![0, 5, 5, 5];
+        e.labels = vec![0, 7, 7, 5];
         e.times = vec![1, 2, 3, 4];
         e.amplitudes = vec![0; 16];
         e.recount();
-        e.labels = vec![0, 7, 7, 5];
-        e.recount();
-        e.sort_labels();
-        assert_eq!(e.labels, vec![0, 1, 1, 2]);
         let mask = vec![1u8; 65536];
-        assert_eq!(e.mask(&[1], 3, 0, 1, &mask), 2);
+        assert_eq!(e.mask(&[7], 3, 0, 1, &mask), 2);
+        assert_eq!(e.labels, vec![0, 3, 3, 5]);
         assert_eq!(e.counts[3], 2);
         assert_eq!(e.counts[0], 1);
     }

@@ -69,7 +69,7 @@ test("browser back/forward restores only trial, tetrode and cut choices", async 
     .getByRole("button", { name: "Waveforms", exact: true })
     .click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("slider", { name: "Point size", exact: true }).fill("2");
+  await page.getByRole("slider", { name: "PCA fit sample size", exact: true }).fill("1000");
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   expect(await length(page)).toBe(navigations);
   expect(page.url()).toBe(url);

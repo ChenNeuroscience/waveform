@@ -24,7 +24,6 @@ export interface Trial {
 export const RENDERING_MODES = ["fixed", "density", "drift"] as const;
 export type RenderingMode = (typeof RENDERING_MODES)[number];
 export interface Settings {
-  pointSize: number;
   pcaSamples: number;
   renderMode: RenderingMode;
   binCm: number;
@@ -41,7 +40,6 @@ export interface Settings {
   speedMax: number;
 }
 export const defaultSettings: Settings = {
-  pointSize: 1,
   pcaSamples: 5000,
   renderMode: "density",
   binCm: 3,

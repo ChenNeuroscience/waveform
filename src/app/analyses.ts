@@ -32,29 +32,35 @@ export function useAnalyses({
   onError: (message: string) => void;
 }) {
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
-  const [trajectory, setTrajectory] = useState<Trajectory | null>(null);
+  const [trajectory, setTrajectory] = useState<{ key: string; value: Trajectory | null } | null>(
+    null,
+  );
   const [comparison, setComparison] = useState<{ key: string; data: AnalysisData } | null>(null);
+  const trajectoryKey =
+    data && trial?.pos
+      ? `${positionKey(trial)}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}`
+      : "";
 
   // The path is shared by every cell, so it is fetched once per position file and
   // processing settings rather than with each cell's analysis.
   useEffect(() => {
     let live = true;
-    if (!data?.key || !trial?.pos) {
+    if (!trajectoryKey || !trial?.pos) {
       setTrajectory(null);
       return;
     }
     request("trajectory", { pos: trial.pos, posKey: positionKey(trial), settings })
       .then((t) => {
         if (live) {
-          setTrajectory(t);
+          setTrajectory({ key: trajectoryKey, value: t });
         }
       })
       .catch(() => {});
     return () => {
       live = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the position-processing settings change the trajectory
-  }, [data?.key, trial?.id, trial?.pos, settings.leds, settings.maxSpeed, settings.posSmooth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- trajectoryKey covers recording availability, position identity and processing settings; tetrode and cut changes reuse the path
+  }, [trajectoryKey]);
 
   // The hovered (or selected) cell's analysis, debounced so sweeping the pointer
   // across tiles requests only where it settles.
@@ -152,7 +158,7 @@ export function useAnalyses({
 
   return {
     analysis,
-    trajectory,
+    trajectory: trajectory?.key === trajectoryKey ? trajectory.value : null,
     comparisonAnalysis: comparison?.key === comparisonKey ? comparison.data : null,
     clearAnalysis: () => setAnalysis(null),
   };

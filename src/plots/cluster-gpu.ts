@@ -10,7 +10,7 @@ precision highp float;
 layout(location=0) in vec4 amplitudes;
 layout(location=1) in uint ticks;
 layout(location=2) in uint cell;
-uniform int ax;uniform int ay;uniform float size;uniform int selected;uniform bool isolate;uniform float opacity;uniform vec2 range;uniform float timeScale;
+uniform int ax;uniform int ay;uniform float size;uniform int selected;uniform float opacity;uniform vec2 range;uniform float timeScale;
 out vec4 shade;out float time;
 float axis(int a){return a==4?time:amplitudes[a];}
 const vec3 groupColors[31]=vec3[31](${groupPalette.map((c) => `vec3(${c.map((v) => `${v}.`).join(",")})`).join(",")});
@@ -18,7 +18,7 @@ vec3 palette(float c){int i=int(c);return i<31?groupColors[i]/255.:vec3(0.);}
 void main(){
  time=float(ticks)*timeScale;
  float x=axis(ax),y=axis(ay);gl_Position=vec4(x*1.86-.93,y*1.86-.93,int(cell)==selected?-.5:0.,1.);gl_PointSize=size;
- bool hide=(isolate&&int(cell)!=selected)||time<range.x||time>range.y;
+ bool hide=time<range.x||time>range.y;
  shade=vec4(palette(float(cell)),hide?0.:opacity);
 }`;
 const fragment = `#version 300 es
@@ -64,7 +64,6 @@ export class ClusterGPU {
   private countsFor: {
     key: string;
     points: FeatureCoordinates["values"];
-    labels: Uint16Array | null;
   } | null = null;
   cache = new Map<
     string,
@@ -103,7 +102,6 @@ export class ClusterGPU {
     coordinates: FeatureCoordinates,
     s: Settings,
     selected: number,
-    isolate: boolean,
     range: number[],
     axes: number[][],
     columns = 3,
@@ -181,13 +179,11 @@ export class ClusterGPU {
       }
     }
     const aggregate = s.renderMode === "density" || (s.renderMode === "drift" && this.timed);
-    const countsKey = `${key}|${s.pointSize}|${w}|${h}|${dpr}|${columns}|${range}|${isolate ? selected : "all"}`;
-    const labels = isolate ? data.labels : null;
+    const countsKey = `${key}|${w}|${h}|${dpr}|${columns}|${range}`;
     const reuseCounts =
       aggregate &&
       this.countsFor?.key === countsKey &&
-      this.countsFor.points === coordinates.values &&
-      this.countsFor.labels === labels;
+      this.countsFor.points === coordinates.values;
     const p = aggregate ? this.sums! : this.p;
     if (!reuseCounts) {
       gl.useProgram(p);
@@ -211,13 +207,12 @@ export class ClusterGPU {
       }
       gl.enable(gl.SCISSOR_TEST);
       const u = (n: string) => gl.getUniformLocation(p, n);
-      gl.uniform1f(u("size"), s.pointSize * dpr);
+      gl.uniform1f(u("size"), dpr); // Fixed at one CSS pixel.
       gl.uniform1f(u("opacity"), 1);
       if (aggregate) {
         gl.uniform1f(u("unit"), this.unit);
       }
       gl.uniform1i(u("selected"), selected);
-      gl.uniform1i(u("isolate"), isolate ? 1 : 0);
       gl.uniform2f(u("range"), range[0], range[1]);
       gl.uniform1f(u("timeScale"), cached.timeScale);
       axes.forEach(([ax, ay], i) => {
@@ -244,7 +239,7 @@ export class ClusterGPU {
       });
       gl.disable(gl.SCISSOR_TEST);
       if (aggregate) {
-        this.countsFor = { key: countsKey, points: coordinates.values, labels };
+        this.countsFor = { key: countsKey, points: coordinates.values };
       }
     }
     if (aggregate) {
@@ -263,10 +258,7 @@ export class ClusterGPU {
       gl.uniform1f(gl.getUniformLocation(this.resolve!, "unit"), this.unit);
       // Point footprints cover far less of a projection than waveform traces.
       // Scale their count fraction accordingly, using the identical colour ramp.
-      gl.uniform1f(
-        gl.getUniformLocation(this.resolve!, "total"),
-        (isolate ? data.counts[selected] : data.n) * s.pointSize ** 2,
-      );
+      gl.uniform1f(gl.getUniformLocation(this.resolve!, "total"), data.n);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
   }

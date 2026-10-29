@@ -103,7 +103,7 @@ impl CutParser {
 }
 impl Engine {
     /// Each cell's membership hash, which lets analysis caches survive edits that
-    /// leave a cell's spikes unchanged (including renumbering).
+    /// leave a cell's spikes unchanged (including cell-number swaps).
     fn cell_hashes(&mut self) -> &[u32] {
         if self.cell_hashes.is_empty() {
             let mut sums = vec![0u64; MAX_CELLS];

@@ -166,7 +166,7 @@ export function TileWall({
   const [width, setWidth] = useState(800);
 
   // Tile analyses keyed by cell membership, so edits only refetch cells whose
-  // spikes changed and renumbered cells keep theirs; the version re-renders.
+  // spikes changed and swapped cell numbers keep theirs; the version re-renders.
   const cache = useRef(new Map<string, AnalysisData>());
   const [analysisVersion, setAnalysisVersion] = useState(0);
 

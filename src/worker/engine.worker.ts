@@ -592,9 +592,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     w.engine_edit_begin(e);
     let changed = 0;
     try {
-      if (m.action === "sort") {
-        w.engine_sort(e);
-      } else if (m.action === "polygon" || m.action === "paint") {
+      if (m.action === "polygon" || m.action === "paint") {
         if (m.featureKey && m.featureKey !== a.pcaKey) {
           throw new Superseded("PCA basis changed; redraw the selection.");
         }

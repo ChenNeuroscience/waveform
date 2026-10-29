@@ -230,7 +230,10 @@ export function useShortcuts(context: ShortcutContext) {
         c.update(
           "renderMode",
           RENDERING_MODES[
-            (RENDERING_MODES.indexOf(c.settings.renderMode) + 1) % RENDERING_MODES.length
+            (RENDERING_MODES.indexOf(c.settings.renderMode) +
+              (e.shiftKey ? -1 : 1) +
+              RENDERING_MODES.length) %
+              RENDERING_MODES.length
           ],
         );
       }

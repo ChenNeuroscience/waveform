@@ -171,7 +171,6 @@ export default function App() {
   );
   const featureMode = featurePreference === "pca" ? "pca" : "amplitudes";
   const featureSpace = useFeatureSpace(data, featureMode, settings.pcaSamples);
-  const [isolate, setIsolate] = usePreference("isolate", false);
   const [shown, setShown] = usePreference<VisiblePlots>("plots", {
     waveforms: true,
     spatial: true,
@@ -796,16 +795,8 @@ export default function App() {
     settings,
     update,
     resetSettings: () => setSettings(defaultSettings),
-    isolate,
-    setIsolate,
     ready,
     operation: (type) => operation(type),
-    renumber: () =>
-      operation("edit", {
-        action: "sort",
-        dest: 0,
-        description: "Renumber cells by spike count (preserve noise 0)",
-      }),
     history: data,
     headers: data?.headers || {},
   };
@@ -912,7 +903,7 @@ export default function App() {
               />
               <Divider part="position" onDrag={panes.dragDivider} />
               <FeaturePane
-                {...{ data, settings, cell, isolate, painting, grabMode }}
+                {...{ data, settings, cell, painting, grabMode }}
                 mode={featureMode}
                 onMode={setFeatureMode}
                 coordinates={featureSpace.coordinates}

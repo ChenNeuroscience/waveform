@@ -39,7 +39,6 @@ export type EditRequest = Session & {
   description: string;
   newCut?: NewCut;
 } & (
-    | { action: "sort" }
     | { action: "merge"; source: number }
     | { action: "swap"; source: number }
     | ({ action: "paint" } & RegionEdit)

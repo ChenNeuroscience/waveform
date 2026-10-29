@@ -84,7 +84,7 @@ for (const fallback of [false, true]) {
   });
 }
 
-test("P cycles the single colour choice, D is unused, and Q switches waveform features", async ({
+test("P and Shift+P cycle colour choices, D is unused, and Q switches waveform features", async ({
   page,
 }) => {
   await page.goto("/?demo=quick");
@@ -110,6 +110,11 @@ test("P cycles the single colour choice, D is unused, and Q switches waveform fe
   await expect(fixed).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("p");
   await expect(density).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(image).toBe(original);
+  for (const previous of [fixed, drift, density]) {
+    await page.keyboard.press("Shift+p");
+    await expect(previous).toHaveAttribute("aria-pressed", "true");
+  }
   await expect.poll(image).toBe(original);
   await expect(modes.locator('[aria-pressed="true"]')).toHaveCount(1);
   await page.keyboard.press("q");

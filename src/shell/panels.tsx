@@ -1,6 +1,6 @@
 /** Tool-window panels: settings, help/shortcuts and file headers. */
-import { useState, type ReactNode } from "react";
-import { History, Redo2, Search, Undo2 } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
+import { History, Redo2, RotateCcw, Search, Undo2 } from "lucide-react";
 import type { HistoryEntry, Settings } from "../types";
 
 export type PanelName = "settings" | "history" | "headers" | "help";
@@ -9,11 +9,8 @@ export interface PanelContext {
   settings: Settings;
   update: <K extends keyof Settings>(k: K, v: Settings[K]) => void;
   resetSettings: () => void;
-  isolate: boolean;
-  setIsolate: (v: boolean) => void;
   ready: boolean;
   operation: (type: "undo" | "redo") => void;
-  renumber: () => void;
   history: { undo: HistoryEntry[]; redo: HistoryEntry[] } | null;
   headers: Record<string, Record<string, string>>;
 }
@@ -34,15 +31,7 @@ export const TOOL_PANELS: Record<
     y: 65,
     height: 560,
     render: (c) => (
-      <SettingsPanel
-        settings={c.settings}
-        update={c.update}
-        onReset={c.resetSettings}
-        isolate={c.isolate}
-        onIsolate={c.setIsolate}
-        ready={c.ready}
-        onRenumber={c.renumber}
-      />
+      <SettingsPanel settings={c.settings} update={c.update} onReset={c.resetSettings} />
     ),
   },
   history: {
@@ -129,32 +118,51 @@ export function SettingsPanel({
   settings,
   update,
   onReset,
-  isolate,
-  onIsolate,
-  ready,
-  onRenumber,
 }: {
   settings: Settings;
   update: <K extends keyof Settings>(k: K, v: Settings[K]) => void;
   onReset: () => void;
-  isolate: boolean;
-  onIsolate: (v: boolean) => void;
-  ready: boolean;
-  onRenumber: () => void;
 }) {
   return (
     <>
-      <h3>Rendering</h3>
+      <div className="settings-actions">
+        <button className="secondary" title="Restore default settings" onClick={onReset}>
+          <RotateCcw size={12} aria-hidden="true" />
+          Reset settings
+        </button>
+      </div>
+      <h3>Position processing</h3>
+      <label className="settings-checkbox">
+        <input
+          type="checkbox"
+          checked={settings.leds === 2}
+          onChange={(e) => update("leds", e.target.checked ? 2 : 1)}
+        />
+        <span>Use both LEDs when available</span>
+      </label>
       <Slider
-        label="Point size"
-        value={settings.pointSize}
-        min={0.5}
-        max={4}
-        step={0.1}
-        unit="px"
-        onChange={(v) => update("pointSize", v)}
+        label="Jump filter"
+        value={settings.maxSpeed}
+        min={0}
+        max={10}
+        step={0.25}
+        unit="m/s"
+        zeroLabel="Off"
+        zeroHint="Position jumps are not filtered."
+        onChange={(v) => update("maxSpeed", v)}
       />
-      <Toggle label="Isolate selected cell" checked={isolate} onChange={onIsolate} />
+      <Slider
+        label="Position smoothing"
+        value={settings.posSmooth}
+        min={0}
+        max={2}
+        step={0.1}
+        unit="s"
+        zeroLabel="Off"
+        zeroHint="Position coordinates are not smoothed."
+        onChange={(v) => update("posSmooth", v)}
+      />
+      <h3>Cluster plots</h3>
       <Slider
         label="PCA fit sample size"
         value={settings.pcaSamples}
@@ -164,7 +172,7 @@ export function SettingsPanel({
         unit="spikes"
         onChange={(v) => update("pcaSamples", v)}
       />
-      <h3>Spatial & temporal analysis</h3>
+      <h3>Spatial rate map</h3>
       <Slider
         label="Spatial bin width"
         value={settings.binCm}
@@ -181,15 +189,19 @@ export function SettingsPanel({
         max={5}
         step={1}
         unit="bins"
+        zeroLabel="Off"
+        zeroHint="Spatial and directional smoothing is off."
         onChange={(v) => update("smooth", v)}
       />
       <Slider
-        label="Rate-map colour maximum (0 = auto)"
+        label="Rate-map colour maximum"
         value={settings.maxRate}
         min={0}
         max={50}
         step={1}
         unit="Hz"
+        zeroLabel="Auto"
+        zeroHint="Uses each cell's peak rate."
         onChange={(v) => update("maxRate", v)}
       />
       <Slider
@@ -198,17 +210,11 @@ export function SettingsPanel({
         min={2}
         max={32}
         step={1}
+        unit="steps"
         onChange={(v) => update("rateMapSteps", v)}
       />
-      <Slider
-        label="Autocorrelation window"
-        value={settings.acWindow}
-        min={20}
-        max={1000}
-        step={20}
-        unit="ms"
-        onChange={(v) => update("acWindow", v)}
-      />
+      <h3>Spatial autocorrelogram</h3>
+      <p className="muted">Uses the spatial rate map's binning and smoothing.</p>
       <Slider
         label="Spatial AC minimum overlap"
         value={settings.scMinOverlap}
@@ -218,6 +224,8 @@ export function SettingsPanel({
         unit="bins"
         onChange={(v) => update("scMinOverlap", v)}
       />
+      <h3>Directional rate map</h3>
+      <p className="muted">Uses the spatial rate map's smoothing radius.</p>
       <Slider
         label="Direction bin width"
         value={settings.dirBin}
@@ -227,6 +235,7 @@ export function SettingsPanel({
         unit="°"
         onChange={(v) => update("dirBin", v)}
       />
+      <h3>Speed tuning</h3>
       <Slider
         label="Speed bin width"
         value={settings.speedBin}
@@ -245,55 +254,22 @@ export function SettingsPanel({
         unit="cm/s"
         onChange={(v) => update("speedMax", v)}
       />
-      <h3>Position processing</h3>
-      <label className="field">
-        Tracked LEDs
-        <select
-          aria-label="Tracked LEDs"
-          value={settings.leds}
-          onChange={(e) => update("leds", +e.target.value)}
-        >
-          <option value="1">One · movement direction</option>
-          <option value="2">Two · LED direction</option>
-        </select>
-      </label>
+      <h3>Temporal autocorrelogram</h3>
       <Slider
-        label="Jump filter (0 = off)"
-        value={settings.maxSpeed}
-        min={0}
-        max={10}
-        step={0.25}
-        unit="m/s"
-        onChange={(v) => update("maxSpeed", v)}
+        label="Autocorrelation window"
+        value={settings.acWindow}
+        min={20}
+        max={1000}
+        step={20}
+        unit="ms"
+        onChange={(v) => update("acWindow", v)}
       />
-      <Slider
-        label="Position smoothing"
-        value={settings.posSmooth}
-        min={0}
-        max={2}
-        step={0.1}
-        unit="s"
-        onChange={(v) => update("posSmooth", v)}
-      />
-      <button className="secondary" onClick={onReset}>
-        Reset settings
-      </button>
-      <h3>Cut labels</h3>
-      <button className="secondary" disabled={!ready} onClick={onRenumber}>
-        Renumber cells by spike count
-      </button>
-      <p className="muted">
-        Largest cell becomes 1. Noise remains 0. This changes the cut and can be undone.
-      </p>
     </>
   );
 }
 export function HelpPanel() {
   return (
     <>
-      <p className="muted">
-        Import a selection of LTX files or a folder to begin. Add cut files at any time.
-      </p>
       <h3>Navigation</h3>
       <Shortcut keys="⌘ / Ctrl O" text="Add files…" />
       <Shortcut keys="0–9" text="Jump to tetrode (ones digit)" />
@@ -302,53 +278,32 @@ export function HelpPanel() {
       <Shortcut keys="← / →" text="Previous / next tetrode (restores its last cut)" />
       <Shortcut keys="⇧ ← / →" text="Previous / next cut of the tetrode (first: no cut)" />
       <Shortcut keys="H" text="Inspect file headers" />
+      <Shortcut keys="Z" text="Edit history" />
       <Shortcut keys="K / ?" text="Keyboard shortcuts" />
       <h3>Cut editing</h3>
-      <Shortcut keys="Drag tile" text="Merge higher cell number into lower" />
-      <Shortcut keys="Right drag" text="Adjust a split preview from either waveform tile" />
       <Shortcut keys="L" text="Switch brush / lasso cutting" />
       <Shortcut keys="E / F" text="Group under pointer as destination / source" />
       <Shortcut keys="Shift F" text="Toggle the group under the pointer in the source set" />
-      <Shortcut
-        keys="Left / right click chip"
-        text="Choose destination / source; Shift-right toggles a source"
-      />
       <Shortcut keys="Enter / +" text="First unused destination group" />
-      <Shortcut keys="Click tile" text="Bring the group's feature points to the front" />
-      <Shortcut
-        keys="S"
-        text="Hover a tile, then click or type the group to swap with; Escape cancels"
-      />
+      <Shortcut keys="S" text="Swap cell under pointer (Esc cancels)" />
       <Shortcut keys="⌘ / Ctrl Z" text="Undo" />
-      <Shortcut keys="⌘ / Ctrl ⇧ Z" text="Redo" />
+      <Shortcut keys="⌘ / Ctrl ⇧ Z / Ctrl Y" text="Redo" />
       <Shortcut keys="⌘ / Ctrl S" text="Export .cut" />
-      <Shortcut
-        keys="⌘ / Ctrl C"
-        text="Copy the hovered position pane, or the selected cell's stats and plots"
-      />
-      <Shortcut
-        keys="Hold ⌘ / Ctrl C"
-        text="After 500 ms: click cells and trials to include them; over the position pane, cells add spike dots. Esc finishes."
-      />
+      <Shortcut keys="⌘ / Ctrl C" text="Copy plots and statistics (position pane when hovered)" />
+      <Shortcut keys="Hold ⌘ / Ctrl C" text="Enter extended copy mode (500 ms)" />
+      <Shortcut keys="⌘ / Ctrl A" text="Select all cells in copy mode" />
       <h3>Views</h3>
       <Shortcut keys="Q" text="Switch amplitudes / principal components" />
-      <Shortcut keys="Hover tile" text="Show cell spikes on the position path" />
-      <Shortcut keys="Hold Space" text="Click a plot to copy it; click a window to close it" />
+      <Shortcut keys="Space + click" text="Copy a plot / close a floating window" />
       <Shortcut
         keys="W / R / A / C / V / T"
         text="Show only waves / spatial / spatial autocorrelation / direction / speed / temporal autocorrelation; Shift adds or removes"
       />
-      <Shortcut
-        keys="P"
-        text="Cycle fixed colours / density / drift for waveforms and cluster plots"
-      />
+      <Shortcut keys="P / ⇧ P" text="Cycle fixed colours / density / drift (forward / back)" />
       <Shortcut
         keys="Esc"
         text="Close panel or leave the lasso; otherwise hide / show the toolbar"
       />
-      <a href="https://github.com/ChenNeuroscience/waveform" target="_blank" rel="noreferrer">
-        Project and source on GitHub ↗
-      </a>
     </>
   );
 }
@@ -359,6 +314,8 @@ function Slider({
   max,
   step,
   unit = "",
+  zeroLabel,
+  zeroHint,
   onChange,
 }: {
   label: string;
@@ -367,18 +324,30 @@ function Slider({
   max: number;
   step: number;
   unit?: string;
+  zeroLabel?: "Off" | "Auto";
+  zeroHint?: string;
   onChange: (n: number) => void;
 }) {
+  const id = useId();
+  const format = (n: number) => {
+    const suffix = n === 1 && ["bins", "spikes", "steps"].includes(unit) ? unit.slice(0, -1) : unit;
+    return `${fmt(Number(n.toFixed(2)))}${suffix ? `${suffix === "°" ? "" : " "}${suffix}` : ""}`;
+  };
+  const state = value === 0 ? zeroLabel : undefined;
+  const current = state || format(value);
   return (
-    <label className="slider-field">
-      <span>
-        {label}
-        <b>
-          {Number(value.toFixed(2))} {unit}
-        </b>
+    <label className="slider-field" htmlFor={id} data-state={state?.toLowerCase()}>
+      <span className="slider-heading">
+        <span>{label}</span>
+        <output className="slider-value" htmlFor={id} title={format(value)} aria-hidden="true">
+          {current}
+        </output>
       </span>
       <input
+        id={id}
         aria-label={label}
+        aria-valuetext={current}
+        aria-describedby={state && zeroHint ? `${id}-hint` : undefined}
         type="range"
         value={value}
         min={min}
@@ -386,22 +355,15 @@ function Slider({
         step={step}
         onChange={(e) => onChange(+e.target.value)}
       />
-    </label>
-  );
-}
-function Toggle({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="toggle-field">
-      <span>{label}</span>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="slider-limits" aria-hidden="true">
+        <span>{min === 0 && zeroLabel ? zeroLabel : format(min)}</span>
+        <span>{format(max)}</span>
+      </span>
+      {state && zeroHint && (
+        <small className="slider-hint" id={`${id}-hint`}>
+          {zeroHint}
+        </small>
+      )}
     </label>
   );
 }

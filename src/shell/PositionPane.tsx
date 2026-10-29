@@ -68,7 +68,9 @@ export function PositionPane({
       onPopPlot("path", e.clientX, e.clientY);
     }
   };
-  if (!analysis || !trajectory || !trial?.pos) {
+  // The path is independent of cell analysis. Keep its canvas mounted while a
+  // different tetrode or cut loads, preserving PathPlot's cached base image.
+  if (!trajectory || !trial?.pos) {
     return (
       <section className="position-pane" {...hover}>
         <div className="position-content">
@@ -89,14 +91,16 @@ export function PositionPane({
             {timing.durationText}
           </div>
           <div className="position-speed">
-            <AnalysisPlot
-              data={analysis}
-              mode="speed"
-              maxRate={0}
-              positionSpeed
-              speedAlignment="left"
-              compact
-            />
+            {analysis && (
+              <AnalysisPlot
+                data={analysis}
+                mode="speed"
+                maxRate={0}
+                positionSpeed
+                speedAlignment="left"
+                compact
+              />
+            )}
             <small className="speed-axis-limit">{settings.speedMax} cm/s max</small>
           </div>
         </div>

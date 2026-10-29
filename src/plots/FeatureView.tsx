@@ -32,7 +32,7 @@ function nearestGroup(
   [px, py]: number[],
   plot: number,
   columns: number,
-  { selected, isolate, range }: { selected: number; isolate: boolean; range: number[] },
+  { selected, range }: { selected: number; range: number[] },
 ) {
   const [ax, ay] = projections[plot];
   const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
@@ -44,7 +44,7 @@ function nearestGroup(
   for (let i = 0; i < data.labels.length; i++) {
     const label = data.labels[i];
     const time = data.times[i] * timeScale;
-    if ((isolate && label !== selected) || time < range[0] || time > range[1]) {
+    if (time < range[0] || time > range[1]) {
       continue;
     }
     const fx = FEATURE_MARGIN + FEATURE_SPAN * coordinates.values[i * 4 + ax] * scale;
@@ -78,7 +78,6 @@ export function Clusters({
   coordinates,
   settings,
   selected,
-  isolate,
   range,
   tool,
   onPolygon,
@@ -88,7 +87,6 @@ export function Clusters({
   coordinates: FeatureCoordinates;
   settings: Settings;
   selected: number;
-  isolate: boolean;
   range: number[];
   tool: string;
   onPolygon: (p: number[], ax: number, ay: number) => void;
@@ -131,14 +129,14 @@ export function Clusters({
       if (plot === null) {
         return;
       }
-      const group = nearestGroup(data, coordinates, p, plot, columns, { selected, isolate, range });
+      const group = nearestGroup(data, coordinates, p, plot, columns, { selected, range });
       if (group !== null) {
         onPick(group, key === "f", event.shiftKey);
       }
     };
     window.addEventListener("keydown", pick, true);
     return () => window.removeEventListener("keydown", pick, true);
-  }, [data, coordinates, selected, isolate, range, columns, tool, onPick, axes]);
+  }, [data, coordinates, selected, range, columns, tool, onPick, axes]);
   useEffect(() => {
     const c = canvas.current!;
     const restore = () => setVersion((v) => v + 1);
@@ -171,25 +169,14 @@ export function Clusters({
       if (!gpu.current && canvas.current) {
         gpu.current = new ClusterGPU(canvas.current);
       }
-      gpu.current?.draw(data, coordinates, settings, selected, isolate, range, axes, columns);
+      gpu.current?.draw(data, coordinates, settings, selected, range, axes, columns);
     } catch (e) {
       setError(String(e));
     }
-    // Only point size and colour mode affect the points; other settings (rate maps,
+    // Only colour mode affects the points; other settings (rate maps,
     // analysis windows) must not redraw the whole population.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only point size and colour mode among the settings affect the drawn points
-  }, [
-    data,
-    coordinates,
-    settings.pointSize,
-    settings.renderMode,
-    selected,
-    isolate,
-    range,
-    axes,
-    version,
-    columns,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only colour mode among the settings affects the drawn points
+  }, [data, coordinates, settings.renderMode, selected, range, axes, version, columns]);
   const grid = featureGridSize(columns);
   const point = (e: React.PointerEvent) => {
     const b = e.currentTarget.getBoundingClientRect();

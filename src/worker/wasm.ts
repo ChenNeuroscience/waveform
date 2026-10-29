@@ -62,7 +62,6 @@ export const EXPORTS = {
   engine_recount: 1,
   engine_relabel: 4,
   engine_resident_bytes: 1,
-  engine_sort: 1,
   engine_split_cache_begin: 2,
   engine_split_cache_finish: 1,
   engine_split_cached: 1,

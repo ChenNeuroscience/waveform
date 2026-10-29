@@ -115,7 +115,6 @@ test("feature corner labels survive Space copies; settings and divider positions
     .click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const settings = page.getByRole("dialog", { name: "Settings", exact: true });
-  await settings.getByRole("checkbox", { name: "Isolate selected cell", exact: true }).check();
   await page.getByRole("slider", { name: "Maximum speed shown", exact: true }).fill("60");
   const window = (await settings.boundingBox())!;
   await page.mouse.move(window.x + 50, window.y + 12);
@@ -148,12 +147,6 @@ test("feature corner labels survive Space copies; settings and divider positions
   await expect(page.getByRole("slider", { name: "Maximum speed shown", exact: true })).toHaveValue(
     "60",
   );
-  await expect(
-    settings.getByRole("checkbox", {
-      name: "Isolate selected cell",
-      exact: true,
-    }),
-  ).toBeChecked();
   const restored = (await settings.boundingBox())!;
   expect(restored.x + restored.width).toBeLessThanOrEqual(900);
   expect(restored.y + restored.height).toBeLessThanOrEqual(650);

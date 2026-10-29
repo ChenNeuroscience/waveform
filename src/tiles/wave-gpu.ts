@@ -475,6 +475,9 @@ export class WaveGPU {
     const u = (n: string) => gl.getUniformLocation(this.quad, n);
     gl.uniform1i(u("counts"), 0);
     gl.uniform1f(u("unit"), this.unit);
+    // v1 normalises every cell against the whole tetrode. Counts come from
+    // resident waveforms, so use their total to preserve that scale if sampled.
+    gl.uniform1f(u("total"), scene.data.waveSlots);
     gl.uniform1i(
       u("mode"),
       scene.mode === "drift" && this.timed ? DRIFT : scene.mode === "density" ? DENSITY : FLAG,
@@ -488,7 +491,6 @@ export class WaveGPU {
     gl.bindTexture(gl.TEXTURE_2D, entry.texture);
     gl.uniform2f(u("origin"), x, y);
     gl.uniform3fv(u("rgb"), cellRgb(cell));
-    gl.uniform1f(u("total"), entry.drawn);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }

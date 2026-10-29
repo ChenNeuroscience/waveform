@@ -59,7 +59,7 @@ export function RenderingToggles({
               fixed: "Fixed cell colours",
               density: "Density: colour by overlap",
               drift: "Drift: mean spike time, red (start) to green (end)",
-            }[option] + " · P cycles colour modes"
+            }[option] + " · P cycles colour modes; Shift P reverses"
           }
           onClick={() => onChange(option)}
         >
