@@ -308,6 +308,15 @@ small {
 .trial-block.selected {
   background: #ffffe5;
 }
+.trial-block.copy-included:not(.selected) {
+  background: #edf4ff;
+  box-shadow: inset 3px 0 #7b9cc5;
+}
+.tetrode-file-block button.copy-cut:not(.active) {
+  background: #cbdcf1;
+  border-color: #7898be;
+  color: #243f61;
+}
 .trial-heading {
   display: flex;
   gap: 3px;

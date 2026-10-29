@@ -1,9 +1,10 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { WaveGPU } from "./wave-gpu";
-import { AnalysisPlot, drawAnalysis } from "../plots/AnalysisPlot";
-import { CellStats, type CellStat } from "./CellStats";
+import { AnalysisPlot } from "../plots/AnalysisPlot";
+import { CellStats } from "./CellStats";
 import { request } from "../worker/client";
+import { Superseded } from "../worker/protocol";
 import { waveX, waveY, type WaveLayout } from "../plots/plot-geometry";
 import { useTileGestures, type DragComparison } from "./tile-gestures";
 import {
@@ -19,24 +20,17 @@ import {
   type SwapState,
   type TileFeedback,
 } from "../types";
+import {
+  TILE_PLOTS,
+  captureAnalysisPlots,
+  cellStatEntries,
+  type CellCapture,
+  type AnalysisFrame,
+} from "../app/copy-plots";
 export type VisiblePlots = Record<PlotMode, boolean>;
 const ROW = 124;
 const STRIDE = ROW + 2;
 
-/** The analysis plots a tile can show, in tile order, with their regions. */
-const TILE_PLOTS = [
-  { mode: "spatial", selector: ".tile-spatial", name: "Spatial rate map" },
-  { mode: "direction", selector: ".tile-direction", name: "Head direction" },
-  { mode: "speed", selector: ".tile-speed", name: "Speed" },
-  { mode: "ac", selector: ".tile-ac", name: "Autocorrelation" },
-] as const;
-
-/** A cell's shown plots as separate images, with its hover stats. */
-export interface CellCapture {
-  cell: number;
-  stats: CellStat[];
-  plots: { name: string; canvas: HTMLCanvasElement }[];
-}
 export interface TileWallHandle {
   /** Capture cells' plots, including cells scrolled out of view. */
   capture: (cells: number[]) => Promise<CellCapture[]>;
@@ -99,20 +93,6 @@ function analysisSettingsKey(s: Settings) {
     s.speedBin,
     s.speedMax,
   ].join("|");
-}
-
-/** The hover stats for a tile: peak rates (with position data) and spike count. */
-function cellStatEntries(a: AnalysisData | undefined, hasPos: boolean, spikes: number) {
-  const entries = [];
-  if (a && hasPos && a.peak > 0) {
-    entries.push({ label: "spa max", value: `${a.peak.toFixed(1)}Hz` });
-  }
-  const direction = a && hasPos ? Math.max(...a.direction) : 0;
-  if (direction > 0) {
-    entries.push({ label: "dir max", value: `${direction.toFixed(1)}Hz` });
-  }
-  entries.push({ label: "n spikes", value: spikes.toLocaleString() });
-  return entries;
 }
 
 /** Join the class names whose flags are set. */
@@ -254,6 +234,7 @@ export function TileWall({
   // Fetches missing analyses (unbatched, so the visible tiles' requests aren't
   // superseded) and draws each plot off-screen at its tile size.
   const capture = async (cells: number[]): Promise<CellCapture[]> => {
+    const renderer = shown.waveforms ? gpu.current : null;
     const missing = cells.filter((cell) => !analysisFor(cell));
     const results = await Promise.all(
       missing.map((cell) =>
@@ -265,31 +246,24 @@ export function TileWall({
         cache.current.set(result.membership, result);
       }
     }
+    await renderer?.whenLoaded();
+    if (renderer && (renderer !== gpu.current || renderer.scene?.data !== data)) {
+      throw new Superseded("Recording changed before the clipboard capture completed.");
+    }
     const wall = scroller.current!;
+    const frames: AnalysisFrame[] = TILE_PLOTS.flatMap(({ mode, selector, name }) => {
+      const size = shown[mode] && regionSize(wall, selector);
+      return size ? [{ mode, name, ...size }] : [];
+    });
     return cells.map((cell) => {
       const a = analysisFor(cell);
-      const plots = [];
-      const waves = shown.waveforms ? gpu.current?.capture(cell) : null;
+      const spikes = data.counts[cell];
+      const plots = captureAnalysisPlots(a, spikes, !!pos, settings, frames);
+      const waves = renderer?.capture(cell);
       if (waves) {
-        plots.push({ name: "Waveforms", canvas: waves });
+        plots.unshift({ mode: "waveforms", name: "Waveforms", canvas: waves });
       }
-      for (const { mode, selector, name } of TILE_PLOTS) {
-        const size = regionSize(wall, selector);
-        if (!shown[mode] || !a || (mode !== "ac" && !pos) || !size) {
-          continue;
-        }
-        const canvas = document.createElement("canvas");
-        const maxRate = mode === "spatial" ? settings.maxRate : 0;
-        drawAnalysis(canvas, size.width, size.height, {
-          data: a,
-          mode,
-          maxRate,
-          rateMapSteps: settings.rateMapSteps,
-          compact: true,
-        });
-        plots.push({ name, canvas });
-      }
-      return { cell, stats: cellStatEntries(a, !!pos, data.counts[cell]), plots };
+      return { cell, spikes, stats: cellStatEntries(a, !!pos, spikes), plots };
     });
   };
   useImperativeHandle(ref, () => ({ capture }));

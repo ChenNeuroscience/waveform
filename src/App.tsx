@@ -407,6 +407,10 @@ export default function App() {
     closeAll: closeAllCopies,
   } = useCopies({
     trial,
+    trials,
+    settings,
+    shown,
+    rememberedCut,
     tetNum,
     cell,
     data,
@@ -881,6 +885,11 @@ export default function App() {
                 onRecording={chooseRecording}
                 onPrepareCut={prepareCut}
                 onCutDrag={dragCut}
+                copying={copyMode.cells !== null}
+                copyTrialIds={copyMode.trialIds}
+                onCopyTrial={copyMode.toggleTrial}
+                copyCuts={copyMode.cuts}
+                onCopyCut={copyMode.chooseCut}
               />
               <Divider part="files" onDrag={panes.dragDivider} />
               <PositionPane
@@ -927,8 +936,13 @@ export default function App() {
               {copyMode.cells && (
                 <TilePrompt
                   label="Copy cells"
-                  instructions={`Copy mode: click tiles to add or remove them (${copyMode.cells.length} ${copyMode.cells.length === 1 ? "cell" : "cells"} on the clipboard). Esc to finish.`}
+                  instructions={
+                    copyMode.trialIds.length > 1
+                      ? `Copy mode: ${copyMode.cells.length} cells across ${copyMode.trialIds.length} trials. Click tiles or trials to toggle them. Esc to finish.`
+                      : `Copy mode: click tiles to add or remove them (${copyMode.cells.length} ${copyMode.cells.length === 1 ? "cell" : "cells"} on the clipboard). Click more trials to compare. Esc to finish.`
+                  }
                 >
+                  {copyMode.preparing && <div role="status">Preparing clipboard…</div>}
                   <button type="button" onClick={copyMode.selectAll}>
                     Select all [⌘/Ctrl A]
                   </button>

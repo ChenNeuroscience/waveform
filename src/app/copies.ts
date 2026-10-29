@@ -2,11 +2,22 @@
  * (Space-click), and copying cells to the clipboard: the selected cell, or in copy
  * mode a set of cells picked on the tile wall, rewritten after every change. */
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { captureTile, type CellCapture, type TileWallHandle } from "../tiles/TileWall";
+import { captureTile, type TileWallHandle, type VisiblePlots } from "../tiles/TileWall";
+import { captureAnalysisPlots, cellStatEntries, type AnalysisFrame } from "./copy-plots";
+import { comparisonClipboard, type TrialCapture } from "./clipboard-layout";
 import { captureFeatureGrid } from "../plots/FeatureView";
 import { downloadBlob } from "../files";
 import type { CellStat } from "../tiles/CellStats";
-import type { Trial, ViewData } from "../types";
+import {
+  fileId,
+  positionKey,
+  type Trial,
+  type Tetrode,
+  type ViewData,
+  type Settings,
+} from "../types";
+import { request } from "../worker/client";
+import { Superseded, type CopyTrialAnalysis } from "../worker/protocol";
 
 export interface PlotCopy {
   id: string;
@@ -38,40 +49,15 @@ function tileStats(cell: number): CellStat[] {
   }));
 }
 
-/** Escape text for inclusion in clipboard HTML. */
-function escapeHtml(text: string) {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-/** Clipboard HTML and plain text for captured cells: per cell, a line with its
- * bold title and stats, then (HTML only) one image per plot. */
-function clipboardContent(captures: CellCapture[], prefix: string, counts: Uint32Array) {
-  const ratio = Math.min(2, devicePixelRatio || 1);
-  const html: string[] = [];
-  const text: string[] = [];
-  for (const { cell, stats, plots } of captures) {
-    const title = `${prefix} · cell ${cell}`;
-    const spikes = `${(counts[cell] || 0).toLocaleString("en-GB")} spikes`;
-    const rates = stats.filter((s) => s.label !== "n spikes").map((s) => `${s.label}: ${s.value}`);
-    const details = [spikes, ...rates].join(" · ");
-    const images = plots.map(
-      ({ name, canvas }) =>
-        `<img src="${canvas.toDataURL()}" alt="${name}" width="${Math.round(canvas.width / ratio)}" height="${Math.round(canvas.height / ratio)}">`,
-    );
-    html.push(
-      `<p style="margin:0"><b>${escapeHtml(title)}</b> · ${escapeHtml(details)}</p>`,
-      `<p style="margin:0">${images.join(" ")}</p>`,
-    );
-    text.push(`${title} · ${details}`);
-  }
-  return { html: html.join(""), text: text.join("\n") };
-}
-
 /** Thrown when a newer clipboard write replaces one still capturing. */
 class StaleCopy extends Error {}
 
 export function useCopies({
   trial,
+  trials,
+  settings,
+  shown,
+  rememberedCut,
   tetNum,
   cell,
   data,
@@ -79,6 +65,10 @@ export function useCopies({
   onNotice,
 }: {
   trial: Trial | undefined;
+  trials: Trial[];
+  settings: Settings;
+  shown: VisiblePlots;
+  rememberedCut: (tet: Tetrode) => string;
   tetNum: number;
   cell: number;
   data: ViewData | null;
@@ -88,10 +78,19 @@ export function useCopies({
   const [copies, setCopies] = useState<PlotCopy[]>([]);
   // Copy mode's selected cells (null outside copy mode), and the latest write.
   const [copying, setCopying] = useState<number[] | null>(null);
+  const [trialIds, setTrialIds] = useState<string[]>([]);
+  const [copyCuts, setCopyCuts] = useState<Record<string, string>>({});
+  const [preparing, setPreparing] = useState(false);
+  // Summaries only: changing the selected cells/trials can reuse completed analyses.
+  const analysisCache = useRef(new Map<string, Map<number, CopyTrialAnalysis["cells"][number]>>());
   const latestWrite = useRef(0);
   // Copy mode ends when the window loses focus (its keys no longer reach it).
   useEffect(() => {
-    const blur = () => setCopying(null);
+    const blur = () => {
+      setCopying(null);
+      setTrialIds([]);
+      setCopyCuts({});
+    };
     addEventListener("blur", blur);
     return () => removeEventListener("blur", blur);
   }, []);
@@ -144,18 +143,100 @@ export function useCopies({
   /** Put cells on the clipboard. The item is handed over at once (keeping the key
    * press or click that allows it) and filled when the plots are captured; a
    * newer write makes an older one fail quietly. */
-  const writeClipboard = async (cells: number[]) => {
+  const writeClipboard = async (
+    cells: number[],
+    selectedTrials: string[] = [],
+    selectedCuts = copyCuts,
+  ) => {
     const wall = tileWall.current;
     if (!wall || !data) {
       return;
     }
     const id = ++latestWrite.current;
-    const counts = data.counts;
-    const content = wall.capture(cells).then((captures) => {
+    setPreparing(true);
+    const secondary = trials.filter((t) => t.id !== trial?.id && selectedTrials.includes(t.id));
+    const sources = secondary.map((t) => {
+      const tet = t.tetrodes.find((tet) => tet.number === tetNum && tet.file);
+      const cut = tet?.cuts.find((cut) => cut.id === (selectedCuts[t.id] ?? rememberedCut(tet)));
+      const recording = tet?.file
+        ? {
+            trialId: t.id,
+            file: tet.file,
+            assetKey: `${tet.id}|${fileId(tet.file)}`,
+            cut: cut?.file,
+            cutKey: cut?.id,
+            pos: t.pos,
+            posKey: positionKey(t),
+          }
+        : undefined;
+      const key = `${recording?.assetKey}|${cut?.id}|${cut?.revision || 0}|${positionKey(t)}|${JSON.stringify(settings)}`;
+      return { trial: t, recording, key, cut };
+    });
+    // Even an empty request cancels work for an older trial selection.
+    const analyses = request("copy_analysis", {
+      recordings: cells.length
+        ? sources
+            .filter(
+              (s) =>
+                s.recording && cells.some((cell) => !analysisCache.current.get(s.key)?.has(cell)),
+            )
+            .map((s) => s.recording!)
+        : [],
+      cells,
+      settings,
+    });
+    const content = Promise.all([wall.capture(cells), analyses]).then(([captures, results]) => {
       if (id !== latestWrite.current) {
         throw new StaleCopy();
       }
-      return clipboardContent(captures, `${trial?.name} · T${tetNum}`, counts);
+      const ratio = Math.min(2, devicePixelRatio || 1);
+      const frames: AnalysisFrame[] = (captures[0]?.plots || []).flatMap((plot) =>
+        plot.mode === "waveforms"
+          ? []
+          : [
+              {
+                mode: plot.mode,
+                name: plot.name,
+                width: plot.canvas.width / ratio,
+                height: plot.canvas.height / ratio,
+              },
+            ],
+      );
+      const primaryTet = trial?.tetrodes.find((t) => t.number === tetNum);
+      const primaryCut = primaryTet?.cuts.find((c) => c.id === rememberedCut(primaryTet));
+      const columns: TrialCapture[] = [
+        { name: trial!.name, cutName: primaryCut?.name || "Unsorted", cells: captures },
+      ];
+      for (const source of sources) {
+        const result = results.find((r) => r.trialId === source.trial.id);
+        if (result) {
+          const cache = analysisCache.current.get(source.key) || new Map();
+          result.cells.forEach((cell) => cache.set(cell.cell, cell));
+          analysisCache.current.set(source.key, cache);
+        }
+        columns.push({
+          name: source.trial.name,
+          cutName: source.cut?.name || (source.recording ? "Unsorted" : `No tetrode ${tetNum}`),
+          cells: cells.map((cell) => {
+            const result = analysisCache.current.get(source.key)?.get(cell);
+            const spikes = result?.spikes || 0;
+            return {
+              cell,
+              spikes,
+              stats: cellStatEntries(result?.data, !!source.trial.pos, spikes),
+              plots: captureAnalysisPlots(
+                result?.data,
+                spikes,
+                !!source.trial.pos,
+                settings,
+                frames,
+                source.recording ? "No data" : `No tetrode ${tetNum}`,
+              ),
+            };
+          }),
+        });
+      }
+      return comparisonClipboard(columns, tetNum);
     });
     try {
       const item = new ClipboardItem({
@@ -164,8 +245,16 @@ export function useCopies({
       });
       await navigator.clipboard.write([item]);
     } catch (error) {
-      if (id === latestWrite.current && !(error instanceof StaleCopy)) {
+      if (
+        id === latestWrite.current &&
+        !(error instanceof StaleCopy) &&
+        !(error instanceof Superseded)
+      ) {
         throw error;
+      }
+    } finally {
+      if (id === latestWrite.current) {
+        setPreparing(false);
       }
     }
   };
@@ -185,17 +274,48 @@ export function useCopies({
   };
 
   /** Set the copy-mode selection and put it on the clipboard. */
-  const copyCells = (cells: number[]) => {
+  const copyCells = (cells: number[], selectedTrials = trialIds, selectedCuts = copyCuts) => {
     const sorted = [...cells].sort((a, b) => a - b);
     setCopying(sorted);
-    if (sorted.length) {
-      writeClipboard(sorted).catch(() => onNotice("Clipboard unavailable."));
-    }
+    setTrialIds(selectedTrials);
+    setCopyCuts(selectedCuts);
+    writeClipboard(sorted, selectedTrials, selectedCuts).catch((error) =>
+      onNotice(`Clipboard could not be updated: ${error.message}`),
+    );
   };
   const copyMode = {
     cells: copying,
+    trialIds: copying === null ? [] : [trial?.id || "", ...trialIds],
+    cuts: Object.fromEntries(
+      trials.map((t) => {
+        const tet = t.tetrodes.find((e) => e.number === tetNum);
+        return [t.id, copyCuts[t.id] ?? (tet ? rememberedCut(tet) : "")];
+      }),
+    ),
+    preparing,
+    chooseCut: (t: Trial, cutId: string) => {
+      if (copying === null || t.id === trial?.id) {
+        return;
+      }
+      copyCells(copying, trialIds.includes(t.id) ? trialIds : [...trialIds, t.id], {
+        ...copyCuts,
+        [t.id]: cutId,
+      });
+    },
+    toggleTrial: (t: Trial) => {
+      if (copying === null || t.id === trial?.id) {
+        return;
+      }
+      copyCells(
+        copying,
+        trialIds.includes(t.id) ? trialIds.filter((id) => id !== t.id) : [...trialIds, t.id],
+      );
+    },
     /** Enter copy mode, starting with the hovered cell if there is one. */
-    start: (hovered: number | null) => copyCells(hovered === null ? [] : [hovered]),
+    start: (hovered: number | null) => {
+      analysisCache.current.clear();
+      copyCells(hovered === null ? [] : [hovered], [], {});
+    },
     toggle: (n: number) => {
       const current = copying ?? [];
       copyCells(current.includes(n) ? current.filter((c) => c !== n) : [...current, n]);
@@ -209,8 +329,21 @@ export function useCopies({
       });
       copyCells(all);
     },
-    end: () => setCopying(null),
+    end: () => {
+      setCopying(null);
+      setTrialIds([]);
+      setCopyCuts({});
+    },
   };
+
+  useEffect(() => {
+    if (copying !== null) {
+      writeClipboard(copying, trialIds).catch((error) =>
+        onNotice(`Clipboard could not be updated: ${error.message}`),
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selections write immediately in their event handlers; refresh only when plot options change
+  }, [settings, shown]);
 
   const close = (id: string) => setCopies((cs) => cs.filter((c) => c.id !== id));
   const closeAll = () => setCopies([]);

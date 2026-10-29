@@ -90,6 +90,7 @@ export class WaveGPU {
   timed = false;
   asset = "";
   loaded = false;
+  private loadComplete: Promise<void> = Promise.resolve();
   loading = 0;
   orderData: Uint32Array | null = null;
   cache = new Map<string, Entry>();
@@ -223,7 +224,7 @@ export class WaveGPU {
       ORDER_WIDTH,
       Math.max(1, Math.ceil(slots / ORDER_WIDTH)),
     );
-    (async () => {
+    this.loadComplete = (async () => {
       for (let layer = 0; layer < layers; layer++) {
         const first = layer * PER_LAYER;
         const count = Math.min(PER_LAYER, slots - first);
@@ -256,7 +257,12 @@ export class WaveGPU {
       }
       this.loaded = true;
       this.tick();
-    })().catch(() => {});
+    })();
+    void this.loadComplete.catch(() => {});
+  }
+  /** Clipboard captures wait for resident records when waveforms have just been enabled. */
+  whenLoaded() {
+    return this.loadComplete;
   }
   private clearCache() {
     for (const entry of this.cache.values()) {

@@ -115,11 +115,18 @@ test("Copying a cell puts its text and each plot separately on the clipboard", a
   await page.keyboard.press("ControlOrMeta+c");
   await expect
     .poll(async () => (await readClipboard(page).catch(() => ({ text: "" }))).text)
-    .toMatch(/cell 1 · /);
+    .toMatch(/t1 c1 · /);
   const clipboard = await readClipboard(page);
   expect(clipboard.types).not.toContain("image/png");
-  expect(clipboard.text).toMatch(/T\d+ · cell 1 · [\d,]+ spikes/);
-  const alts = [...clipboard.html.matchAll(/<img[^>]*alt="([^"]+)"/g)].map((m) => m[1]);
+  expect(clipboard.text).toMatch(/t\d+ c1 · [\d,]+ spikes/);
+  expect(clipboard.html).toContain("<b>demo_box-a · t1 c1</b>");
+  expect(clipboard.html).not.toContain("<table");
+  expect(clipboard.html).not.toContain("Waveforms from");
+  expect(clipboard.html).not.toContain("Trials and cuts:");
+  expect(clipboard.text.split("\n")).toHaveLength(1);
+  const alts = [...clipboard.html.matchAll(/<img[^>]*alt="([^"]+)"/g)].map(
+    (m) => m[1].split(" · ")[0],
+  );
   expect(alts).toEqual([
     "Waveforms",
     "Spatial rate map",
@@ -127,6 +134,20 @@ test("Copying a cell puts its text and each plot separately on the clipboard", a
     "Speed",
     "Autocorrelation",
   ]);
+  const preview = await context.newPage();
+  await preview.setContent(
+    `<div style="display:inline-block;font:11px Arial;">${clipboard.html}</div>`,
+  );
+  const plots = preview.locator("p").filter({ has: preview.locator("img") });
+  await expect(plots).toHaveCount(1);
+  await expect(plots.locator("img")).toHaveCount(5);
+  await preview
+    .locator("img")
+    .evaluateAll((images) =>
+      Promise.all(images.map((image) => (image as HTMLImageElement).decode())),
+    );
+  await preview.locator("div").screenshot({ path: "test-results/single-trial-clipboard.png" });
+  await preview.close();
 });
 
 test("holding Cmd/Ctrl C opens copy mode, which keeps the clipboard in step", async ({
@@ -140,7 +161,9 @@ test("holding Cmd/Ctrl C opens copy mode, which keeps the clipboard in step", as
   const tile = (n: number) => page.locator(`.cell-tile[data-cell="${n}"]`);
   // A read can race a write still landing; poll again.
   const lines = async () =>
-    (await readClipboard(page).catch(() => ({ text: "" }))).text.split("\n");
+    (await readClipboard(page).catch(() => ({ text: "" }))).text
+      .split("\n")
+      .filter((line) => /· t\d+ c\d+ ·/.test(line));
   await tile(2).hover();
   await page.keyboard.down("ControlOrMeta");
   await page.keyboard.down("c");
@@ -152,19 +175,19 @@ test("holding Cmd/Ctrl C opens copy mode, which keeps the clipboard in step", as
   await expect(prompt).toContainText("(1 cell on the clipboard)");
   await expect(tile(2)).toHaveClass(/tile-marked/);
   await expect(tile(3)).toHaveClass(/tile-muted/);
-  await expect.poll(lines).toEqual([expect.stringMatching(/cell 2 · /)]);
+  await expect.poll(lines).toEqual([expect.stringMatching(/t1 c2 · /)]);
   await tile(3).click();
   await expect(prompt).toContainText("(2 cells on the clipboard)");
   await expect
     .poll(lines)
-    .toEqual([expect.stringMatching(/cell 2 · /), expect.stringMatching(/cell 3 · /)]);
+    .toEqual([expect.stringMatching(/t1 c2 · /), expect.stringMatching(/t1 c3 · /)]);
   await tile(2).click();
-  await expect.poll(lines).toEqual([expect.stringMatching(/cell 3 · /)]);
+  await expect.poll(lines).toEqual([expect.stringMatching(/t1 c3 · /)]);
   // Select all includes tiles scrolled out of view, each with its own plots.
   await prompt.getByRole("button", { name: /Select all/ }).click();
   await expect.poll(async () => (await lines()).length).toBeGreaterThan(3);
   const { html, text } = await readClipboard(page);
-  const count = text.split("\n").length;
+  const count = text.split("\n").filter((line) => /· t\d+ c\d+ ·/.test(line)).length;
   expect(html.match(/alt="Waveforms"/g)).toHaveLength(count);
   expect(html.match(/alt="Autocorrelation"/g)).toHaveLength(count);
   // Leaving the window ends copy mode and vignettes the window until it returns.

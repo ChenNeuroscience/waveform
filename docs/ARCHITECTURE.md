@@ -52,6 +52,12 @@ Drift and exact counts need `EXT_color_buffer_float` and `EXT_float_blend`; with
 
 Waveform frame geometry (shared by the shader, split marker and gestures) lives in `plots/plot-geometry.ts`.
 
+## Clipboard comparisons
+
+Copy mode can include additional trials without changing the displayed recording. Each uses the same tetrode number and its remembered cut (or first cut), including saved local edits; clicking its existing cut buttons can override that choice for the clipboard. The worker's `copy_analysis` request streams one secondary population at a time through the shared recording reader, computes summaries with the existing Rust analysis engine, and frees the temporary engine in `finally`. It never activates that recording, builds its waveform order, or transfers its population to the UI. New selections cancel obsolete reads between chunks; completed summaries are reused within copy mode.
+
+`app/copy-plots.ts` draws analysis captures at consistent sizes. `app/clipboard-layout.ts` builds a borderless HTML table for multiple trials, with fixed column widths and one subrow per chart type. Headings use `t# c#` (tetrode first). Headings and statistics remain editable text; plots remain separate images, with a subtle cross for missing cells, tetrodes or position data. Empty waveform cells preserve alignment without spacer images or font-dependent whitespace. Stat labels appear once on the left, and trial columns contain values and units. Shared trial-name prefixes are omitted from column headers; footnotes identify the waveform source and record the full trial names and selected cuts. Only the displayed trial contributes waveforms. A single trial uses the original title-and-stats line followed by its plots in one compact row, without a table or trial footnotes.
+
 ## Caches
 
 - **Recordings:** about 384 MiB of retained engine data; inactive tetrodes are evicted first.
