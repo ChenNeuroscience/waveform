@@ -176,8 +176,11 @@ test("favicon and compact tile corners; extra filter, time controls and channel 
   const frame = await tile.locator(".tile-waves").evaluate((el) => ({
     w: Number((el as HTMLElement).dataset.plotWidth),
     h: Number((el as HTMLElement).dataset.plotHeight),
+    top: Number((el as HTMLElement).dataset.plotTop),
   }));
-  expect(frame.w / frame.h).toBe(4);
+  expect(frame.h).toBe(row.height);
+  expect(frame.top).toBe(0);
+  expect(frame.w).toBe(waves.width - 24);
   await page.screenshot({ path: "test-results/tile-corners.png" });
 });
 
