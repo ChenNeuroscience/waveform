@@ -212,4 +212,6 @@ it("waveform frame geometry round-trips between samples and split points", () =>
           threshold,
         });
   expect(waveY(0)).toBe(0.5);
+  expect(waveY(127)).toBeLessThan(1 / 128);
+  expect(waveY(-128)).toBe(1);
 });

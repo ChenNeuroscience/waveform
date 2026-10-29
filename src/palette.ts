@@ -38,3 +38,35 @@ const blackText = new Set([
 ]);
 export const groupRgb8 = (cell: number): readonly number[] => groupPalette[cell] || [0, 0, 0];
 export const groupTextColor = (cell: number) => (blackText.has(cell) ? "#000" : "#fff");
+
+// The five spatial rate-map colours from waveform-v1's rm-plots.html.
+const rateMapColours = [
+  [0, 0, 198],
+  [0, 162, 255],
+  [56, 235, 32],
+  [248, 221, 0],
+  [255, 32, 0],
+] as const;
+
+/** Other step counts sample the same colours with linear RGB interpolation. */
+export function rateMapPalette(steps = 5): string[] {
+  const count = Number.isFinite(steps) ? Math.max(2, Math.min(32, Math.round(steps))) : 5;
+  return Array.from({ length: count }, (_, i) => {
+    const position = (i * (rateMapColours.length - 1)) / (count - 1);
+    const low = Math.floor(position);
+    const high = Math.min(low + 1, rateMapColours.length - 1);
+    const rgb = rateMapColours[low].map((v, channel) =>
+      Math.round(v + (rateMapColours[high][channel] - v) * (position - low)),
+    );
+    return `rgb(${rgb.join(",")})`;
+  });
+}
+
+export function rateMapColour(rate: number, maximum: number, palette: readonly string[]): string {
+  if (!Number.isFinite(rate)) {
+    return "#ffffff";
+  }
+  // Match v1's equal-width bins, including its epsilon at exact boundaries.
+  const index = maximum > 0 ? Math.floor((rate / (maximum * (1 + 1e-7))) * palette.length) : 0;
+  return palette[Math.max(0, Math.min(palette.length - 1, index))];
+}
