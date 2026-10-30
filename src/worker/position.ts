@@ -30,7 +30,6 @@ export async function parsePosition(
   const n = parseInt(h.num_pos_samples);
   const ppm = parseFloat(h.pixels_per_metre);
   const rate = parseFloat(h.sample_rate);
-  const tb = parseFloat(h.timestamp_timebase || h.timebase || h.sample_rate || "50");
   const minX = parseFloat(h.window_min_x || "0");
   const minY = parseFloat(h.window_min_y || "0");
   const maxX = parseFloat(h.window_max_x);
@@ -41,13 +40,12 @@ export async function parsePosition(
     offset + n * 20 > file.size ||
     !(ppm > 0) ||
     !(rate > 0) ||
-    !(tb > 0) ||
     !(maxX > minX) ||
     !(maxY > minY)
   ) {
     throw new Error("Invalid or truncated position file.");
   }
-  const handle = w.position_new(n, ppm, rate, tb, minX, minY, maxX, maxY);
+  const handle = w.position_new(n, ppm, rate, minX, minY, maxX, maxY);
   try {
     w.position_bearing(handle, parseFloat(h.bearing_colour_1 || "0"));
     await streamFile(w, file, offset, n * 20, 32768 * 20, (p, bytes) =>

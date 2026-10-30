@@ -35,11 +35,15 @@ export function useAnalyses({
   const [trajectory, setTrajectory] = useState<{ key: string; value: Trajectory | null } | null>(
     null,
   );
+  const [speedDwell, setSpeedDwell] = useState<{ key: string; values: Float32Array } | null>(null);
   const [comparison, setComparison] = useState<{ key: string; data: AnalysisData } | null>(null);
   const trajectoryKey =
     data && trial?.pos
       ? `${positionKey(trial)}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}`
       : "";
+  const speedDwellKey = trajectoryKey
+    ? `${trajectoryKey}|${settings.speedBin}|${settings.speedMax}`
+    : "";
 
   // The path is shared by every cell, so it is fetched once per position file and
   // processing settings rather than with each cell's analysis.
@@ -81,6 +85,15 @@ export function useAnalyses({
           .then((a) => {
             if (live) {
               setAnalysis(a);
+              // Every cell carries the same position-only dwell histogram. Retain
+              // its array across cell, cut and tetrode changes so it isn't redrawn.
+              if (speedDwellKey) {
+                setSpeedDwell((current) =>
+                  current?.key === speedDwellKey
+                    ? current
+                    : { key: speedDwellKey, values: a.speedDwell },
+                );
+              }
             }
           })
           .catch((e) => {
@@ -159,6 +172,7 @@ export function useAnalyses({
   return {
     analysis,
     trajectory: trajectory?.key === trajectoryKey ? trajectory.value : null,
+    speedDwell: speedDwell?.key === speedDwellKey ? speedDwell.values : null,
     comparisonAnalysis: comparison?.key === comparisonKey ? comparison.data : null,
     clearAnalysis: () => setAnalysis(null),
   };

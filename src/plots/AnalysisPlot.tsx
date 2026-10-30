@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { fitGrid } from "./plot-geometry";
+import { drawSpeedBars } from "./SpeedPlot";
 import { type AnalysisData, type PlotMode } from "../types";
 import { correlationColour, rateMapColour, rateMapPalette } from "../palette";
 
@@ -88,8 +89,9 @@ export function drawAnalysis(
       const j = i % a.length;
       const theta = (j / a.length) * Math.PI * 2 - Math.PI;
       const rr = (a[j] / max) * r;
-      const x = cx + Math.cos(theta) * rr;
-      const y = cy + Math.sin(theta) * rr;
+      // v1's display convention: zero points left, pi/2 points up.
+      const x = cx - Math.cos(theta) * rr;
+      const y = cy - Math.sin(theta) * rr;
       if (!i) {
         ctx.moveTo(x, y);
       } else {
@@ -117,19 +119,7 @@ export function drawAnalysis(
       }
       ctx.stroke();
     } else {
-      ctx.fillStyle = "#111";
-      const bh = h / a.length;
-      for (let i = 0; i < a.length; i++) {
-        if (!(a[i] > 0)) {
-          continue;
-        }
-        const bw = (a[i] / max) * (w - 1);
-        ctx.fillRect(speedAlignment === "left" ? 0 : w - bw, i * bh, bw, Math.max(0.5, bh - 0.4));
-      }
-      if (positionSpeed) {
-        ctx.fillStyle = "#f00";
-        ctx.fillRect(0, 0, 0.6, h);
-      }
+      drawSpeedBars(ctx, w, h, a, speedAlignment, positionSpeed);
     }
   } else {
     const a = mode === "ac" ? data.ac : positionSpeed ? data.speedDwell : data.speed;

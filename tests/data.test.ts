@@ -110,15 +110,16 @@ describe("undo delta integrity", () => {
   });
 });
 describe("analysis", () => {
-  it("uses the position timestamp clock, preserves window-relative coordinates and applies LED bearing", async () => {
+  it("uses nominal position sampling despite irregular timestamps, preserves window-relative coordinates and applies LED bearing", async () => {
     const w = await corePromise;
-    // The supplied LTX data has a 50 Hz sample rate and 96 kHz timestamp clock.
+    // Position sampling is 50 Hz. Offsets, repeats and jumps in its recorded
+    // 96 kHz timestamps must not affect the sample-index clock.
     const header =
       "pos_format t,x1,y1,x2,y2,numpix1,numpix2\nnum_pos_samples 4\npixels_per_metre 100\nsample_rate 50 hz\ntimebase 50 hz\ntimestamp_timebase 96000 hz\nwindow_min_x 30\nwindow_min_y 60\nwindow_max_x 40\nwindow_max_y 70\nbearing_colour_1 135\ndata_start";
     const raw = new Uint8Array(80),
       d = new DataView(raw.buffer);
     for (let i = 0; i < 4; i++) {
-      d.setUint32(i * 20, i * 1920);
+      d.setUint32(i * 20, [960000, 0, 960000, 1920][i]);
       d.setUint16(i * 20 + 4, i + 1);
       d.setUint16(i * 20 + 6, 1);
       d.setUint16(i * 20 + 8, i + 3);
@@ -153,7 +154,7 @@ describe("analysis", () => {
   it("normalises spikes by dwell time and excludes self from autocorrelation in Rust", async () => {
     const w = await corePromise,
       e = seedEngine(w, [100, 1100, 2100], [1, 1, 1]),
-      pos = w.position_new(4, 100, 1, 1, 0, 0, 10, 10),
+      pos = w.position_new(4, 100, 1, 0, 0, 10, 10),
       raw = new Uint8Array(80),
       d = new DataView(raw.buffer);
     for (let i = 0; i < 4; i++) {

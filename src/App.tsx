@@ -390,7 +390,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when the tetrode or cut identity changes; other inputs are read at load time
   }, [tet?.id, tet?.file, cutId]);
   const displayCell = dragComparison?.source ?? hoverCell ?? cell;
-  const { analysis, trajectory, comparisonAnalysis, clearAnalysis } = useAnalyses({
+  const { analysis, trajectory, speedDwell, comparisonAnalysis, clearAnalysis } = useAnalyses({
     data,
     busy,
     trial,
@@ -891,7 +891,7 @@ export default function App() {
               />
               <Divider part="files" onDrag={panes.dragDivider} />
               <PositionPane
-                {...{ data, trial, settings, trajectory, analysis, comparisonAnalysis }}
+                {...{ data, trial, settings, trajectory, speedDwell, analysis, comparisonAnalysis }}
                 {...{ hoverCell, dragComparison, grabMode }}
                 onPopPlot={popPlot}
                 onHover={(hovered) => {

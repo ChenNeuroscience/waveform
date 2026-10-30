@@ -84,7 +84,7 @@ export const EXPORTS = {
   position_bearing: 2,
   position_finish: 4,
   position_free: 1,
-  position_new: 8,
+  position_new: 7,
   position_path: 1,
   position_path_len: 1,
   position_push: 3,
