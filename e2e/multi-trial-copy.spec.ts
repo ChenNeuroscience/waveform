@@ -75,6 +75,11 @@ test("copy mode compares trials without loading their waveform views, and produc
   const secondary = page.getByRole("button", { name: "demo_box-b 8", exact: true });
   await secondary.click();
   await expect(secondary).toHaveClass(/copy-included/);
+  const excluded = page.getByRole("button", { name: "demo_box-c 8", exact: true });
+  await expect(excluded).toHaveCSS("opacity", "0.45");
+  await expect(excluded).toHaveCSS("filter", "grayscale(1)");
+  await expect(secondary).toHaveCSS("opacity", "1");
+  await expect(primary).toHaveCSS("opacity", "1");
   await expect(page.locator('.trial-block input[type="checkbox"]')).toHaveCount(0);
   await page.locator('.cell-tile[data-cell="3"]').click();
   await expect.poll(async () => (await clipboard(page)).text).toContain("demo_box-b · t1 c3");
@@ -304,9 +309,7 @@ test("secondary trials use their remembered edited cut without changing the prim
   await expect
     .poll(async () => (await clipboard(page)).text)
     .toMatch(/demo_box-b · t1 c1 · [1-9][\d,]* spikes/);
-  await expect(second.getByRole("button", { name: "~_1.cut", exact: true })).toHaveClass(
-    /copy-cut/,
-  );
+  await expect(second.getByRole("button", { name: "~_1.cut", exact: true })).toHaveClass(/active/);
   await expect(page).toHaveTitle("demo_box-a [Waveform]");
   await expect(page.getByRole("alert")).toHaveCount(0);
 });

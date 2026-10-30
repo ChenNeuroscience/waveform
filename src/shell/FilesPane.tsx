@@ -1,6 +1,7 @@
 import { cutDownloadKey, type CutDownloads } from "../app/cut-downloads";
 import type { CutFile, Tetrode, Trial } from "../types";
 import { useEffect, useRef } from "react";
+import { ToggleButton } from "./ToggleButton";
 
 /** Tetrode navigation and the trials with their tetrode and cut files. */
 export function FilesPane(p: {
@@ -21,6 +22,12 @@ export function FilesPane(p: {
   onCopyCut: (t: Trial, cut: string) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
+  const navigation = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    navigation.current
+      ?.querySelector('[aria-pressed="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [p.tetNum]);
   // Keep the selected trial in view when it changes.
   useEffect(() => {
     list.current
@@ -34,26 +41,29 @@ export function FilesPane(p: {
     <section className="files-pane">
       <div className="tetrode-navigation">
         <span>Tetrode:</span>
-        {numbers.map((n) => (
-          <button
-            key={n}
-            className={n === p.tetNum ? "active" : ""}
-            aria-label={String(n).padStart(2, "0")}
-            disabled={p.copying || !p.trial?.tetrodes.find((t) => t.number === n)?.file}
-            onClick={() => p.onTet(n)}
-          >
-            {n}
-          </button>
-        ))}
+        <div className="toggle-group" role="group" aria-label="Tetrodes" ref={navigation}>
+          {numbers.map((n) => (
+            <ToggleButton
+              key={n}
+              pressed={n === p.tetNum}
+              aria-label={String(n).padStart(2, "0")}
+              disabled={p.copying || !p.trial?.tetrodes.find((t) => t.number === n)?.file}
+              onClick={() => p.onTet(n)}
+            >
+              {n}
+            </ToggleButton>
+          ))}
+        </div>
       </div>
-      <div className="trial-list" ref={list}>
+      <div className="trial-list" ref={list} data-copying={p.copying ? "" : undefined}>
         {p.trials.map((t) => (
           <div
             key={t.id}
             role="button"
             tabIndex={0}
             aria-label={`${t.name} ${t.tetrodes.length}`}
-            aria-pressed={p.copying ? p.copyTrialIds.includes(t.id) : undefined}
+            aria-pressed={p.copying ? p.copyTrialIds.includes(t.id) : t.id === p.trial?.id}
+            aria-current={t.id === p.trial?.id ? "true" : undefined}
             onClick={() => (p.copying ? p.onCopyTrial(t) : p.onTrial(t))}
             onKeyDown={(e) => {
               if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
@@ -99,14 +109,11 @@ export function FilesPane(p: {
                       title={e.file.name}
                       aria-label={`${t.name} tetrode ${e.number}`}
                       className={
-                        t.id === p.trial?.id && e.number === p.tetNum && !p.cutId
+                        e.number === p.tetNum &&
+                        ((t.id === p.trial?.id && !p.cutId) ||
+                          (p.copying && p.copyTrialIds.includes(t.id) && p.copyCuts[t.id] === ""))
                           ? "active"
-                          : p.copying &&
-                              p.copyTrialIds.includes(t.id) &&
-                              e.number === p.tetNum &&
-                              p.copyCuts[t.id] === ""
-                            ? "copy-cut"
-                            : ""
+                          : ""
                       }
                       onClick={(event) => {
                         event.stopPropagation();
@@ -137,7 +144,7 @@ export function FilesPane(p: {
                       onPointerDown={() => p.onPrepareCut(t, e, c)}
                       onDragStart={(event) => p.onCutDrag(event, t, e, c)}
                       aria-label={c.name.replace(t.name, "~")}
-                      className={`cut-file ${c.local ? "local-cut" : ""} ${t.id === p.trial?.id && e.number === p.tetNum && p.cutId === c.id ? "active" : ""} ${p.copying && p.copyTrialIds.includes(t.id) && e.number === p.tetNum && p.copyCuts[t.id] === c.id ? "copy-cut" : ""}`}
+                      className={`cut-file ${c.local ? "local-cut" : ""} ${e.number === p.tetNum && ((t.id === p.trial?.id && p.cutId === c.id) || (p.copying && p.copyTrialIds.includes(t.id) && p.copyCuts[t.id] === c.id)) ? "active" : ""}`}
                       onClick={(event) => {
                         event.stopPropagation();
                         if (p.copying) {

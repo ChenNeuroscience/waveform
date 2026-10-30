@@ -1,66 +1,33 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import icon from "../../img/icon.svg";
-import { FolderOpen, Folder, Undo2, Redo2, Keyboard, Settings2, History, List } from "lucide-react";
+import type { ReactNode } from "react";
+import { Undo2, Redo2, Keyboard, Settings as SettingsIcon, History } from "lucide-react";
 import type { PlotMode, ViewData } from "../types";
 import type { VisiblePlots } from "../tiles/TileWall";
 import type { PanelName } from "./panels";
 import { experimentTiming } from "./position-info";
+import { ToggleButton } from "./ToggleButton";
+import { FileMenu } from "./FileMenu";
 
-/** The Waveform icon, which returns to the start screen after a confirmation. */
-function HomeButton({ unexported, onHome }: { unexported: boolean; onHome: () => void }) {
-  const [confirming, setConfirming] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  // A press anywhere else dismisses the confirmation.
-  useEffect(() => {
-    if (!confirming) {
-      return;
-    }
-    const dismiss = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) {
-        setConfirming(false);
-      }
-    };
-    addEventListener("pointerdown", dismiss, true);
-    return () => removeEventListener("pointerdown", dismiss, true);
-  }, [confirming]);
-  const cancelOnEscape = (event: React.KeyboardEvent) => {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      setConfirming(false);
-    }
-  };
-  const confirm = () => {
-    setConfirming(false);
-    onHome();
-  };
+/** A file with paired key/value lines, for recording header metadata. */
+function HeadersIcon() {
   return (
-    <div className="toolbar-home" ref={root} onKeyDown={cancelOnEscape}>
-      <button
-        className="home-button"
-        title="Waveform · close files and return to the start screen"
-        aria-label="Return to the start screen"
-        aria-expanded={confirming}
-        onClick={() => setConfirming((c) => !c)}
-      >
-        <img src={icon} alt="" width={20} height={20} />
-      </button>
-      {confirming && (
-        <div className="home-confirm" role="dialog" aria-label="Return to the start screen">
-          <p>
-            Close all files and return to the start screen?
-            {unexported && " Unexported cut edits will be lost."}
-          </p>
-          <button autoFocus className="primary" onClick={confirm}>
-            Close files
-          </button>
-          <button onClick={() => setConfirming(false)}>Cancel</button>
-        </div>
-      )}
-    </div>
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 2v6h6M7 11h2m3 0h5M7 15h2m3 0h5M7 19h2m3 0h5" />
+    </svg>
   );
 }
 
-/** Home, open files, undo/redo, panels, plot toggles and the recording status line. */
+/** File menu, undo/redo, panels, plot toggles and the recording status line. */
 export function Toolbar(p: {
   busy: boolean;
   data: ViewData | null;
@@ -71,8 +38,6 @@ export function Toolbar(p: {
   progress: number;
   ready: boolean;
   shown: VisiblePlots;
-  /** Some cut has edits not yet exported (the home confirmation warns). */
-  unexported: boolean;
   onHome: () => void;
   onOpenFiles: () => void;
   onOpenFolder: () => void;
@@ -82,18 +47,7 @@ export function Toolbar(p: {
   const timing = experimentTiming(p.data?.headers || {}, p.data?.duration || 0);
   return (
     <div className="desktop-toolbar" role="toolbar" aria-label="Waveform tools">
-      <HomeButton unexported={p.unexported} onHome={p.onHome} />
-      <span className="tool-separator" />
-      <button
-        title="Open files [Ctrl/Cmd O]"
-        aria-label="Browse files"
-        onClick={() => p.onOpenFiles()}
-      >
-        <FolderOpen size={17} />
-      </button>
-      <button title="Open folder" aria-label="Open a folder" onClick={() => p.onOpenFolder()}>
-        <Folder size={16} />
-      </button>
+      <FileMenu onHome={p.onHome} onOpenFiles={p.onOpenFiles} onOpenFolder={p.onOpenFolder} />
       <span className="tool-separator" />
       <button
         title="Keyboard shortcuts [K]"
@@ -128,16 +82,16 @@ export function Toolbar(p: {
         aria-label="File headers"
         onClick={() => p.onPanel("headers")}
       >
-        <List size={17} />
+        <HeadersIcon />
       </button>
       <button title="Settings" aria-label="Settings" onClick={() => p.onPanel("settings")}>
-        <Settings2 size={17} />
+        <SettingsIcon size={17} />
       </button>
       <span className="tool-separator" />
       {(["waveforms", "spatial", "sc", "direction", "speed", "ac"] as PlotMode[]).map((m) => (
-        <button
+        <ToggleButton
           key={m}
-          className={`plot-toggle ${p.shown[m] ? "checked" : ""}`}
+          className="plot-toggle"
           aria-label={
             {
               waveforms: "Waveforms",
@@ -148,7 +102,7 @@ export function Toolbar(p: {
               sc: "Spatial autocorrelation",
             }[m]
           }
-          aria-pressed={p.shown[m]}
+          pressed={p.shown[m]}
           title={
             {
               waveforms: "Waveforms [W]",
@@ -171,7 +125,7 @@ export function Toolbar(p: {
               sc: "SC",
             }[m]
           }
-        </button>
+        </ToggleButton>
       ))}
       {p.children && (
         <>

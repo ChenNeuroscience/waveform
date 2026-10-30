@@ -5,6 +5,10 @@
   color: #111;
   background: white;
   color-scheme: light;
+  --toggle-radius: 3px;
+  --toggle-selected-bg: #e8ebef;
+  --toggle-selected-border: #9199a3;
+  --toggle-selected-text: #343a43;
   font-synthesis: none;
 }
 * {
@@ -17,6 +21,17 @@ body,
   height: 100%;
   margin: 0;
   overflow: hidden;
+}
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+[data-text-selectable] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 button,
 input,
@@ -109,27 +124,37 @@ small {
 .home-button:hover img {
   transform: scale(1.08);
 }
-.home-confirm {
+.waveform-menu {
+  display: flex;
+  flex-direction: column;
   position: fixed;
-  z-index: 40;
-  top: 38px;
+  z-index: 1100;
   left: 6px;
-  width: 250px;
-  padding: 10px 12px;
-  white-space: normal;
+  top: 38px;
+  width: 190px;
+  max-width: calc(100vw - 12px);
+  padding: 4px;
   background: white;
   border: 1px solid #d3d6db;
-  border-radius: 7px;
+  border-radius: var(--toggle-radius);
   box-shadow: 0 6px 20px rgb(15 23 42 / 18%);
-  font-size: 12px;
 }
-.home-confirm p {
-  margin: 0 0 9px;
-  line-height: 1.4;
+.waveform-menu button {
+  flex-shrink: 0;
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
 }
-.home-confirm button {
-  margin-right: 6px;
-  font-size: 12px;
+.waveform-menu button:hover,
+.waveform-menu button:focus-visible {
+  border-color: transparent;
+  background: var(--toggle-selected-bg);
+}
+.menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: #d9dce1;
 }
 .toolbar-show {
   position: fixed;
@@ -172,7 +197,7 @@ small {
     sans-serif;
   color: #3b4048;
 }
-.desktop-toolbar > button {
+.desktop-toolbar > button:not(.toggle-button) {
   height: 27px;
   padding: 3px 7px;
   border: 1px solid transparent;
@@ -182,75 +207,84 @@ small {
     border-color 0.12s ease,
     color 0.12s ease;
 }
-.desktop-toolbar > button:hover:not(:disabled) {
+.desktop-toolbar > button:not(.toggle-button):hover:not(:disabled) {
   background: rgb(15 23 42 / 6%);
   border-color: transparent;
 }
-.desktop-toolbar > button:active:not(:disabled) {
+.desktop-toolbar > button:not(.toggle-button):active:not(:disabled) {
   background: rgb(15 23 42 / 11%);
 }
 .desktop-toolbar > button:disabled svg {
   opacity: 0.35;
 }
 .tool-separator {
+  flex-shrink: 0;
   height: 18px;
   width: 1px;
   background: #d9dce1;
   margin: 0 5px;
 }
-/* Plot toggles: rounded pills; red marks plots that are shown. */
-.desktop-toolbar > .plot-toggle {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+/* One pressed-state language for plots, display options and paired tool choices. */
+.toggle-button {
   min-width: 36px;
   height: 23px;
-  margin: 0 1px;
+  padding: 0 7px;
   border: 1px solid #d6d9de;
-  border-radius: 999px;
+  border-radius: var(--toggle-radius);
   background: white;
   color: #7a808a;
+  font:
+    600 10px Arial,
+    sans-serif;
+  letter-spacing: 0.04em;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
 }
-.desktop-toolbar > .plot-toggle:hover:not(:disabled) {
+.toggle-button:hover:not(:disabled) {
   border-color: #b4b9c1;
   background: #f6f7f9;
   color: #4b515a;
 }
-.desktop-toolbar > .plot-toggle.checked {
-  border-color: #f2a3a3;
-  background: #fff1f0;
-  color: #d23c3c;
+.toggle-button[aria-pressed="true"] {
+  border-color: var(--toggle-selected-border);
+  background: var(--toggle-selected-bg);
+  color: var(--toggle-selected-text);
+  box-shadow: inset 0 1px 2px rgb(15 23 42 / 8%);
 }
-.desktop-toolbar > .plot-toggle.checked:hover:not(:disabled) {
-  border-color: #e98585;
-  background: #ffe6e4;
-  color: #c02f2f;
+.toggle-button[aria-pressed="true"]:hover:not(:disabled) {
+  border-color: #747e8b;
+  background: #dfe3e8;
+  color: #242a33;
 }
-/* Rendering toggles (drift, density): the same pills with grayscale icons and a
-   slate-blue "on" state, marking them as display modes rather than plots. */
-.desktop-toolbar > .render-toggle {
-  min-width: 36px;
-  height: 23px;
-  margin: 0 1px;
-  padding: 0 8px;
-  border: 1px solid #d6d9de;
-  border-radius: 999px;
-  background: white;
-  opacity: 0.75;
+.toggle-button:disabled {
+  opacity: 0.45;
 }
-.desktop-toolbar > .render-toggle:hover:not(:disabled) {
-  border-color: #b4b9c1;
-  background: #f6f7f9;
-  opacity: 1;
+.toggle-group {
+  display: inline-flex;
+  align-items: center;
+  isolation: isolate;
 }
-.desktop-toolbar > .render-toggle.checked {
-  border-color: #9fb5d6;
-  background: #edf2fa;
-  opacity: 1;
+.toggle-group > .toggle-button {
+  border-radius: 0;
 }
-.desktop-toolbar > .render-toggle.checked:hover:not(:disabled) {
-  border-color: #7f9cc7;
-  background: #e2eaf6;
+.toggle-group > .toggle-button:first-child {
+  border-radius: var(--toggle-radius) 0 0 var(--toggle-radius);
+}
+.toggle-group > .toggle-button:last-child {
+  border-radius: 0 var(--toggle-radius) var(--toggle-radius) 0;
+}
+.toggle-group > .toggle-button + .toggle-button {
+  margin-left: -1px;
+}
+.toggle-group > .toggle-button[aria-pressed="true"] {
+  position: relative;
+  z-index: 1;
+}
+.toggle-group > .toggle-button:focus-visible {
+  position: relative;
+  z-index: 2;
 }
 .desktop-workspace {
   display: grid;
@@ -271,9 +305,8 @@ small {
 }
 .tetrode-navigation {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 3px;
+  gap: 6px;
   padding: 3px 4px;
   border-bottom: 1px solid #d3d3d3;
   flex-shrink: 0;
@@ -282,17 +315,16 @@ small {
   font-size: 11px;
   margin-right: 2px;
 }
-.tetrode-navigation button {
-  min-width: 25px;
-  height: 24px;
-  border: 1px solid #ccc;
-  background: #f6f6f6;
-  font-size: 11px;
-  padding: 1px 5px;
+.tetrode-navigation > .toggle-group {
+  min-width: 0;
+  overflow-x: auto;
+  padding: 1px;
+  scrollbar-width: thin;
 }
-.tetrode-navigation button.active {
-  background: #fffed2;
-  border-color: #aaa;
+.tetrode-navigation .toggle-button {
+  flex-shrink: 0;
+  min-width: 25px;
+  padding: 0 5px;
 }
 .trial-list {
   overflow: auto;
@@ -304,18 +336,21 @@ small {
   border-bottom: 1px solid #c9c9c9;
   background: #f4f4f4;
   padding: 4px 4px 3px;
+  transition:
+    opacity 0.12s ease,
+    filter 0.12s ease;
 }
 .trial-block.selected {
-  background: #ffffe5;
+  background: var(--toggle-selected-bg);
+  border-bottom-color: var(--toggle-selected-border);
+  box-shadow: inset 0 1px 0 var(--toggle-selected-border);
 }
 .trial-block.copy-included:not(.selected) {
-  background: #edf4ff;
-  box-shadow: inset 3px 0 #7b9cc5;
+  background: #f0f2f5;
 }
-.tetrode-file-block button.copy-cut:not(.active) {
-  background: #cbdcf1;
-  border-color: #7898be;
-  color: #243f61;
+.trial-list[data-copying] .trial-block:not(.selected):not(.copy-included) {
+  opacity: 0.45;
+  filter: grayscale(1);
 }
 .trial-heading {
   display: flex;
@@ -503,14 +538,9 @@ small {
   padding: 2px;
   flex-shrink: 0;
 }
-.feature-tools > button {
-  width: 23px;
-  height: 21px;
-  padding: 2px;
-}
-.feature-tools > button.active {
-  border: 1px solid #7e9dbb;
-  background: #e8eff8;
+.feature-tools .toggle-button {
+  min-width: 28px;
+  padding: 0 5px;
 }
 .feature-group-strip {
   flex: 1;
@@ -563,12 +593,12 @@ small {
   align-items: center;
   align-content: center;
   gap: 2px;
-  padding: 2px 0;
-  min-height: 23px;
+  padding: 3px 0;
+  min-height: 27px;
 }
 .source-brace {
   position: relative;
-  min-height: 23px;
+  min-height: 27px;
 }
 .source-brace svg {
   position: absolute;
@@ -582,11 +612,14 @@ small {
 .painting-destination {
   display: inline-flex;
   align-items: center;
-  height: 23px;
+  height: 27px;
 }
 .set-symbol {
+  display: inline-flex;
+  align-items: center;
+  height: 27px;
   font-size: 23px;
-  line-height: 23px;
+  line-height: 1;
 }
 .feature-group-strip .new-group {
   background: #ffffe0;
@@ -1055,47 +1088,70 @@ small {
 }
 .slider-field {
   display: block;
-  font-size: 10px;
-  margin-bottom: 13px;
+  font-size: 11px;
+  margin-bottom: 17px;
 }
-.slider-field > span {
+.slider-heading {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  margin-bottom: 5px;
+  margin-bottom: 7px;
   gap: 8px;
 }
-.slider-field b {
-  font-size: 10px;
-  font-weight: normal;
-  color: #555;
+.slider-value {
+  flex-shrink: 0;
+  min-width: 64px;
+  padding: 3px 6px;
+  border: 1px solid #c7ccd2;
+  border-radius: var(--toggle-radius);
+  background: white;
+  color: #343a43;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
   white-space: nowrap;
+}
+.slider-field[data-state="off"] .slider-value {
+  background: #eceef1;
+  color: #626972;
 }
 .slider-field input {
   display: block;
   width: 100%;
   margin: 0;
+  accent-color: #59616c;
 }
-.toggle-field {
+.slider-limits {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  font-size: 10px;
-  margin: 12px 0;
+  margin-top: 4px;
+  font-size: 9px;
+  color: #737980;
 }
-.toggle-field input {
-  margin: 0;
-}
-.field {
+.slider-hint {
   display: block;
-  font-size: 10px;
-  margin: 12px 0;
-}
-.field select {
-  display: block;
-  width: 100%;
-  height: 23px;
   margin-top: 5px;
   font-size: 10px;
+  color: #626972;
+}
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 3px;
+}
+.settings-actions + h3 {
+  margin-top: 8px;
+}
+.settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  margin: 12px 0 17px;
+}
+.settings-checkbox input {
+  margin: 0;
+  accent-color: #59616c;
 }
 .primary,
 .secondary {
@@ -1227,7 +1283,7 @@ kbd {
   .desktop-toolbar {
     gap: 1px;
   }
-  .desktop-toolbar > button {
+  .desktop-toolbar > button:not(.toggle-button) {
     padding: 3px 5px;
   }
   .desktop-workspace {

@@ -69,7 +69,7 @@ test("browser back/forward restores only trial, tetrode and cut choices", async 
     .getByRole("button", { name: "Waveforms", exact: true })
     .click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("slider", { name: "Point size", exact: true }).fill("2");
+  await page.getByRole("slider", { name: "PCA fit sample size", exact: true }).fill("1000");
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   expect(await length(page)).toBe(navigations);
   expect(page.url()).toBe(url);
@@ -132,7 +132,7 @@ test("arrow keys step trials (up/down), tetrodes (left/right) and a tetrode's cu
   await expect.poll(async () => (await selection(page)).cutId).toBe(start.cutId);
   expect((await selection(page)).tetNum).toBe(1);
 });
-test("opening files adds a history entry after the start screen; the icon goes home after confirming", async ({
+test("opening files adds a history entry after the start screen; the file menu clears directly", async ({
   page,
 }) => {
   await page.goto("/?demo=quick");
@@ -146,17 +146,13 @@ test("opening files adds a history entry after the start screen; the icon goes h
   await expect(page.locator(".desktop-toolbar")).toHaveCount(0);
   await tryDemo.click();
   await ready(page);
-  const home = page.getByRole("button", { name: "Return to the start screen", exact: true });
-  const confirm = page.getByRole("dialog", { name: "Return to the start screen", exact: true });
-  await home.click();
-  await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(confirm).toHaveCount(0);
+  const home = page.getByRole("button", { name: "Waveform menu", exact: true });
   await home.click();
   await page.keyboard.press("Escape");
-  await expect(confirm).toHaveCount(0);
+  await expect(page.getByRole("menu", { name: "File actions", exact: true })).toHaveCount(0);
   await expect(page.locator(".desktop-toolbar")).toBeVisible();
   await home.click();
-  await confirm.getByRole("button", { name: "Close files", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Clear files", exact: true }).click();
   await expect(tryDemo).toBeVisible();
   // The start screen is a new entry, so Back is still available.
   expect(await page.evaluate(() => history.state.waveform.selection)).toBeNull();

@@ -10,6 +10,7 @@ macro_rules! getter{($ptr:ident,$len:ident,[$($field:ident).+],$typ:ty)=>{
  #[no_mangle]pub unsafe extern "C" fn $len(e:*mut Engine)->usize{let e=&*e;e.$($field).+.len()}
 };}
 mod dsp;
+mod pca;
 mod position;
 mod processing;
 mod spatial_ac;
@@ -34,6 +35,7 @@ pub struct Engine {
     /// Two u32 halves per cell of an order-independent hash of its full spike set;
     /// cleared by every label change and rebuilt on first read.
     cell_hashes: Vec<u32>,
+    pca: pca::Pca,
 }
 impl Engine {
     pub fn new(n: usize) -> Self {
@@ -51,6 +53,7 @@ impl Engine {
             groups: vec![],
             groups_dirty: true,
             cell_hashes: vec![],
+            pca: Default::default(),
         }
     }
     pub fn push(&mut self, data: &[u8]) {
@@ -95,8 +98,12 @@ impl Engine {
     fn axis(&self, i: usize, axis: usize) -> f32 {
         if axis < 4 {
             self.amplitudes[i * 4 + axis] as f32 / 255.
-        } else {
+        } else if axis == 4 {
             self.times[i] as f32 / self.times.last().copied().unwrap_or(1).max(1) as f32
+        } else if (5..9).contains(&axis) && self.pca.ready {
+            self.pca.values[i * 4 + axis - 5]
+        } else {
+            0.5
         }
     }
     pub fn relabel(&mut self, source: u16, dest: u16, swap: bool) -> usize {
@@ -148,24 +155,6 @@ impl Engine {
             {
                 self.labels[i] = dest;
                 n += 1;
-            }
-        }
-        self.recount();
-        n
-    }
-    pub fn sort_labels(&mut self) -> usize {
-        let mut groups: Vec<usize> = (1..MAX_CELLS).filter(|&c| self.counts[c] > 0).collect();
-        groups.sort_by_key(|&c| std::cmp::Reverse(self.counts[c]));
-        let mut map = vec![0u16; MAX_CELLS];
-        for (i, &c) in groups.iter().enumerate() {
-            map[c] = (i + 1) as u16;
-        }
-        let mut n = 0;
-        for c in &mut self.labels {
-            let next = map[*c as usize];
-            if next != *c {
-                n += 1;
-                *c = next;
             }
         }
         self.recount();
@@ -255,10 +244,6 @@ pub unsafe extern "C" fn engine_polygon(
         slice::from_raw_parts(p, n),
     )
 }
-#[no_mangle]
-pub unsafe extern "C" fn engine_sort(e: *mut Engine) -> usize {
-    (*e).sort_labels()
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,18 +293,15 @@ mod tests {
         assert_eq!(e.counts[100], 0);
     }
     #[test]
-    fn brush_mask_and_sort() {
+    fn brush_mask_preserves_other_labels() {
         let mut e = Engine::new(4);
-        e.labels = vec![0, 5, 5, 5];
+        e.labels = vec![0, 7, 7, 5];
         e.times = vec![1, 2, 3, 4];
         e.amplitudes = vec![0; 16];
         e.recount();
-        e.labels = vec![0, 7, 7, 5];
-        e.recount();
-        e.sort_labels();
-        assert_eq!(e.labels, vec![0, 1, 1, 2]);
         let mask = vec![1u8; 65536];
-        assert_eq!(e.mask(&[1], 3, 0, 1, &mask), 2);
+        assert_eq!(e.mask(&[7], 3, 0, 1, &mask), 2);
+        assert_eq!(e.labels, vec![0, 3, 3, 5]);
         assert_eq!(e.counts[3], 2);
         assert_eq!(e.counts[0], 1);
     }

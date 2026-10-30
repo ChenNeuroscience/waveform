@@ -48,10 +48,10 @@ export function drawSpikeLayers(
     ctx.fillStyle = layer.color;
     for (let i = 0; i < layer.spikes.length; i += 2) {
       ctx.fillRect(
-        box.x + layer.spikes[i] * box.width,
-        box.y + layer.spikes[i + 1] * box.height,
-        1.6,
-        1.6,
+        Math.round(box.x + layer.spikes[i] * box.width) - 1,
+        Math.round(box.y + layer.spikes[i + 1] * box.height) - 1,
+        3,
+        3,
       );
     }
   }

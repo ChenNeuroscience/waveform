@@ -81,7 +81,7 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
   const settings = page.getByRole("dialog", { name: "Settings", exact: true }),
     headers = page.getByRole("dialog", { name: "File headers", exact: true });
   await page.keyboard.down("Space");
-  await settings.getByText("Rendering", { exact: true }).click();
+  await settings.locator(".floating-titlebar").click();
   await page.keyboard.up("Space");
   await expect(settings).toHaveCount(0);
   await expect(headers).toBeVisible();

@@ -32,29 +32,39 @@ export function useAnalyses({
   onError: (message: string) => void;
 }) {
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
-  const [trajectory, setTrajectory] = useState<Trajectory | null>(null);
+  const [trajectory, setTrajectory] = useState<{ key: string; value: Trajectory | null } | null>(
+    null,
+  );
+  const [speedDwell, setSpeedDwell] = useState<{ key: string; values: Float32Array } | null>(null);
   const [comparison, setComparison] = useState<{ key: string; data: AnalysisData } | null>(null);
+  const trajectoryKey =
+    data && trial?.pos
+      ? `${positionKey(trial)}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}`
+      : "";
+  const speedDwellKey = trajectoryKey
+    ? `${trajectoryKey}|${settings.speedBin}|${settings.speedMax}`
+    : "";
 
   // The path is shared by every cell, so it is fetched once per position file and
   // processing settings rather than with each cell's analysis.
   useEffect(() => {
     let live = true;
-    if (!data?.key || !trial?.pos) {
+    if (!trajectoryKey || !trial?.pos) {
       setTrajectory(null);
       return;
     }
     request("trajectory", { pos: trial.pos, posKey: positionKey(trial), settings })
       .then((t) => {
         if (live) {
-          setTrajectory(t);
+          setTrajectory({ key: trajectoryKey, value: t });
         }
       })
       .catch(() => {});
     return () => {
       live = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the position-processing settings change the trajectory
-  }, [data?.key, trial?.id, trial?.pos, settings.leds, settings.maxSpeed, settings.posSmooth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- trajectoryKey covers recording availability, position identity and processing settings; tetrode and cut changes reuse the path
+  }, [trajectoryKey]);
 
   // The hovered (or selected) cell's analysis, debounced so sweeping the pointer
   // across tiles requests only where it settles.
@@ -75,6 +85,15 @@ export function useAnalyses({
           .then((a) => {
             if (live) {
               setAnalysis(a);
+              // Every cell carries the same position-only dwell histogram. Retain
+              // its array across cell, cut and tetrode changes so it isn't redrawn.
+              if (speedDwellKey) {
+                setSpeedDwell((current) =>
+                  current?.key === speedDwellKey
+                    ? current
+                    : { key: speedDwellKey, values: a.speedDwell },
+                );
+              }
             }
           })
           .catch((e) => {
@@ -152,7 +171,8 @@ export function useAnalyses({
 
   return {
     analysis,
-    trajectory,
+    trajectory: trajectory?.key === trajectoryKey ? trajectory.value : null,
+    speedDwell: speedDwell?.key === speedDwellKey ? speedDwell.values : null,
     comparisonAnalysis: comparison?.key === comparisonKey ? comparison.data : null,
     clearAnalysis: () => setAnalysis(null),
   };

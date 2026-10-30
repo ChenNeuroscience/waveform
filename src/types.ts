@@ -21,10 +21,11 @@ export interface Trial {
   tetrodes: Tetrode[];
   otherFiles?: string[];
 }
+export const RENDERING_MODES = ["fixed", "density", "drift"] as const;
+export type RenderingMode = (typeof RENDERING_MODES)[number];
 export interface Settings {
-  pointSize: number;
-  drift: boolean;
-  density: boolean;
+  pcaSamples: number;
+  renderMode: RenderingMode;
   binCm: number;
   smooth: number;
   maxRate: number;
@@ -39,9 +40,8 @@ export interface Settings {
   speedMax: number;
 }
 export const defaultSettings: Settings = {
-  pointSize: 1,
-  drift: false,
-  density: true,
+  pcaSamples: 5000,
+  renderMode: "density",
   binCm: 3,
   smooth: 1,
   maxRate: 0,
@@ -56,6 +56,19 @@ export const defaultSettings: Settings = {
   speedMax: 45,
 };
 export type PlotMode = "waveforms" | "spatial" | "direction" | "speed" | "ac" | "sc";
+export type FeatureMode = "amplitudes" | "pca";
+/** Four coordinates per spike. Amplitudes are bytes; PCA is normalised float32. */
+export interface FeatureCoordinates {
+  key: string;
+  mode: FeatureMode;
+  values: Uint8Array | Float32Array;
+}
+export interface PcaFeatures {
+  asset: string;
+  key: string;
+  samples: number;
+  values: Float32Array;
+}
 export interface HistoryEntry {
   id: string;
   description: string;

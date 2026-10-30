@@ -103,7 +103,7 @@ impl CutParser {
 }
 impl Engine {
     /// Each cell's membership hash, which lets analysis caches survive edits that
-    /// leave a cell's spikes unchanged (including renumbering).
+    /// leave a cell's spikes unchanged (including cell-number swaps).
     fn cell_hashes(&mut self) -> &[u32] {
         if self.cell_hashes.is_empty() {
             let mut sums = vec![0u64; MAX_CELLS];
@@ -458,6 +458,7 @@ pub unsafe extern "C" fn engine_resident_bytes(e: *mut Engine) -> usize {
         + e.times.capacity() * 4
         + e.amplitudes.capacity()
         + e.labels.capacity() * 2
+        + e.pca.bytes()
         + e.wave_bytes()
         + e.edit
             .preview

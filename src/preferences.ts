@@ -1,4 +1,27 @@
 import { useEffect, useState } from "react";
+import { defaultSettings, RENDERING_MODES, type Settings, type RenderingMode } from "./types";
+
+/** Restore settings, including the old independent drift/density switches. */
+export function restoreSettings(value: unknown): Settings {
+  const saved = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const settings = Object.fromEntries(
+    Object.entries(defaultSettings).map(([key, fallback]) => [
+      key,
+      typeof saved[key] === typeof fallback &&
+      (typeof fallback !== "number" || Number.isFinite(saved[key]))
+        ? saved[key]
+        : fallback,
+    ]),
+  ) as unknown as Settings;
+  settings.renderMode = RENDERING_MODES.includes(saved.renderMode as RenderingMode)
+    ? (saved.renderMode as RenderingMode)
+    : saved.drift === true
+      ? "drift"
+      : saved.density === false
+        ? "fixed"
+        : "density";
+  return settings;
+}
 const prefix = "waveform-ui:";
 export function readPreference<T>(name: string | null, fallback: T): T {
   if (name === null) {

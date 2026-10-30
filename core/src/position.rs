@@ -1,10 +1,72 @@
 //! Position decoding/post-processing and numeric cell analysis, entirely in Wasm.
 use crate::Engine;
-use std::{cell::RefCell, slice, sync::Arc};
+use std::{
+    cell::{OnceCell, RefCell},
+    slice,
+    sync::Arc,
+};
 #[derive(Default, Clone)]
 struct Raw {
-    time: Vec<f64>,
     spots: Vec<[f32; 4]>,
+    pixels: Vec<[u16; 2]>,
+    pixel_stats: OnceCell<Option<[PixelStats; 2]>>,
+}
+#[derive(Clone, Copy)]
+struct PixelStats {
+    mean: f64,
+    sd: f64,
+}
+fn valid_pixels(n: u16) -> bool {
+    n != 0 && n != 1023
+}
+impl PixelStats {
+    fn from_counts(pixels: &[[u16; 2]], led: usize) -> Option<Self> {
+        let (count, sum) = pixels
+            .iter()
+            .map(|p| p[led])
+            .filter(|&n| valid_pixels(n))
+            .fold((0usize, 0u64), |(count, sum), n| {
+                (count + 1, sum + n as u64)
+            });
+        if count == 0 {
+            return None;
+        }
+        let mean = sum as f64 / count as f64;
+        let variance = pixels
+            .iter()
+            .map(|p| p[led])
+            .filter(|&n| valid_pixels(n))
+            .map(|n| (n as f64 - mean).powi(2))
+            .sum::<f64>()
+            / count as f64;
+        Some(Self {
+            mean,
+            sd: variance.sqrt(),
+        })
+    }
+    fn z(&self, delta: f64) -> f64 {
+        if self.sd > 0. {
+            delta / self.sd
+        } else if delta == 0. {
+            0.
+        } else {
+            delta.signum() * f64::INFINITY
+        }
+    }
+}
+fn pixel_swap_candidate(pixels: [u16; 2], stats: [PixelStats; 2]) -> bool {
+    if !pixels.iter().all(|&n| valid_pixels(n)) || stats[0].mean == stats[1].mean {
+        return false;
+    }
+    // v1's size evidence: the first spot has shifted toward the other LED's
+    // pixel-count distribution. Also support recordings whose first LED is smaller.
+    let a = stats[0].z(stats[0].mean - pixels[0] as f64);
+    let b = stats[1].z(pixels[0] as f64 - stats[1].mean);
+    if stats[0].mean > stats[1].mean {
+        a > b
+    } else {
+        a < b
+    }
 }
 /// Cell-independent results derived from a processed position, computed on first
 /// use and reused by every cell's analysis.
@@ -29,24 +91,15 @@ pub(crate) struct Position {
     ppm: f32,
     min_x: f32,
     min_y: f32,
-    timebase: f64,
     bearing: f32,
 }
 impl Position {
-    fn new(
-        n: usize,
-        ppm: f32,
-        rate: f64,
-        timebase: f64,
-        min_x: f32,
-        min_y: f32,
-        max_x: f32,
-        max_y: f32,
-    ) -> Self {
+    fn new(n: usize, ppm: f32, rate: f64, min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> Self {
         Self {
             raw: Arc::new(Raw {
-                time: Vec::with_capacity(n),
                 spots: Vec::with_capacity(n),
+                pixels: Vec::with_capacity(n),
+                pixel_stats: OnceCell::new(),
             }),
             x: vec![],
             y: vec![],
@@ -58,17 +111,16 @@ impl Position {
             ppm,
             min_x,
             min_y,
-            timebase,
             bearing: 0.,
             derived: Default::default(),
         }
     }
     fn push(&mut self, data: &[u8]) {
         let r = Arc::get_mut(&mut self.raw).unwrap();
+        r.pixel_stats.take();
         for row in data.chunks_exact(20) {
+            // Sample index and the nominal rate define time; ignore the record timestamp.
             let word = |p: usize| u16::from_be_bytes([row[p], row[p + 1]]);
-            r.time
-                .push(u32::from_be_bytes(row[..4].try_into().unwrap()) as f64 / self.timebase);
             let mut v = [
                 word(4) as f32,
                 word(6) as f32,
@@ -84,6 +136,7 @@ impl Position {
                 v[3] = f32::NAN;
             }
             r.spots.push(v);
+            r.pixels.push([word(12), word(14)]);
         }
     }
     fn process(&mut self, leds: u32, max_speed: f32, smoothing: f64) {
@@ -97,18 +150,29 @@ impl Position {
         );
         let mut previous = [f32::NAN; 4];
         let dist = |a: f32, b: f32, c: f32, d: f32| (a - c).hypot(b - d);
-        for &v in &self.raw.spots {
+        let statistics = if leds == 2 {
+            *self.raw.pixel_stats.get_or_init(|| {
+                Some([
+                    PixelStats::from_counts(&self.raw.pixels, 0)?,
+                    PixelStats::from_counts(&self.raw.pixels, 1)?,
+                ])
+            })
+        } else {
+            None
+        };
+        for (i, &v) in self.raw.spots.iter().enumerate() {
             let mut a = v;
             if leds == 2
-                && dist(a[0], a[1], previous[0], previous[1])
-                    + dist(a[2], a[3], previous[2], previous[3])
-                    > dist(a[2], a[3], previous[0], previous[1])
-                        + dist(a[0], a[1], previous[2], previous[3])
-                        + self.ppm * 0.02
+                && statistics.is_some_and(|s| pixel_swap_candidate(self.raw.pixels[i], s))
+                && dist(a[0], a[1], previous[2], previous[3]) + self.ppm * 0.01
+                    < dist(a[0], a[1], previous[0], previous[1])
+                && dist(a[2], a[3], previous[0], previous[1]) + self.ppm * 0.01
+                    < dist(a[2], a[3], previous[2], previous[3])
             {
                 a.swap(0, 2);
                 a.swap(1, 3);
             }
+            // Corrected positions retain identities across consecutive swapped frames.
             previous = a;
             x1.push(a[0] * 100. / self.ppm);
             y1.push(a[1] * 100. / self.ppm);
@@ -123,7 +187,7 @@ impl Position {
                 }
                 let mut valid = true;
                 if let Some(j) = last {
-                    let dt = self.raw.time[i] - self.raw.time[j];
+                    let dt = (i - j) as f64 / self.rate;
                     if dt > 0.
                         && max_speed > 0.
                         && (x[i] - x[j]).hypot(y[i] - y[j]) as f64 / dt > max_speed as f64 * 100.
@@ -175,30 +239,20 @@ impl Position {
             self.dir[0] = self.dir[1];
         }
         for i in 0..n {
-            let dt = if i + 1 < n {
-                self.raw.time[i + 1] - self.raw.time[i]
-            } else {
-                0.
-            };
-            self.speed.push(if dt > 0. {
-                (self.x[i + 1] - self.x[i]).hypot(self.y[i + 1] - self.y[i]) / (dt as f32)
+            self.speed.push(if i + 1 < n {
+                (self.x[i + 1] - self.x[i]).hypot(self.y[i + 1] - self.y[i]) * self.rate as f32
             } else {
                 f32::NAN
             });
         }
     }
-    /// The duration of sample i, if it lies in the arena with a usable interval.
+    /// Every valid sample represents one interval at the nominal sample rate.
     fn dwell(&self, i: usize) -> Option<f32> {
         let (x, y) = (self.x[i] / self.width, self.y[i] / self.height);
         if !(x.is_finite() && y.is_finite() && (0. ..1.).contains(&x) && (0. ..1.).contains(&y)) {
             return None;
         }
-        let dt = if i + 1 < self.raw.time.len() {
-            self.raw.time[i + 1] - self.raw.time[i]
-        } else {
-            1. / self.rate
-        };
-        (dt > 0. && dt <= 1.).then_some(dt as f32)
+        Some((1. / self.rate) as f32)
     }
     fn path(&self) -> std::cell::Ref<'_, Vec<f32>> {
         if self.derived.borrow().path.is_none() {
@@ -223,7 +277,6 @@ impl Position {
             ppm: self.ppm,
             min_x: self.min_x,
             min_y: self.min_y,
-            timebase: self.timebase,
             bearing: self.bearing,
             derived: Default::default(),
         };
@@ -404,16 +457,9 @@ fn analyse(
             p.derived.borrow_mut().occupancy = Some((key, maps.clone()));
             maps
         });
-        let mut cursor = 0;
         for &id in ids {
-            let t = e.times[id as usize] as f64 / tb;
-            while cursor + 1 < p.raw.time.len() && p.raw.time[cursor + 1] <= t {
-                cursor += 1;
-            }
-            if p.raw.time.is_empty()
-                || t < p.raw.time[0]
-                || t > p.raw.time[p.raw.time.len() - 1] + 1. / p.rate
-            {
+            let cursor = (e.times[id as usize] as f64 * p.rate / tb).floor() as usize;
+            if cursor >= p.x.len() {
                 continue;
             }
             if let Some(b) = bin(cursor) {
@@ -435,8 +481,13 @@ fn analyse(
     let spatial: Vec<f32> = so
         .iter()
         .zip(sh)
-        .map(|(&o, h)| {
-            let v = if o > 0.001 { h / o } else { f32::NAN };
+        .enumerate()
+        .map(|(i, (&o, h))| {
+            let v = if occ[i] > 0. && o > 0. {
+                h / o
+            } else {
+                f32::NAN
+            };
             if v.is_finite() {
                 peak = peak.max(v);
             }
@@ -491,14 +542,13 @@ pub extern "C" fn position_new(
     n: usize,
     ppm: f32,
     rate: f64,
-    timebase: f64,
     min_x: f32,
     min_y: f32,
     max_x: f32,
     max_y: f32,
 ) -> *mut Position {
     Box::into_raw(Box::new(Position::new(
-        n, ppm, rate, timebase, min_x, min_y, max_x, max_y,
+        n, ppm, rate, min_x, min_y, max_x, max_y,
     )))
 }
 #[no_mangle]
@@ -621,13 +671,156 @@ getter!(engine_analysis_sc, engine_analysis_sc_len, sc);
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn recording(rows: &[[u16; 6]], ppm: f32, rate: f64) -> Position {
+        let mut p = Position::new(rows.len(), ppm, rate, 0., 0., ppm, ppm);
+        let mut bytes = vec![0u8; rows.len() * 20];
+        for (i, row) in rows.iter().enumerate() {
+            // Offsets, gaps and repeated timestamps must not change the nominal clock.
+            bytes[i * 20..i * 20 + 4].copy_from_slice(&((i % 3) as u32 * 1_000_000).to_be_bytes());
+            for (j, value) in row.iter().enumerate() {
+                bytes[i * 20 + 4 + j * 2..i * 20 + 6 + j * 2].copy_from_slice(&value.to_be_bytes());
+            }
+        }
+        p.push(&bytes);
+        p
+    }
+    #[test]
+    fn led_pixel_gate_preserves_real_turns() {
+        let mut rows = vec![[20, 20, 30, 20, 30, 10]; 8];
+        // A real half-turn exchanges positions, but not LED spot sizes.
+        rows[7] = [30, 20, 20, 20, 30, 10];
+        let mut p = recording(&rows, 100., 50.);
+        p.process(2, 0., 0.);
+        assert!((p.dir[7].abs() - std::f32::consts::PI).abs() < 1e-6);
+        assert!(p.x.iter().all(|&x| x == 25.));
+    }
+    #[test]
+    fn led_swaps_follow_size_evidence_through_bursts_and_variants() {
+        for sizes in [[30, 10], [10, 30]] {
+            let rows: Vec<_> = (0..24)
+                .map(|i| {
+                    let d = (i % 3) as u16;
+                    if (8..11).contains(&i) {
+                        [30, 20, 20, 20, sizes[1] + d, sizes[0] + d]
+                    } else {
+                        [20, 20, 30, 20, sizes[0] + d, sizes[1] + d]
+                    }
+                })
+                .collect();
+            let mut p = recording(&rows, 100., 50.);
+            p.process(2, 0., 0.);
+            assert!(p.dir.iter().all(|&d| d.abs() < 1e-6));
+            assert!(p.x.iter().all(|&x| x == 25.));
+            let single = p.variant(1, 0., 0.);
+            assert_eq!(single.x[8], 30.);
+            let dual = single.variant(2, 0., 0.);
+            assert!(dual.dir.iter().all(|&d| d.abs() < 1e-6));
+            assert!(Arc::ptr_eq(&p.raw, &dual.raw));
+            assert!(dual.raw.pixel_stats.get().is_some());
+        }
+    }
+    #[test]
+    fn led_swap_requires_one_cm_improvement_for_each_spot() {
+        let mut rows = vec![[40, 80, 56, 80, 30, 10]; 20];
+        // At 400 pixels/metre, only one spot improves by more than 1 cm.
+        // The summed-distance criterion alone would incorrectly swap these.
+        rows[19] = [49, 80, 32, 80, 10, 30];
+        let mut p = recording(&rows, 400., 50.);
+        p.process(2, 0., 0.);
+        assert!((p.dir[19].abs() - std::f32::consts::PI).abs() < 1e-6);
+    }
+    #[test]
+    fn pixel_statistics_ignore_missing_counts_and_handle_constant_sizes() {
+        let pixels = [[30, 10], [0, 1023], [32, 12]];
+        let a = PixelStats::from_counts(&pixels, 0).unwrap();
+        let b = PixelStats::from_counts(&pixels, 1).unwrap();
+        assert_eq!((a.mean, a.sd, b.mean, b.sd), (31., 1., 11., 1.));
+        assert!(PixelStats::from_counts(&[[0, 1023]], 0).is_none());
+        let stats = [
+            PixelStats { mean: 30., sd: 0. },
+            PixelStats { mean: 10., sd: 0. },
+        ];
+        assert!(!pixel_swap_candidate([30, 10], stats));
+        assert!(pixel_swap_candidate([10, 30], stats));
+        assert!(!pixel_swap_candidate([0, 30], stats));
+        assert!(!pixel_swap_candidate([10, 1023], stats));
+        assert!(!pixel_swap_candidate([10, 30], [stats[0]; 2]));
+    }
+    #[test]
+    fn nominal_sampling_controls_dwell_speed_and_spike_assignment() {
+        let rows: Vec<_> = (20..24).map(|x| [x, 20, 1023, 1023, 12, 0]).collect();
+        let mut p = recording(&rows, 100., 50.);
+        p.process(1, 0., 0.);
+        for i in 0..4 {
+            assert_eq!(p.dwell(i), Some(0.02));
+        }
+        assert_eq!(&p.speed[..3], &[50., 50., 50.]);
+        assert!(p.speed[3].is_nan());
+        let mut e = Engine::new(10);
+        e.times = vec![0, 10, 20, 39, 40, 59, 60, 79, 80, 1000];
+        e.labels = vec![1; 10];
+        let a = analyse(&mut e, Some(&p), 1, 1000., 1., 1., 0, 100., 6., 4., 100.);
+        let x: Vec<_> = a
+            .spikes
+            .chunks_exact(2)
+            .map(|xy| (xy[0] * 100.).round() as u32)
+            .collect();
+        assert_eq!(x, vec![20, 20, 21, 21, 22, 22, 23, 23]);
+        assert!((a.meta[3] - 100.).abs() < 1e-3);
+    }
+    #[test]
+    fn jump_filter_uses_elapsed_sample_count() {
+        let mut p = recording(
+            &[
+                [20, 20, 1023, 1023, 12, 0],
+                [30, 20, 1023, 1023, 12, 0],
+                [20, 20, 1023, 1023, 12, 0],
+            ],
+            100.,
+            50.,
+        );
+        p.process(1, 4., 0.);
+        assert_eq!(p.x, vec![20., 20., 20.]);
+        let mut p = recording(
+            &[
+                [20, 20, 1023, 1023, 12, 0],
+                [1023, 1023, 1023, 1023, 0, 0],
+                [30, 20, 1023, 1023, 12, 0],
+            ],
+            100.,
+            50.,
+        );
+        p.process(1, 4., 0.);
+        assert_eq!(p.x, vec![20., 25., 30.]);
+    }
+    #[test]
+    fn smoothing_retains_the_original_unvisited_bin_mask() {
+        let mut p = recording(&vec![[5, 5, 1023, 1023, 12, 0]; 100], 100., 50.);
+        p.process(1, 0., 0.);
+        let mut e = Engine::new(10);
+        e.times = (0..10).map(|i| i * 100).collect();
+        e.labels = vec![1; 10];
+        let a = analyse(&mut e, Some(&p), 1, 1000., 2., 5., 1, 100., 6., 4., 45.);
+        assert_eq!(a.spatial.iter().filter(|v| v.is_finite()).count(), 1);
+        assert!((a.spatial[21] - 5.).abs() < 1e-4);
+        assert!(a.spatial[0].is_nan());
+        assert!((a.meta[3] - 5.).abs() < 1e-4);
+    }
+    #[test]
+    fn every_visited_bin_is_valid_even_with_submillisecond_dwell() {
+        let mut p = recording(&[[5, 5, 1023, 1023, 12, 0]], 100., 2000.);
+        p.process(1, 0., 0.);
+        let mut e = Engine::new(1);
+        e.times = vec![0];
+        e.labels = vec![1];
+        let a = analyse(&mut e, Some(&p), 1, 1000., 1., 5., 0, 100., 6., 4., 45.);
+        assert_eq!(a.spatial.iter().filter(|v| v.is_finite()).count(), 1);
+        assert!((a.spatial[21] - 2000.).abs() < 1e-3);
+    }
     #[test]
     fn occupancy_normalisation_and_self_exclusion() {
         let p = Position {
-            raw: Arc::new(Raw {
-                time: vec![0., 1., 2., 3.],
-                spots: vec![],
-            }),
+            raw: Arc::new(Raw::default()),
             x: vec![1., 1., 8., 8.],
             y: vec![1., 1., 8., 8.],
             dir: vec![0.; 4],
@@ -638,7 +831,6 @@ mod tests {
             ppm: 100.,
             min_x: 0.,
             min_y: 0.,
-            timebase: 1.,
             bearing: 0.,
             derived: Default::default(),
         };

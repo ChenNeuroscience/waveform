@@ -76,7 +76,9 @@ export async function exportCut(page: Page) {
 export async function setDensity(page: Page, enabled: boolean) {
   const toggle = page.getByRole("button", { name: "Density rendering", exact: true });
   if ((await toggle.getAttribute("aria-pressed")) !== String(enabled)) {
-    await toggle.click();
+    await page
+      .getByRole("button", { name: enabled ? "Density rendering" : "Fixed colours", exact: true })
+      .click();
   }
   await expect(toggle).toHaveAttribute("aria-pressed", String(enabled));
 }

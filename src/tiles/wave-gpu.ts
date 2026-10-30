@@ -1,4 +1,6 @@
 import { program } from "../plots/webgl";
+import { DENSITY_COLOUR_GLSL } from "../plots/density-colours";
+import type { RenderingMode } from "../types";
 import { cellRgb } from "../types";
 import {
   WAVE_GAIN,
@@ -44,12 +46,12 @@ const DENSITY = 1;
 const DRIFT = 2;
 const quadFragment = `#version 300 es
 precision highp float;uniform sampler2D counts;uniform vec2 origin;uniform vec3 rgb;uniform float unit;uniform float total;uniform int mode;out vec4 c;
-vec3 palette(float count){return vec3(count>.5?(count>.75?4.-4.*count:4.*count-2.):(count>.25?2.-4.*count:4.*count),count<.5?2.*count:2.-2.*count,count);}
+${DENSITY_COLOUR_GLSL}
 void main(){
  vec2 s=texelFetch(counts,ivec2(gl_FragCoord.xy-origin),0).rg/unit;
  if(s.x<.5){c=vec4(1.);return;}
  float t=s.y/s.x;
- c=vec4(mode==${DRIFT}?vec3(1.-t,t,0.):mode==${DENSITY}?palette(sqrt(s.x/max(1.,total)*10.)):rgb,1.);}`;
+ c=vec4(mode==${DRIFT}?vec3(1.-t,t,0.):mode==${DENSITY}?densityColour(sqrt(s.x/max(1.,total)*10.)):rgb,1.);}`;
 interface Entry {
   texture: WebGLTexture;
   fbo: WebGLFramebuffer;
@@ -67,9 +69,7 @@ interface Scene {
   };
   cells: number[];
   layout: WaveLayout;
-  density: boolean;
-  /** Mean spike time per pixel; drawn only where float blending is available. */
-  drift: boolean;
+  mode: RenderingMode;
   readyKey: string;
 }
 export type LoadBatch = (asset: string, first: number, count: number) => Promise<Uint8Array>;
@@ -475,7 +475,13 @@ export class WaveGPU {
     const u = (n: string) => gl.getUniformLocation(this.quad, n);
     gl.uniform1i(u("counts"), 0);
     gl.uniform1f(u("unit"), this.unit);
-    gl.uniform1i(u("mode"), scene.drift && this.timed ? DRIFT : scene.density ? DENSITY : FLAG);
+    // v1 normalises every cell against the whole tetrode. Counts come from
+    // resident waveforms, so use their total to preserve that scale if sampled.
+    gl.uniform1f(u("total"), scene.data.waveSlots);
+    gl.uniform1i(
+      u("mode"),
+      scene.mode === "drift" && this.timed ? DRIFT : scene.mode === "density" ? DENSITY : FLAG,
+    );
   }
   /** Colour a cell's cached counts into the bound framebuffer at (x, y). */
   private composite(cell: number, entry: Entry, x: number, y: number, [w, h]: number[]) {
@@ -485,7 +491,6 @@ export class WaveGPU {
     gl.bindTexture(gl.TEXTURE_2D, entry.texture);
     gl.uniform2f(u("origin"), x, y);
     gl.uniform3fv(u("rgb"), cellRgb(cell));
-    gl.uniform1f(u("total"), entry.drawn);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }

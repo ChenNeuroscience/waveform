@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { AnalysisPlot } from "../plots/AnalysisPlot";
+import { SpeedDwellPlot } from "../plots/SpeedPlot";
 import { PathPlot, type SpikeLayer } from "../plots/PathPlot";
 import {
   color,
@@ -19,6 +19,7 @@ export function PositionPane({
   trial,
   settings,
   trajectory,
+  speedDwell,
   analysis,
   comparisonAnalysis,
   hoverCell,
@@ -32,6 +33,7 @@ export function PositionPane({
   trial: Trial | undefined;
   settings: Settings;
   trajectory: Trajectory | null;
+  speedDwell: Float32Array | null;
   /** The displayed (hovered or selected) cell's analysis. */
   analysis: AnalysisData | null;
   comparisonAnalysis: AnalysisData | null;
@@ -68,7 +70,9 @@ export function PositionPane({
       onPopPlot("path", e.clientX, e.clientY);
     }
   };
-  if (!analysis || !trajectory || !trial?.pos) {
+  // The path is independent of cell analysis. Keep its canvas mounted while a
+  // different tetrode or cut loads, preserving PathPlot's cached base image.
+  if (!trajectory || !trial?.pos) {
     return (
       <section className="position-pane" {...hover}>
         <div className="position-content">
@@ -89,14 +93,7 @@ export function PositionPane({
             {timing.durationText}
           </div>
           <div className="position-speed">
-            <AnalysisPlot
-              data={analysis}
-              mode="speed"
-              maxRate={0}
-              positionSpeed
-              speedAlignment="left"
-              compact
-            />
+            {speedDwell && <SpeedDwellPlot values={speedDwell} />}
             <small className="speed-axis-limit">{settings.speedMax} cm/s max</small>
           </div>
         </div>

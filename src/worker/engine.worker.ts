@@ -9,6 +9,7 @@ import { openStore, put, get } from "./history";
 import { streamFile, copyU8, copyU16, copyU32, withU16, withF32, type Core } from "./wasm";
 import { Superseded } from "./protocol";
 import { readRecording } from "./recording";
+import { fitPca } from "./pca";
 import type { PositionRequest, RequestType, WorkerMessage, WorkerResult } from "./protocol";
 interface Asset {
   key: string;
@@ -20,6 +21,7 @@ interface Asset {
   file: File;
   ms: number;
   last: number;
+  pcaKey?: string;
 }
 interface Session {
   key: string;
@@ -38,6 +40,7 @@ const analyses = new Map<string, AnalysisData>();
 let wasmPromise: Promise<Core>;
 let latestLoad = 0;
 let latestCopy = 0;
+let latestFeatures = 0;
 let active: Session | undefined;
 let activeAsset: Asset | undefined;
 const dbPromise = openStore();
@@ -253,11 +256,58 @@ async function positionFor(m: PositionRequest, w: Core) {
   return pos;
 }
 async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
-  if (splitState && !["split", "analysis", "trajectory", "wave_batch"].includes(m.type)) {
+  if (
+    splitState &&
+    !["split", "analysis", "trajectory", "wave_batch", "features"].includes(m.type)
+  ) {
     throw new Error("Finish the waveform split with a left click, or press Escape to cancel.");
   }
   if (m.type === "demo") {
     return demoFiles(await wasmPromise, m.options, (n, message) => progress(m.id, n, message));
+  }
+  if (m.type === "features") {
+    if (m.mode === "amplitudes") {
+      return null;
+    }
+    const a = activeAsset;
+    if (!a || a.key !== m.asset) {
+      throw new Superseded("Superseded feature calculation.");
+    }
+    const load = latestLoad;
+    const check = () => {
+      if (m.id !== latestFeatures || load !== latestLoad) {
+        throw new Superseded("Superseded feature calculation.");
+      }
+    };
+    check();
+    if (!Number.isInteger(m.samples) || m.samples < 4 || m.samples > 20000) {
+      throw new Error("PCA sample count must be between 4 and 20,000.");
+    }
+    const samples = Math.min(a.n, m.samples);
+    const key = `${a.key}|pca:${samples}`;
+    const w = await wasmPromise;
+    if (a.pcaKey !== key) {
+      a.pcaKey = undefined;
+      w.engine_pca_clear(a.e);
+      evict(a.n * 16 + 20_000_000);
+      await fitPca(w, a, m.samples, check, (fraction, message) =>
+        progress(m.id, fraction, message),
+      );
+      a.pcaKey = key;
+    }
+    return {
+      asset: a.key,
+      key,
+      samples,
+      values:
+        m.knownKey === key
+          ? undefined
+          : new Float32Array(
+              w.memory.buffer,
+              w.engine_pca_values(a.e),
+              w.engine_pca_values_len(a.e),
+            ).slice(),
+    };
   }
   if (m.type === "copy_analysis") {
     if (m.cells.some((cell) => !Number.isInteger(cell) || cell < 0 || cell >= 1024)) {
@@ -542,14 +592,16 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     w.engine_edit_begin(e);
     let changed = 0;
     try {
-      if (m.action === "sort") {
-        w.engine_sort(e);
-      } else if (m.action === "polygon" || m.action === "paint") {
+      if (m.action === "polygon" || m.action === "paint") {
+        if (m.featureKey && m.featureKey !== a.pcaKey) {
+          throw new Superseded("PCA basis changed; redraw the selection.");
+        }
+        const offset = m.featureKey ? 5 : 0;
         withU16(w, m.sources, (p, n) =>
           withF32(w, m.polygon, (q, count) =>
             m.action === "paint"
-              ? w.engine_brush(e, p, n, m.dest, m.ax, m.ay, q, count)
-              : w.engine_polygon(e, p, n, m.dest, m.ax, m.ay, q, count),
+              ? w.engine_brush(e, p, n, m.dest, m.ax + offset, m.ay + offset, q, count)
+              : w.engine_polygon(e, p, n, m.dest, m.ax + offset, m.ay + offset, q, count),
           ),
         );
       } else {
@@ -672,6 +724,9 @@ self.onmessage = (event: MessageEvent) => {
   }
   if (m.type === "load") {
     latestLoad = m.id;
+  }
+  if (m.type === "features") {
+    latestFeatures = m.id;
   }
   if (m.type === "copy_analysis") {
     latestCopy = m.id;
