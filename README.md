@@ -10,6 +10,8 @@ The cluster pane's feature-space buttons switch between peak-to-trough amplitude
 
 Press **Q** to switch amplitudes/principal components, and **L** to switch brush/lasso. The shared colour control selects **fixed cell colours**, **density**, or **drift** for both waveforms and cluster plots; **P** cycles forwards and **Shift+P** backwards. Density uses the same colour ramp in both views.
 
+The palette button at the left of the cluster toolbar locks those plots to fixed cell colours. Turn it off to follow the main colour control again.
+
 Waveform density uses v1's shared tetrode-wide scale, so colours can be compared across cells.
 
 The Waveform icon opens a file menu: **Add folder…**, **Add files…**, and **Clear files**. Adding files preserves the current workspace; clearing returns straight to the start screen.
@@ -43,6 +45,6 @@ npm run test:e2e     # browser tests (Playwright)
 
 The default browser stress test uses 1M spikes. To opt into the 9M case, run `WAVEFORM_STRESS_9M=1 npm run test:e2e -- e2e/synthetic.spec.ts`; it is skipped in ordinary runs and CI.
 
-GitHub Actions runs these checks on every push and pull request, and deploys `main` to GitHub Pages.
+GitHub Actions runs these checks on pull requests and pushes to `main`, and deploys `main` to GitHub Pages. Manual workflow runs are also available.
 
 MIT licence.

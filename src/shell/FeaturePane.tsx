@@ -1,7 +1,9 @@
-import { Lasso, Paintbrush } from "lucide-react";
+import { Lasso, Paintbrush, Palette } from "lucide-react";
+import { useMemo } from "react";
 import { Clusters } from "../plots/FeatureView";
 import { GroupSelector } from "./GroupSelector";
 import { ToggleButton } from "./ToggleButton";
+import { usePreference } from "../preferences";
 import type { FeatureCoordinates, FeatureMode, Settings, ViewData } from "../types";
 
 const FULL_RANGE = [0, 1];
@@ -103,6 +105,11 @@ export function FeaturePane({
   featureError?: string;
 }) {
   const { sources, dest, tool, onSource, onDest, onNewGroup, onTool } = painting;
+  const [fixedColours, setFixedColours] = usePreference("cluster-fixed-colours", false);
+  const clusterSettings = useMemo(
+    () => (fixedColours ? { ...settings, renderMode: "fixed" as const } : settings),
+    [settings, fixedColours],
+  );
   // Space-click copies the feature grid into a floating window.
   const grabFeatures = (e: React.PointerEvent) => {
     if (grabMode && e.button === 0) {
@@ -125,6 +132,19 @@ export function FeaturePane({
         onHover={onHover}
       >
         <div className="feature-tools">
+          <ToggleButton
+            pressed={fixedColours}
+            aria-label="Fixed cluster colours"
+            title={
+              fixedColours
+                ? "Fixed cell colours; turn off to follow the main colour mode"
+                : "Keep fixed cell colours in cluster plots"
+            }
+            onClick={() => setFixedColours((fixed) => !fixed)}
+          >
+            <Palette size={17} />
+          </ToggleButton>
+          <span className="tool-separator" aria-hidden="true" />
           <div className="toggle-group" role="group" aria-label="Feature space">
             <ToggleButton
               pressed={mode === "amplitudes"}
@@ -172,7 +192,7 @@ export function FeaturePane({
           <Clusters
             data={data}
             coordinates={coordinates}
-            settings={settings}
+            settings={clusterSettings}
             selected={cell}
             range={FULL_RANGE}
             tool={canPaint ? tool : "disabled"}

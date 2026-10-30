@@ -129,6 +129,47 @@ test("P and Shift+P cycle colour choices, D is unused, and Q switches waveform f
   await expect(page.locator('.clusters[data-features="amplitudes"]')).toBeVisible();
 });
 
+test("cluster palette lock holds fixed colours while the main palette changes", async ({
+  page,
+}) => {
+  await page.goto("/?demo=quick");
+  await page.getByText("Try it now with simulated data").click();
+  await ready(page);
+  const lock = page.getByRole("button", { name: "Fixed cluster colours", exact: true });
+  const clusters = page.locator(".clusters");
+  const waves = page.locator(".tile-wave-canvas");
+  const image = () =>
+    clusters.locator("canvas").evaluate((c) => (c as HTMLCanvasElement).toDataURL());
+  await expect(lock).toHaveAttribute("aria-pressed", "false");
+  await expect(clusters).toHaveAttribute("data-colour-mode", "density");
+  const densityImage = await image();
+  await lock.click();
+  await expect(lock).toHaveAttribute("aria-pressed", "true");
+  await expect(clusters).toHaveAttribute("data-colour-mode", "fixed");
+  await expect(waves).toHaveAttribute("data-colour-mode", "density");
+  await expect.poll(image).not.toBe(densityImage);
+  const fixedImage = await image();
+  await page.keyboard.press("p");
+  await expect(waves).toHaveAttribute("data-colour-mode", "drift");
+  await expect(clusters).toHaveAttribute("data-colour-mode", "fixed");
+  await expect.poll(image).toBe(fixedImage);
+  await page.keyboard.press("q");
+  await expect(clusters).toHaveAttribute("data-features", "pca");
+  await expect(clusters).toHaveAttribute("data-colour-mode", "fixed");
+  await page.keyboard.press("q");
+  await expect(clusters).toHaveAttribute("data-features", "amplitudes");
+  await expect.poll(image).toBe(fixedImage);
+  await page.keyboard.press("Shift+p");
+  await expect(waves).toHaveAttribute("data-colour-mode", "density");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("waveform-ui:cluster-fixed-colours")))
+    .toBe("true");
+  await lock.click();
+  await expect(lock).toHaveAttribute("aria-pressed", "false");
+  await expect(clusters).toHaveAttribute("data-colour-mode", "density");
+  await expect.poll(image).toBe(densityImage);
+});
+
 test("trial and tetrode choices use joined neutral controls; header text retains native copying", async ({
   page,
   context,
