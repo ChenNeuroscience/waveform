@@ -2,7 +2,13 @@ name: Build, test and deploy Waveform
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.markdown'
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.markdown'
   workflow_dispatch:
 permissions:
   contents: read
