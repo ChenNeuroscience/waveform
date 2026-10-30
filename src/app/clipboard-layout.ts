@@ -20,6 +20,17 @@ function plotImage(plot: PlotCapture, width: number, alt: string, flow = "block"
   return `<img src="${plot.canvas.toDataURL()}" alt="${escapeHtml(alt)}" width="${Math.round(width)}" height="${height}" style="${style}${plot.mode === "spatial" ? "image-rendering:pixelated;" : ""}">`;
 }
 
+function peakStat(mode: PlotCapture["mode"]) {
+  return mode === "spatial" ? "spa max" : mode === "direction" ? "dir max" : undefined;
+}
+
+function peakValue(cell: CellCapture, mode: PlotCapture["mode"]) {
+  return (cell.stats.find((stat) => stat.label === peakStat(mode))?.value || "—").replace(
+    /(\d)Hz$/,
+    "$1 Hz",
+  );
+}
+
 /** The original single-trial layout: title and stats, then all plots in one row. */
 function singleTrialClipboard(trial: TrialCapture, tetNum: number) {
   const ratio = Math.min(2, devicePixelRatio || 1);
@@ -68,8 +79,9 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
     commonPrefix = "";
   }
   const names = trials.map((trial) => trial.name.slice(commonPrefix.length));
-  const fit = Math.min(1, 600 / ((wave ? 200 : 110) + trials.length * 88));
-  const labelWidth = Math.floor((wave ? 200 : 110) * fit);
+  const titleWidth = Math.max(48, ...cells.map((cell) => `t${tetNum} c${cell.cell}`.length * 6));
+  const fit = Math.min(1, 600 / ((wave ? 200 : titleWidth) + trials.length * 88));
+  const labelWidth = Math.floor((wave ? 200 : titleWidth) * fit);
   const columnWidth = Math.floor(88 * fit);
   const tableWidth = labelWidth + trials.length * columnWidth;
   const plotScale = Math.min(
@@ -79,18 +91,9 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
   const html: string[] = [];
   const text: string[] = [];
   const cellStyle =
-    "border:0;padding:0;vertical-align:middle;font-weight:normal;word-wrap:break-word;";
+    "border:0;padding:0;vertical-align:top;font-weight:normal;word-wrap:break-word;";
   const labelStyle = `${cellStyle}text-align:left;`;
   const valueStyle = `${cellStyle}text-align:center;`;
-  const textRow = (label: string, values: string[]) => {
-    html.push(
-      `<tr><th scope="row" width="${labelWidth}" style="${labelStyle}">${escapeHtml(label)}</th>${values
-        .map(
-          (value) => `<td width="${columnWidth}" style="${valueStyle}">${escapeHtml(value)}</td>`,
-        )
-        .join("")}</tr>`,
-    );
-  };
   html.push(
     `<table border="0" cellpadding="0" cellspacing="0" width="${tableWidth}" style="border:0;border-collapse:collapse;table-layout:fixed;width:${tableWidth}px;font:11px Arial;">`,
     `<colgroup><col width="${labelWidth}">${trials.map(() => `<col width="${columnWidth}">`).join("")}</colgroup>`,
@@ -103,39 +106,19 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
   );
 
   for (const capture of cells) {
-    html.push(
-      `<tbody style="page-break-inside:avoid;"><tr><th colspan="${trials.length + 1}" scope="rowgroup" style="border:0;padding:9px 0 3px;text-align:left;">t${tetNum} c${capture.cell}</th></tr>`,
-    );
+    html.push('<tbody style="page-break-inside:avoid;">');
     const columns = trials.map((trial) => trial.cells.find((c) => c.cell === capture.cell)!);
     columns.forEach((cell, i) => {
-      const rates = cell.stats
-        .filter((s) => s.label !== "n spikes")
-        .map((s) => `${s.label}: ${s.value}`)
+      const rates = frames
+        .filter((frame) => peakStat(frame.mode))
+        .map((frame) => `${frame.name}: ${peakValue(cell, frame.mode)}`)
         .join(" · ");
       text.push(
-        `${trials[i].name} · t${tetNum} c${cell.cell} · ${cell.spikes.toLocaleString("en-GB")} spikes${cell.spikes ? "" : " · No data"}${rates ? ` · ${rates}` : ""}`,
+        `${trials[i].name} · t${tetNum} c${cell.cell}${cell.spikes ? "" : " · No data"}${rates ? ` · ${rates}` : ""}`,
       );
     });
-    const stats = [
-      ...new Set(["n spikes", ...columns.flatMap((cell) => cell.stats.map((s) => s.label))]),
-    ];
-    const labels: Record<string, string> = {
-      "n spikes": "Spikes",
-      "spa max": "Spatial max",
-      "dir max": "Direction max",
-    };
-    for (const stat of stats) {
-      textRow(
-        labels[stat] || stat,
-        columns.map((cell) =>
-          stat === "n spikes"
-            ? cell.spikes.toLocaleString("en-GB")
-            : (cell.stats.find((s) => s.label === stat)?.value || "—").replace(/(\d)Hz$/, "$1 Hz"),
-        ),
-      );
-    }
     const waveform = capture.plots.find((p) => p.mode === "waveforms");
-    const chartRows: (PlotCapture | null)[] = frames.length ? frames : wave ? [null] : [];
+    const chartRows: (PlotCapture | null)[] = frames.length ? frames : [null];
     chartRows.forEach((frame, index) => {
       const waveWidth = labelWidth - 8;
       const waveHeight = waveform
@@ -143,12 +126,17 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
         : 0;
       const height = Math.ceil(
         Math.max(
-          frame ? (frame.canvas.height / ratio) * plotScale : 0,
-          index === 0 ? waveHeight : 0,
+          frame ? (frame.canvas.height / ratio) * plotScale + (peakStat(frame.mode) ? 16 : 0) : 0,
+          index === 0 ? waveHeight + 16 : 0,
         ) + 6,
       );
+      const rowStyle = index === 0 ? "padding-top:9px;" : "";
+      const label =
+        index === 0
+          ? `<th scope="rowgroup" width="${labelWidth}" height="${height}" valign="top" style="${labelStyle}${rowStyle}"><p style="margin:0 0 3px;white-space:nowrap;"><b>t${tetNum} c${capture.cell}</b></p>${waveform ? plotImage(waveform, waveWidth, "Waveforms") : ""}</th>`
+          : `<td width="${labelWidth}" height="${height}" style="${labelStyle}"></td>`;
       html.push(
-        `<tr><td width="${labelWidth}" height="${height}" align="center" valign="middle" style="${valueStyle}">${index === 0 && waveform ? plotImage(waveform, waveWidth, "Waveforms") : ""}</td>`,
+        `<tr>${label}`,
         ...columns.map((cell, i) => {
           const plot = frame && cell.plots.find((p) => p.mode === frame.mode);
           const graphic = plot
@@ -158,7 +146,11 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
                 `${plot.name} · ${trials[i].name} · t${tetNum} c${cell.cell}${plot.missing ? ` — ${plot.missing}` : ""}`,
               )
             : "";
-          return `<td width="${columnWidth}" height="${height}" align="center" valign="middle" style="${valueStyle}">${graphic}</td>`;
+          const caption =
+            frame && peakStat(frame.mode)
+              ? `<p style="margin:0 0 3px;">${escapeHtml(peakValue(cell, frame.mode))}</p>`
+              : "";
+          return `<td width="${columnWidth}" height="${height}" align="center" valign="top" style="${valueStyle}${rowStyle}">${caption}${graphic}</td>`;
         }),
         "</tr>",
       );
@@ -166,6 +158,14 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
     html.push("</tbody>");
   }
   html.push("</table>");
+  const peakMaps = frames
+    .filter((frame) => peakStat(frame.mode))
+    .map((frame) => (frame.mode === "spatial" ? "spatial rate maps" : "directional maps"));
+  if (peakMaps.length) {
+    const footnote = `Values above ${peakMaps.join(" and ")} are peak firing rates (Hz).`;
+    html.push(`<p style="margin:6px 0;font:10px Arial;color:#666;">${escapeHtml(footnote)}</p>`);
+    text.push("", footnote);
+  }
   if (wave) {
     const footnote = `Waveforms from ${primary.name} only (T${tetNum}).`;
     html.push(`<p style="margin:6px 0;font:10px Arial;color:#666;">${escapeHtml(footnote)}</p>`);

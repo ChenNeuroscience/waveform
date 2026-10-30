@@ -107,6 +107,10 @@ test("copy mode compares trials without loading their waveform views, and produc
     expect(content.html.match(new RegExp(`alt="${plot} ·`, "g"))).toHaveLength(4);
   }
   expect(content.text).toContain("Waveforms from demo_box-a only (T1).");
+  expect(content.text).not.toContain("spikes");
+  expect(content.text).toContain(
+    "Values above spatial rate maps and directional maps are peak firing rates (Hz).",
+  );
   await page.screenshot({ path: "test-results/multi-trial-selection.png" });
 
   // Plot toggles also update an existing multi-trial selection.
@@ -122,6 +126,28 @@ test("copy mode compares trials without loading their waveform views, and produc
     })
     .toBe(true);
   expect((await clipboard(page)).text).not.toContain("Waveforms from");
+  const compactContent = await clipboard(page);
+  const compact = await context.newPage();
+  await compact.setContent(`<div style="display:inline-block">${compactContent.html}</div>`);
+  await compact
+    .locator("img")
+    .evaluateAll((images) =>
+      Promise.all(images.map((image) => (image as HTMLImageElement).decode())),
+    );
+  const titleWidths = await compact
+    .locator('th[scope="rowgroup"]')
+    .evaluateAll((titles) => titles.map((title) => title.getBoundingClientRect().width));
+  expect(titleWidths).toHaveLength(2);
+  for (const width of titleWidths) expect(width).toBeLessThanOrEqual(60);
+  expect(compactContent.text).toContain(
+    "Values above spatial rate maps are peak firing rates (Hz).",
+  );
+  expect(compactContent.text).not.toContain("directional maps");
+  expect(compactContent.text).not.toContain("Head direction:");
+  await compact
+    .locator("div")
+    .screenshot({ path: "test-results/multi-trial-clipboard-compact.png" });
+  await compact.close();
   await page
     .getByRole("button", { name: "Waveforms", exact: true })
     .click({ modifiers: ["Shift"] });
@@ -175,21 +201,28 @@ test("copy mode compares trials without loading their waveform views, and produc
   expect(await preview.locator("thead th").allTextContents()).toEqual(["", "a", "b"]);
   expect(editableText).toContain("Trials and cuts:");
   expect(editableText).toContain("demo_box-a_1.cut");
-  expect(editableText).toContain("Spikes");
-  const spikeRows = await preview
-    .locator("tbody tr")
-    .evaluateAll((rows) =>
-      rows
-        .filter((row) => row.querySelector('th[scope="row"]')?.textContent === "Spikes")
-        .map((row) => [...(row as HTMLTableRowElement).cells].map((cell) => cell.textContent)),
+  expect(editableText).not.toContain("Spikes");
+  expect(editableText).not.toContain("Spatial max");
+  expect(editableText).not.toContain("Direction max");
+  await expect(preview.locator('th[scope="row"]')).toHaveCount(0);
+  const captions = await preview
+    .locator('td:has(> img[alt^="Spatial rate map ·"]), td:has(> img[alt^="Head direction ·"])')
+    .evaluateAll((cells) =>
+      cells.map((cell) => {
+        const caption = cell.querySelector("p")!;
+        const plot = cell.querySelector("img")!;
+        return {
+          text: caption.textContent,
+          bottom: caption.getBoundingClientRect().bottom,
+          plotTop: plot.getBoundingClientRect().top,
+        };
+      }),
     );
-  expect(spikeRows).toHaveLength(2);
-  for (const row of spikeRows)
-    expect(row).toEqual([
-      "Spikes",
-      expect.stringMatching(/^[\d,]+$/),
-      expect.stringMatching(/^[\d,]+$/),
-    ]);
+  expect(captions).toHaveLength(8);
+  for (const caption of captions) {
+    expect(caption.text).toMatch(/^\d+\.\d Hz$/);
+    expect(caption.bottom).toBeLessThanOrEqual(caption.plotTop);
+  }
   await preview
     .locator("div[contenteditable]")
     .screenshot({ path: "test-results/multi-trial-clipboard.png" });
@@ -251,9 +284,7 @@ test("missing cells and missing tetrodes occupy complete chart slots, and trial 
   await copyMode(page, 2);
   await page.getByRole("button", { name: "beta 1", exact: true }).click();
   await page.getByRole("button", { name: "gamma 1", exact: true }).click();
-  await expect
-    .poll(async () => (await clipboard(page)).text)
-    .toContain("gamma · t1 c2 · 0 spikes · No data");
+  await expect.poll(async () => (await clipboard(page)).text).toContain("gamma · t1 c2 · No data");
   const content = await clipboard(page);
   expect(content.html.match(/alt="Waveforms"/g)).toHaveLength(1);
   expect(content.html.match(/t1 c2 — No data/g)).toHaveLength(4);
@@ -301,14 +332,18 @@ test("secondary trials use their remembered edited cut without changing the prim
   await second.click();
   await expect
     .poll(async () => (await clipboard(page)).text)
-    .toContain("demo_box-b · t1 c1 · 0 spikes · No data");
+    .toContain("demo_box-b · t1 c1 · No data");
   await expect(page).toHaveTitle("demo_box-a [Waveform]");
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   // Choosing a different cut includes its trial and leaves the displayed recording alone.
   await second.getByRole("button", { name: "~_1.cut", exact: true }).click();
   await expect
-    .poll(async () => (await clipboard(page)).text)
-    .toMatch(/demo_box-b · t1 c1 · [1-9][\d,]* spikes/);
+    .poll(async () =>
+      (await clipboard(page)).text
+        .split("\n")
+        .find((line) => line.startsWith("demo_box-b · t1 c1")),
+    )
+    .toMatch(/^demo_box-b · t1 c1(?: · (?!No data).+)?$/);
   await expect(second.getByRole("button", { name: "~_1.cut", exact: true })).toHaveClass(/active/);
   await expect(page).toHaveTitle("demo_box-a [Waveform]");
   await expect(page.getByRole("alert")).toHaveCount(0);
