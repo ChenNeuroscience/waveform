@@ -294,6 +294,10 @@ export function HelpPanel() {
       <Shortcut keys="⌘ / Ctrl A" text="Select all cells in copy mode" />
       <h3>Views</h3>
       <Shortcut keys="Q" text="Switch amplitudes / principal components" />
+      <p className="muted">
+        In 3D, drag to rotate, Shift-drag to pan and scroll to zoom. Choose brush or lasso to cut
+        through all depths; Esc returns to navigation.
+      </p>
       <Shortcut keys="Space + click" text="Copy a plot / close a floating window" />
       <Shortcut
         keys="W / R / A / C / V / T"
@@ -302,7 +306,7 @@ export function HelpPanel() {
       <Shortcut keys="P / ⇧ P" text="Cycle fixed colours / density / drift (forward / back)" />
       <Shortcut
         keys="Esc"
-        text="Close panel or leave the lasso; otherwise hide / show the toolbar"
+        text="Close panel or return to navigation (3D) / brush (2D); otherwise hide / show the toolbar"
       />
     </>
   );

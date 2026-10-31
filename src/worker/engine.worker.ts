@@ -597,11 +597,41 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
           throw new Superseded("PCA basis changed; redraw the selection.");
         }
         const offset = m.featureKey ? 5 : 0;
+        const projected = m.projection;
+        if (
+          projected &&
+          (projected.matrix.length !== 12 ||
+            !projected.matrix.every(Number.isFinite) ||
+            !Number.isInteger(projected.width) ||
+            projected.width < 1 ||
+            projected.width > 16384 ||
+            !Number.isInteger(projected.height) ||
+            projected.height < 1 ||
+            projected.height > 16384)
+        ) {
+          throw new Error("Invalid 3D view; redraw the selection.");
+        }
         withU16(w, m.sources, (p, n) =>
           withF32(w, m.polygon, (q, count) =>
-            m.action === "paint"
-              ? w.engine_brush(e, p, n, m.dest, m.ax + offset, m.ay + offset, q, count)
-              : w.engine_polygon(e, p, n, m.dest, m.ax + offset, m.ay + offset, q, count),
+            projected
+              ? withF32(w, projected.matrix, (matrix) =>
+                  w.engine_projected_region(
+                    e,
+                    p,
+                    n,
+                    m.dest,
+                    offset,
+                    matrix,
+                    q,
+                    count,
+                    m.action === "paint" ? 9 : 0,
+                    projected.width,
+                    projected.height,
+                  ),
+                )
+              : m.action === "paint"
+                ? w.engine_brush(e, p, n, m.dest, m.ax + offset, m.ay + offset, q, count)
+                : w.engine_polygon(e, p, n, m.dest, m.ax + offset, m.ay + offset, q, count),
           ),
         );
       } else {

@@ -1,10 +1,17 @@
-import { Lasso, Paintbrush, Palette } from "lucide-react";
+import { Lasso, Paintbrush, Palette, Rotate3D } from "lucide-react";
 import { useMemo } from "react";
 import { Clusters } from "../plots/FeatureView";
+import { Cluster3D } from "../plots/Cluster3D";
 import { GroupSelector } from "./GroupSelector";
 import { ToggleButton } from "./ToggleButton";
 import { usePreference } from "../preferences";
-import type { FeatureCoordinates, FeatureMode, Settings, ViewData } from "../types";
+import type {
+  FeatureCoordinates,
+  FeatureMode,
+  FeatureProjection,
+  Settings,
+  ViewData,
+} from "../types";
 
 const FULL_RANGE = [0, 1];
 
@@ -86,6 +93,8 @@ export function FeaturePane({
   coordinates,
   featureMessage,
   featureError,
+  threeD,
+  onThreeD,
 }: {
   data: ViewData | null;
   settings: Settings;
@@ -96,13 +105,15 @@ export function FeaturePane({
   splitting: boolean;
   grabMode: boolean;
   onHover: (group: number | null) => void;
-  onPolygon: (polygon: number[], ax: number, ay: number) => void;
+  onPolygon: (polygon: number[], ax: number, ay: number, projection?: FeatureProjection) => void;
   onPopPlot: (kind: "features", x: number, y: number) => void;
   mode: FeatureMode;
   onMode: (mode: FeatureMode) => void;
   coordinates: FeatureCoordinates | null;
   featureMessage: string;
   featureError?: string;
+  threeD: boolean;
+  onThreeD: (enabled: boolean) => void;
 }) {
   const { sources, dest, tool, onSource, onDest, onNewGroup, onTool } = painting;
   const [fixedColours, setFixedColours] = usePreference("cluster-fixed-colours", false);
@@ -144,6 +155,15 @@ export function FeaturePane({
           >
             <Palette size={17} />
           </ToggleButton>
+          <ToggleButton
+            pressed={threeD}
+            aria-label="3D clusters"
+            title="3D cluster view: first three channels or principal components"
+            disabled={!canPaint || splitting}
+            onClick={() => onThreeD(!threeD)}
+          >
+            <span className="cluster-3d-toggle">3D</span>
+          </ToggleButton>
           <span className="tool-separator" aria-hidden="true" />
           <div className="toggle-group" role="group" aria-label="Feature space">
             <ToggleButton
@@ -167,6 +187,16 @@ export function FeaturePane({
           </div>
           <span className="tool-separator" aria-hidden="true" />
           <div className="toggle-group" role="group" aria-label="Cutting tool">
+            {threeD && (
+              <ToggleButton
+                pressed={tool === "orbit"}
+                aria-label="Rotate 3D view"
+                title="Navigate: drag to rotate, Shift-drag to pan, scroll to zoom · Esc"
+                onClick={() => onTool("orbit")}
+              >
+                <Rotate3D size={15} />
+              </ToggleButton>
+            )}
             <ToggleButton
               pressed={tool === "brush"}
               aria-label="Paint source spikes"
@@ -188,18 +218,33 @@ export function FeaturePane({
         </div>
       </GroupSelector>
       <div className="feature-stage" onPointerDownCapture={grabFeatures}>
-        {data && coordinates && (
-          <Clusters
-            data={data}
-            coordinates={coordinates}
-            settings={clusterSettings}
-            selected={cell}
-            range={FULL_RANGE}
-            tool={canPaint ? tool : "disabled"}
-            onPolygon={onPolygon}
-            onPick={(group, source, toggle) => (source ? onSource(group, toggle) : onDest(group))}
-          />
-        )}
+        {data &&
+          coordinates &&
+          (threeD ? (
+            <Cluster3D
+              key={coordinates.key}
+              data={data}
+              coordinates={coordinates}
+              settings={clusterSettings}
+              selected={cell}
+              range={FULL_RANGE}
+              tool={canPaint && !splitting ? tool : "disabled"}
+              onTool={onTool}
+              onPolygon={onPolygon}
+              onPick={(group, source, toggle) => (source ? onSource(group, toggle) : onDest(group))}
+            />
+          ) : (
+            <Clusters
+              data={data}
+              coordinates={coordinates}
+              settings={clusterSettings}
+              selected={cell}
+              range={FULL_RANGE}
+              tool={canPaint ? tool : "disabled"}
+              onPolygon={onPolygon}
+              onPick={(group, source, toggle) => (source ? onSource(group, toggle) : onDest(group))}
+            />
+          ))}
         {data && !coordinates && (
           <div className="pane-placeholder" role="status">
             {featureError || featureMessage}

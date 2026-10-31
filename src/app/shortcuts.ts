@@ -13,8 +13,9 @@ export interface ShortcutContext {
   /** Copy mode is open: Escape ends it, Cmd/Ctrl A selects every cell. */
   copying: boolean;
   pane: string | null;
-  /** The feature-space tool; Escape returns from lasso to the brush. */
+  /** The feature-space tool; Escape returns to the default navigation tool. */
   tool: string;
+  defaultTool?: string;
   hoverCell: number | null;
   hoveredTile: RefObject<number | null>;
   settings: Settings;
@@ -206,10 +207,10 @@ export function useShortcuts(context: ShortcutContext) {
         c.startSwap(hovered);
         return;
       }
-      // Escape closes the focused panel or leaves the lasso; otherwise it hides
-      // or shows the toolbar.
+      // Escape closes the focused panel or returns to the default tool;
+      // otherwise it hides or shows the toolbar.
       if (e.key === "Escape") {
-        if (c.pane || c.tool !== "brush") {
+        if (c.pane || c.tool !== (c.defaultTool || "brush")) {
           c.closePane();
         } else {
           c.toggleToolbar();

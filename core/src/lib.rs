@@ -13,6 +13,7 @@ mod dsp;
 mod pca;
 mod position;
 mod processing;
+mod projection;
 mod spatial_ac;
 mod synthetic;
 mod waves;

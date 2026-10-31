@@ -9,6 +9,7 @@ import type {
   ViewData,
   ViewMessage,
   FeatureMode,
+  FeatureProjection,
   PcaFeatures,
 } from "../types";
 
@@ -33,6 +34,7 @@ interface RegionEdit {
   polygon: number[];
   /** Identify the displayed PCA basis so a stale plot cannot cut another basis. */
   featureKey?: string;
+  projection?: FeatureProjection;
 }
 export type EditRequest = Session & {
   dest: number;

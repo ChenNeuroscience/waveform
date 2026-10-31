@@ -36,6 +36,7 @@ import {
   type SwapState,
   type TileFeedback,
   type FeatureMode,
+  type FeatureProjection,
 } from "./types";
 import { Superseded, type EditRequest } from "./worker/protocol";
 import { TOOL_PANELS, type PanelContext, type PanelName } from "./shell/panels";
@@ -164,7 +165,8 @@ export default function App() {
   const [cell, setCell] = useState(1);
   const [sources, setSources] = useState<number[]>([1]);
   const [dest, setDest] = useState(2);
-  const [tool, setTool] = useState("brush");
+  const [feature3D, setFeature3D] = usePreference("cluster-3d", false);
+  const [tool, setTool] = useState(() => (feature3D ? "orbit" : "brush"));
   const [featurePreference, setFeatureMode] = usePreference<FeatureMode>(
     "feature-mode",
     "amplitudes",
@@ -615,7 +617,7 @@ export default function App() {
       });
     }
   };
-  const polygon = (points: number[], ax: number, ay: number) => {
+  const polygon = (points: number[], ax: number, ay: number, projection?: FeatureProjection) => {
     if (!featureSpace.coordinates) {
       return;
     }
@@ -630,8 +632,9 @@ export default function App() {
       ax,
       ay,
       polygon: points,
+      projection,
       featureKey: featureMode === "pca" ? featureSpace.coordinates.key : undefined,
-      description: `${tool === "brush" ? "Brush" : "Lasso"}${featureMode === "pca" ? " (PCs)" : ""} ${sources.join(", ")} → ${dest}`,
+      description: `${tool === "brush" ? "Brush" : "Lasso"}${projection ? " 3D" : ""}${featureMode === "pca" ? " (PCs)" : ""} ${sources.join(", ")} → ${dest}`,
     });
   };
   const exportCut = async () => {
@@ -655,6 +658,7 @@ export default function App() {
   // Actions are wrapped so they are looked up when a key is pressed (some are
   // declared further down this component).
   useShortcuts({
+    defaultTool: feature3D ? "orbit" : "brush",
     toggleFeatures: () => setFeatureMode((mode) => (mode === "pca" ? "amplitudes" : "pca")),
     ready,
     dragging: !!dragComparison,
@@ -693,7 +697,7 @@ export default function App() {
         setPanels((ps) => ps.filter((p) => p !== pane));
       }
       setPane(null);
-      setTool("brush");
+      setTool(feature3D ? "orbit" : "brush");
     },
     togglePane: (name) => setPane((p) => (p === name ? null : name)),
     setTool,
@@ -904,6 +908,11 @@ export default function App() {
               <Divider part="position" onDrag={panes.dragDivider} />
               <FeaturePane
                 {...{ data, settings, cell, painting, grabMode }}
+                threeD={feature3D}
+                onThreeD={(enabled) => {
+                  setFeature3D(enabled);
+                  setTool(enabled ? "orbit" : "brush");
+                }}
                 mode={featureMode}
                 onMode={setFeatureMode}
                 coordinates={featureSpace.coordinates}
