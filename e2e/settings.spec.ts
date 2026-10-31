@@ -12,13 +12,24 @@ test("settings sections fit their content and clipboard settings restore togethe
   await ready(page);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const panel = page.getByRole("dialog", { name: "Settings", exact: true });
-  for (const title of ["Spatial rate map", "Directional rate map", "Temporal autocorrelogram", "Position processing"]) {
+  for (const title of [
+    "Spatial rate map",
+    "Directional rate map",
+    "Temporal autocorrelogram",
+    "Position processing",
+  ]) {
     await settingsSection(page, title);
-    await expect.poll(() => panel.evaluate((el) => {
-      const content = el.querySelector(".floating-content > div")!.getBoundingClientRect().height;
-      const header = el.querySelector("header")!.getBoundingClientRect().height;
-      return Math.abs(el.getBoundingClientRect().height - content - header - 2);
-    })).toBeLessThanOrEqual(1);
+    await expect
+      .poll(() =>
+        panel.evaluate((el) => {
+          const content = el
+            .querySelector(".floating-content > div")!
+            .getBoundingClientRect().height;
+          const header = el.querySelector("header")!.getBoundingClientRect().height;
+          return Math.abs(el.getBoundingClientRect().height - content - header - 2);
+        }),
+      )
+      .toBeLessThanOrEqual(1);
   }
   const position = panel.getByRole("button", { name: "Position processing", exact: true });
   await expect(position).toHaveAttribute("aria-expanded", "true");
