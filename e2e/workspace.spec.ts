@@ -1,4 +1,4 @@
-import { destination, paintSources, source } from "./controls";
+import { destination, paintSources, source, settingsSection } from "./controls";
 import { ready, exportCut } from "./controls";
 import { test, expect } from "@playwright/test";
 test("demo imports, exact cut edits survive switching, undo/redo and export", async ({ page }) => {
@@ -53,6 +53,7 @@ test("demo imports, exact cut edits survive switching, undo/redo and export", as
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible({
     timeout: 15000,
   });
+  await settingsSection(page, "Spatial rate map");
   await page.getByLabel("Spatial bin width", { exact: true }).fill("5");
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   await page
