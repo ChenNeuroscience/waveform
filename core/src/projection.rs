@@ -6,6 +6,7 @@ struct Region<'a> {
     sources: &'a [u16],
     dest: u16,
     offset: usize,
+    axes: &'a [u16],
     matrix: &'a [f32],
     points: &'a [f32],
     radius: f32,
@@ -64,6 +65,11 @@ impl Engine {
             || r.height == 0
             || !matches!(r.offset, 0 | 5)
             || (r.offset == 5 && !self.pca.ready)
+            || r.axes.len() != 3
+            || r.axes.iter().any(|&axis| axis > 3)
+            || r.axes[0] == r.axes[1]
+            || r.axes[0] == r.axes[2]
+            || r.axes[1] == r.axes[2]
         {
             return 0;
         }
@@ -74,9 +80,9 @@ impl Engine {
                 continue;
             }
             let xyz = [
-                self.axis(i, r.offset),
-                self.axis(i, r.offset + 1),
-                self.axis(i, r.offset + 2),
+                self.axis(i, r.offset + r.axes[0] as usize),
+                self.axis(i, r.offset + r.axes[1] as usize),
+                self.axis(i, r.offset + r.axes[2] as usize),
             ];
             let project = |row: usize| {
                 r.matrix[row] * xyz[0]
@@ -114,6 +120,7 @@ pub unsafe extern "C" fn engine_projected_region(
     ns: usize,
     dest: u16,
     offset: usize,
+    axes: *const u16,
     matrix: *const f32,
     points: *const f32,
     n: usize,
@@ -125,6 +132,7 @@ pub unsafe extern "C" fn engine_projected_region(
         sources: slice::from_raw_parts(sources, ns),
         dest,
         offset,
+        axes: slice::from_raw_parts(axes, 3),
         matrix: slice::from_raw_parts(matrix, 8),
         points: slice::from_raw_parts(points, n),
         radius,
@@ -161,6 +169,7 @@ mod tests {
                 sources: &[1],
                 dest: 3,
                 offset: 0,
+                axes: &[0, 1, 2],
                 matrix: &XY,
                 points: &points,
                 radius: 0.,
@@ -183,6 +192,7 @@ mod tests {
                 sources: &[1],
                 dest: 3,
                 offset: 0,
+                axes: &[0, 1, 2],
                 matrix: &matrix,
                 points: &points,
                 radius: 0.,
@@ -198,6 +208,7 @@ mod tests {
                 sources: &[1],
                 dest: 3,
                 offset: 0,
+                axes: &[0, 1, 2],
                 matrix: &offscreen,
                 points: &points,
                 radius: 0.,
@@ -209,6 +220,28 @@ mod tests {
     }
 
     #[test]
+    fn selecting_the_fourth_feature_changes_the_cut() {
+        let mut e = fixture();
+        let points = [0.5, -0.1, 1.1, -0.1, 1.1, 1.1, 0.5, 1.1];
+        let matrix = [0., 0., 1., 0., 0., 1., 0., 0.];
+        assert_eq!(
+            e.projected_region(Region {
+                sources: &[1],
+                dest: 3,
+                offset: 0,
+                axes: &[0, 1, 3],
+                matrix: &matrix,
+                points: &points,
+                radius: 0.,
+                width: 300,
+                height: 200
+            }),
+            1
+        );
+        assert_eq!(e.labels, [3, 1, 1, 7, 1, 3]);
+    }
+
+    #[test]
     fn brush_connects_fast_strokes_and_keeps_a_circular_pixel_radius() {
         let mut e = fixture();
         assert_eq!(
@@ -216,6 +249,7 @@ mod tests {
                 sources: &[1],
                 dest: 3,
                 offset: 0,
+                axes: &[0, 1, 2],
                 matrix: &XY,
                 points: &[0.1, 0.2, 0.9, 0.2],
                 radius: 9.,

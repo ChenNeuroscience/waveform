@@ -1,4 +1,4 @@
-import type { FeatureProjection } from "../types";
+import type { FeatureMode, FeatureProjection } from "../types";
 
 export interface ClusterCamera {
   yaw: number;
@@ -21,6 +21,7 @@ export function clusterProjection(
   camera: ClusterCamera,
   width: number,
   height: number,
+  omitted = 3,
 ): FeatureProjection {
   const cy = Math.cos(camera.yaw);
   const sy = Math.sin(camera.yaw);
@@ -32,6 +33,7 @@ export function clusterProjection(
     return [...xyz, 0.5 + pan - xyz.reduce((sum, value) => sum + value, 0) / 2];
   };
   return {
+    axes: [0, 1, 2, 3].filter((axis) => axis !== omitted),
     // Float32 rows make CPU, shader and Wasm projection agree at cut boundaries.
     matrix: [
       ...new Float32Array([
@@ -90,9 +92,9 @@ export function nearestCluster3D(
     if (time < range[0] || time > range[1]) {
       continue;
     }
-    const x = values[i * 4] * scale;
-    const y = values[i * 4 + 1] * scale;
-    const z = values[i * 4 + 2] * scale;
+    const x = values[i * 4 + view.axes[0]] * scale;
+    const y = values[i * 4 + view.axes[1]] * scale;
+    const z = values[i * 4 + view.axes[2]] * scale;
     const fx = m[0] * x + m[1] * y + m[2] * z + m[3];
     const fy = m[4] * x + m[5] * y + m[6] * z + m[7];
     if (fx < 0 || fx > 1 || fy < 0 || fy > 1) {
@@ -107,4 +109,71 @@ export function nearestCluster3D(
     }
   }
   return group;
+}
+
+export interface SavedClusterProjection {
+  camera: ClusterCamera;
+  omitted: number;
+  mode: FeatureMode;
+  samples: number;
+}
+
+/** Short, versioned text for notes. Number.toString preserves every camera bit. */
+export function encodeClusterProjection({
+  camera,
+  omitted,
+  mode,
+  samples,
+}: SavedClusterProjection) {
+  const prefix = mode === "pca" ? "PC" : "A";
+  const axes = [0, 1, 2, 3]
+    .filter((axis) => axis !== omitted)
+    .map((axis) => `${prefix}${axis + 1}`)
+    .join("-");
+  return `waveform3d:v1:${axes}:${samples}:${[
+    camera.yaw,
+    camera.pitch,
+    camera.zoom,
+    camera.panX,
+    camera.panY,
+  ].join(",")}`;
+}
+
+export function decodeClusterProjection(text: string): SavedClusterProjection {
+  // Allow a code copied out of a sentence or Markdown in the user's notes.
+  const match = text.match(
+    /waveform3d:v1:((?:A|PC)[1-4]-(?:A|PC)[1-4]-(?:A|PC)[1-4]):(\d+):([-+\d.eE,]+)/,
+  );
+  if (!match) {
+    throw new Error("Paste a waveform3d:v1 projection code.");
+  }
+  const labels = match[1].split("-");
+  const mode = labels[0].startsWith("PC") ? "pca" : "amplitudes";
+  const prefix = mode === "pca" ? "PC" : "A";
+  const axes = labels.map((label) => Number(label.replace(/^(A|PC)/, "")) - 1);
+  const tokens = match[3].replace(/[.,]+$/, "").split(",");
+  const values = tokens.map(Number);
+  const samples = Number(match[2]);
+  const [yaw, pitch, zoom, panX, panY] = values;
+  if (
+    values.length !== 5 ||
+    tokens.some((token) => !token) ||
+    !values.every(Number.isFinite) ||
+    !labels.every((label) => label.startsWith(prefix)) ||
+    !axes.every((axis, i) => i === 0 || axis > axes[i - 1]) ||
+    Math.abs(pitch) > Math.PI / 2 ||
+    zoom < 0.3 ||
+    zoom > 12 ||
+    !Number.isInteger(samples) ||
+    samples < 4 ||
+    samples > 20000
+  ) {
+    throw new Error("This projection code contains invalid view settings.");
+  }
+  return {
+    camera: { yaw, pitch, zoom, panX, panY },
+    omitted: [0, 1, 2, 3].find((axis) => !axes.includes(axis))!,
+    mode,
+    samples,
+  };
 }

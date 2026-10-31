@@ -11,6 +11,31 @@ async function readClipboard(page: Page) {
   });
 }
 
+test("K and Z toggle their own windows even when another pane has focus", async ({ page }) => {
+  await page.goto("/");
+  const help = page.getByRole("dialog", { name: "Keyboard shortcuts", exact: true });
+  const history = page.getByRole("dialog", { name: "Edit history", exact: true });
+  await page.keyboard.press("k");
+  await expect(help).toBeVisible();
+  await page.keyboard.press("k");
+  await expect(help).toHaveCount(0);
+  await page.keyboard.press("z");
+  await expect(history).toBeVisible();
+  await page.keyboard.press("z");
+  await expect(history).toHaveCount(0);
+  await page.keyboard.press("k");
+  await page.keyboard.press("z");
+  await expect(help).toBeVisible();
+  await expect(history).toBeVisible();
+  await page.keyboard.press("k");
+  await expect(help).toHaveCount(0);
+  await expect(history).toBeVisible();
+  await page.keyboard.press("k");
+  await page.keyboard.press("z");
+  await expect(history).toHaveCount(0);
+  await expect(help).toBeVisible();
+});
+
 test("Space closes windows; copied tiles have one title and frozen stats only on hover", async ({
   page,
 }) => {

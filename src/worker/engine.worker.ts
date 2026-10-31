@@ -601,6 +601,9 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         if (
           projected &&
           (projected.matrix.length !== 12 ||
+            projected.axes.length !== 3 ||
+            new Set(projected.axes).size !== 3 ||
+            !projected.axes.every((axis) => Number.isInteger(axis) && axis >= 0 && axis < 4) ||
             !projected.matrix.every(Number.isFinite) ||
             !Number.isInteger(projected.width) ||
             projected.width < 1 ||
@@ -614,19 +617,22 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         withU16(w, m.sources, (p, n) =>
           withF32(w, m.polygon, (q, count) =>
             projected
-              ? withF32(w, projected.matrix, (matrix) =>
-                  w.engine_projected_region(
-                    e,
-                    p,
-                    n,
-                    m.dest,
-                    offset,
-                    matrix,
-                    q,
-                    count,
-                    m.action === "paint" ? 9 : 0,
-                    projected.width,
-                    projected.height,
+              ? withU16(w, projected.axes, (axes) =>
+                  withF32(w, projected.matrix, (matrix) =>
+                    w.engine_projected_region(
+                      e,
+                      p,
+                      n,
+                      m.dest,
+                      offset,
+                      axes,
+                      matrix,
+                      q,
+                      count,
+                      m.action === "paint" ? 9 : 0,
+                      projected.width,
+                      projected.height,
+                    ),
                   ),
                 )
               : m.action === "paint"

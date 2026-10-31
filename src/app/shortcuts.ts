@@ -13,7 +13,7 @@ export interface ShortcutContext {
   /** Copy mode is open: Escape ends it, Cmd/Ctrl A selects every cell. */
   copying: boolean;
   pane: string | null;
-  /** The feature-space tool; Escape returns to the default navigation tool. */
+  /** The feature-space tool; 3D adds navigation to the L cycle. */
   tool: string;
   defaultTool?: string;
   hoverCell: number | null;
@@ -207,10 +207,10 @@ export function useShortcuts(context: ShortcutContext) {
         c.startSwap(hovered);
         return;
       }
-      // Escape closes the focused panel or returns to the default tool;
-      // otherwise it hides or shows the toolbar.
+      // Escape closes the focused panel or leaves the 2D lasso. In 3D, L changes
+      // tools; an active stroke handles Escape itself without leaving its tool.
       if (e.key === "Escape") {
-        if (c.pane || c.tool !== (c.defaultTool || "brush")) {
+        if (c.pane || (c.defaultTool !== "orbit" && c.tool !== "brush")) {
           c.closePane();
         } else {
           c.toggleToolbar();
@@ -251,7 +251,8 @@ export function useShortcuts(context: ShortcutContext) {
       }
       if (e.key.toLowerCase() === "l" && c.ready && !e.repeat) {
         e.preventDefault();
-        c.setTool(c.tool === "lasso" ? "brush" : "lasso");
+        const tools = c.defaultTool === "orbit" ? ["orbit", "brush", "lasso"] : ["brush", "lasso"];
+        c.setTool(tools[(tools.indexOf(c.tool) + 1) % tools.length]);
       }
       if (e.key === "Enter" && c.ready) {
         e.preventDefault();

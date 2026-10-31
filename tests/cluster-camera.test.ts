@@ -5,6 +5,8 @@ import {
   nearestCluster3D,
   projectClusterPoint,
   zoomClusterCamera,
+  encodeClusterProjection,
+  decodeClusterProjection,
 } from "../src/plots/cluster-camera";
 import { corePromise } from "./wasm";
 import { pcaRecording } from "./pca-fixture";
@@ -48,7 +50,7 @@ it("picks the front spike at an overlap, ignoring the fourth coordinate and clip
   expect(nearestCluster3D(values, labels, times, view, 190, 100, 1, [0, 1])).toBeNull();
 });
 
-it("rotated PCA lasso cuts use the first three PCs through all depths and support exact undo", async () => {
+it("rotated PCA lasso cuts use the selected PCs including PC4 and support exact undo", async () => {
   const w = await corePromise;
   const fixture = pcaRecording();
   const a = await readRecording(w, new File([fixture.header, fixture.raw], "pca.1"));
@@ -63,17 +65,19 @@ it("rotated PCA lasso cuts use the first three PCs through all depths and suppor
       () => {},
     );
     const values = copyF32(w, w.engine_pca_values(a.e), w.engine_pca_values_len(a.e));
-    // View PC3 horizontally and PC2 vertically; PC1 supplies depth.
+    // Omit PC2: view PC4 horizontally and PC3 vertically, with PC1 as depth.
     const matrix = [0, 0, 1, 0, 0, 1, 0, 0];
     const polygon = [0.5, -0.05, 1.05, -0.05, 1.05, 1.05, 0.5, 1.05];
     const expected = fixture.labels.map((label, i) =>
-      label === 1 && values[i * 4 + 2] > 0.5 ? 3 : label,
+      label === 1 && values[i * 4 + 3] > 0.5 ? 3 : label,
     );
     w.engine_edit_begin(a.e);
     withU16(w, [1], (sources, n) =>
-      withF32(w, matrix, (m) =>
-        withF32(w, polygon, (p, count) =>
-          w.engine_projected_region(a.e, sources, n, 3, 5, m, p, count, 0, 300, 200),
+      withU16(w, [0, 2, 3], (axes) =>
+        withF32(w, matrix, (m) =>
+          withF32(w, polygon, (p, count) =>
+            w.engine_projected_region(a.e, sources, n, 3, 5, axes, m, p, count, 0, 300, 200),
+          ),
         ),
       ),
     );
@@ -83,5 +87,44 @@ it("rotated PCA lasso cuts use the first three PCs through all depths and suppor
     expect(copyU16(w, w.engine_labels(a.e), a.n)).toEqual(new Uint16Array(fixture.labels));
   } finally {
     w.engine_free(a.e);
+  }
+});
+
+it("projection codes name the displayed axes and restore every camera setting exactly", () => {
+  const camera = {
+    ...DEFAULT_CLUSTER_CAMERA,
+    yaw: 1.234567890123456,
+    zoom: 3.141592653589793,
+    panX: -0.1234567890123456,
+    panY: 1.25e-8,
+  };
+  for (const mode of ["amplitudes", "pca"] as const) {
+    for (const omitted of [3, 2, 1, 0]) {
+      const saved = { camera, mode, omitted, samples: 1500 };
+      const code = encodeClusterProjection(saved);
+      const prefix = mode === "pca" ? "PC" : "A";
+      const axes = [1, 2, 3, 4]
+        .filter((axis) => axis !== omitted + 1)
+        .map((axis) => `${prefix}${axis}`)
+        .join("-");
+      expect(code).toContain(axes);
+      expect(decodeClusterProjection(`Saved view: \`${code}\`.`)).toEqual(saved);
+      expect(clusterProjection(camera, 300, 200, omitted).axes).toEqual(
+        [0, 1, 2, 3].filter((axis) => axis !== omitted),
+      );
+    }
+  }
+});
+
+it("rejects malformed projection codes without accepting mixed or duplicate axes", () => {
+  for (const code of [
+    "no view",
+    "waveform3d:v2:A1-A2-A3:5000:0,0,1,0,0",
+    "waveform3d:v1:A1-PC2-A3:5000:0,0,1,0,0",
+    "waveform3d:v1:A1-A1-A3:5000:0,0,1,0,0",
+    "waveform3d:v1:A1-A2-A3:5000:0,0,100,0,0",
+    "waveform3d:v1:A1-A2-A3:5000:0,,1,0,0",
+  ]) {
+    expect(() => decodeClusterProjection(code)).toThrow();
   }
 });

@@ -48,7 +48,7 @@ export const EXPORTS = {
   engine_patch_clear: 1,
   engine_patch_len: 1,
   engine_polygon: 8,
-  engine_projected_region: 11,
+  engine_projected_region: 12,
   engine_pca_begin: 2,
   engine_pca_sample: 3,
   engine_pca_fit: 1,

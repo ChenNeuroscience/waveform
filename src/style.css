@@ -763,6 +763,7 @@ small {
   font: bold 11px Arial;
 }
 .cluster-3d-container {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -791,14 +792,56 @@ small {
   pointer-events: none;
   overflow: hidden;
 }
-.cluster-3d-reset {
+.cluster-3d-controls {
   position: absolute;
   top: 5px;
   right: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cluster-3d-controls button {
   padding: 3px;
-  min-width: 23px;
+  min-width: 31px;
   min-height: 23px;
   background: #ffffffe8;
+  font: 10px Arial;
+}
+.cluster-3d-status {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  max-width: calc(100% - 50px);
+  background: #fffffff0;
+  font: 10px/14px Arial;
+  pointer-events: none;
+}
+.cluster-projection-dialog {
+  position: absolute;
+  inset: 8px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #aaa;
+  background: white;
+  font: 11px Arial;
+}
+.cluster-projection-dialog p {
+  margin: 0;
+}
+.cluster-projection-dialog textarea {
+  flex: 1;
+  min-height: 45px;
+  width: 100%;
+  resize: none;
+  user-select: text;
+  font: 11px/15px monospace;
+}
+.cluster-projection-dialog > div {
+  display: flex;
+  gap: 6px;
 }
 .cluster-3d-hint {
   flex: none;
@@ -1439,9 +1482,13 @@ kbd {
 .grab-mode .cell-tile:hover,
 .grab-mode .position-path:hover,
 .grab-mode .feature-stage:hover {
-  outline: 3px solid red;
-  outline-offset: -3px;
   cursor: copy;
+}
+.grab-outline {
+  position: fixed;
+  z-index: 2147483647;
+  border: 3px solid red;
+  pointer-events: none;
 }
 .grab-mode:after {
   content: "grabber mode — click a plot to copy";
@@ -1453,7 +1500,7 @@ kbd {
   padding: 3px 7px;
   font-weight: bold;
   color: #c00;
-  z-index: 90;
+  z-index: 2147483646;
   font-size: 11px;
   pointer-events: none;
 }
@@ -1872,10 +1919,6 @@ kbd {
 }
 .tile-copy:hover .tile-copy-stats {
   visibility: visible;
-}
-.grab-mode .floating-window:hover {
-  outline: 3px solid red;
-  outline-offset: -3px;
 }
 .grab-mode .floating-window,
 .grab-mode .floating-window * {

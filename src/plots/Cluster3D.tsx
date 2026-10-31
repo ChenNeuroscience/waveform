@@ -1,14 +1,17 @@
-import { RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Copy, ClipboardPaste, RotateCcw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { FeatureCoordinates, FeatureProjection, Settings, ViewData } from "../types";
 import { ClusterGPU } from "./cluster-gpu";
 import {
   clusterProjection,
+  encodeClusterProjection,
+  decodeClusterProjection,
   DEFAULT_CLUSTER_CAMERA,
   nearestCluster3D,
   projectClusterPoint,
   zoomClusterCamera,
   type ClusterCamera,
+  type SavedClusterProjection,
 } from "./cluster-camera";
 
 type Gesture =
@@ -30,7 +33,6 @@ type Gesture =
     };
 
 const EMPTY_AXES: number[][] = [];
-const AXIS_COLOURS = ["#b24944", "#398354", "#456cb4"];
 
 function CubeAxes({ view, mode }: { view: FeatureProjection; mode: string }) {
   const corners = Array.from({ length: 8 }, (_, i) => {
@@ -52,7 +54,7 @@ function CubeAxes({ view, mode }: { view: FeatureProjection; mode: string }) {
               y1={from.y}
               x2={to.x}
               y2={to.y}
-              stroke={i === 0 ? AXIS_COLOURS[axis] : "#d5d8dc"}
+              stroke={i === 0 ? "#000" : "#d5d8dc"}
               strokeWidth={i === 0 ? 1.3 : 0.8}
             />,
           ];
@@ -60,7 +62,7 @@ function CubeAxes({ view, mode }: { view: FeatureProjection; mode: string }) {
       )}
       {[0, 1, 2].map((axis) => {
         const p = corners[1 << axis];
-        const label = `${mode === "pca" ? "PC" : "A"}${axis + 1}`;
+        const label = `${mode === "pca" ? "PC" : "A"}${view.axes[axis] + 1}`;
         if (p.x < 0 || p.x > view.width || p.y < 0 || p.y > view.height) {
           return null;
         }
@@ -69,7 +71,7 @@ function CubeAxes({ view, mode }: { view: FeatureProjection; mode: string }) {
             key={axis}
             x={Math.max(4, Math.min(view.width - 24, p.x + 4))}
             y={Math.max(12, Math.min(view.height - 4, p.y - 4))}
-            fill={AXIS_COLOURS[axis]}
+            fill="#000"
             fontSize="10"
             fontFamily="Arial"
             data-axis={label}
@@ -82,7 +84,7 @@ function CubeAxes({ view, mode }: { view: FeatureProjection; mode: string }) {
   );
 }
 
-/** One orthographic view of axes 1–3; all cuts pass through its full depth. */
+/** One orthographic view of three features; cuts pass through its full depth. */
 export function Cluster3D({
   data,
   coordinates,
@@ -90,9 +92,13 @@ export function Cluster3D({
   selected,
   range,
   tool,
-  onTool,
   onPolygon,
   onPick,
+  camera,
+  onCamera: setCamera,
+  omitted,
+  onOmitted,
+  onRestoreProjection,
 }: {
   data: ViewData;
   coordinates: FeatureCoordinates;
@@ -100,9 +106,13 @@ export function Cluster3D({
   selected: number;
   range: number[];
   tool: string;
-  onTool: (tool: string) => void;
   onPolygon: (polygon: number[], ax: number, ay: number, projection?: FeatureProjection) => void;
   onPick: (group: number, source: boolean, toggle: boolean) => void;
+  camera: ClusterCamera;
+  onCamera: Dispatch<SetStateAction<ClusterCamera>>;
+  omitted: number;
+  onOmitted: (axis: number) => void;
+  onRestoreProjection: (saved: SavedClusterProjection) => void;
 }) {
   const wrapper = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -110,19 +120,36 @@ export function Cluster3D({
   const pointer = useRef<number[] | null>(null);
   const gesture = useRef<Gesture | null>(null);
   const [stroke, setStroke] = useState<number[][]>([]);
-  const [camera, setCamera] = useState(DEFAULT_CLUSTER_CAMERA);
   const [size, setSize] = useState({ width: 260, height: 240 });
   const [version, setVersion] = useState(0);
   const [error, setError] = useState("");
-  const view = useMemo(() => clusterProjection(camera, size.width, size.height), [camera, size]);
+  const [projectionDialog, setProjectionDialog] = useState<"copy" | "paste" | null>(null);
+  const [projectionText, setProjectionText] = useState("");
+  const [projectionStatus, setProjectionStatus] = useState("");
+  const contextLost = useRef(false);
+  const view = useMemo(
+    () => clusterProjection(camera, size.width, size.height, omitted),
+    [camera, size, omitted],
+  );
   const renderMode = settings.renderMode;
+  useEffect(() => {
+    if (!projectionStatus || projectionDialog) {
+      return;
+    }
+    const timer = setTimeout(() => setProjectionStatus(""), 2400);
+    return () => clearTimeout(timer);
+  }, [projectionStatus, projectionDialog]);
 
   useEffect(() => {
     const c = canvas.current!;
     const plot = wrapper.current!;
-    const restore = () => setVersion((v) => v + 1);
+    const restore = () => {
+      contextLost.current = false;
+      setVersion((v) => v + 1);
+    };
     const lost = (event: Event) => {
       event.preventDefault();
+      contextLost.current = true;
       gpu.current = null;
     };
     c.addEventListener("webglcontextlost", lost);
@@ -144,7 +171,7 @@ export function Cluster3D({
 
   useEffect(() => {
     try {
-      if (canvas.current!.getContext("webgl2")?.isContextLost()) {
+      if (contextLost.current) {
         return;
       }
       gpu.current ??= new ClusterGPU(canvas.current!);
@@ -176,7 +203,7 @@ export function Cluster3D({
     };
     root.addEventListener("wheel", zoom, { passive: false });
     return () => root.removeEventListener("wheel", zoom);
-  }, [view.width, view.height]);
+  }, [view.width, view.height, setCamera]);
 
   useEffect(() => {
     const pick = (event: KeyboardEvent) => {
@@ -191,7 +218,6 @@ export function Cluster3D({
         event.stopImmediatePropagation();
         gesture.current = null;
         setStroke([]);
-        onTool("orbit");
         return;
       }
       const key = event.key.toLowerCase();
@@ -217,7 +243,7 @@ export function Cluster3D({
     };
     window.addEventListener("keydown", pick, true);
     return () => window.removeEventListener("keydown", pick, true);
-  }, [data, coordinates, view, selected, range, tool, onPick, onTool]);
+  }, [data, coordinates, view, selected, range, tool, onPick]);
 
   const point = (event: React.PointerEvent) => {
     const box = event.currentTarget.getBoundingClientRect();
@@ -321,6 +347,47 @@ export function Cluster3D({
     gesture.current = null;
     setStroke([]);
   };
+  const prefix = coordinates.mode === "pca" ? "PC" : "A";
+  const projectionCode = () =>
+    encodeClusterProjection({
+      camera,
+      omitted,
+      mode: coordinates.mode,
+      samples: settings.pcaSamples,
+    });
+  const restoreProjection = (text: string) => {
+    try {
+      const saved = decodeClusterProjection(text);
+      cancel();
+      onRestoreProjection(saved);
+      setProjectionDialog(null);
+      setProjectionStatus("Projection restored.");
+    } catch (error) {
+      setProjectionStatus((error as Error).message);
+    }
+  };
+  const copyProjection = async () => {
+    const text = projectionCode();
+    try {
+      await navigator.clipboard.writeText(text);
+      setProjectionStatus("Projection copied.");
+    } catch {
+      setProjectionText(text);
+      setProjectionDialog("copy");
+      setProjectionStatus("Select and copy this projection code.");
+    }
+  };
+  const pasteProjection = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      decodeClusterProjection(text);
+      restoreProjection(text);
+    } catch {
+      setProjectionText("");
+      setProjectionDialog("paste");
+      setProjectionStatus("Paste a projection code, then restore it.");
+    }
+  };
 
   return (
     <div className="cluster-3d-container">
@@ -335,6 +402,8 @@ export function Cluster3D({
         data-colour-mode={renderMode}
         data-feature-key={coordinates.key}
         data-projection={view.matrix.join(",")}
+        data-axes={view.axes.join(",")}
+        data-omitted={omitted + 1}
         onPointerDown={start}
         onPointerMove={move}
         onPointerUp={finish}
@@ -347,16 +416,50 @@ export function Cluster3D({
       >
         <canvas ref={canvas} aria-label="Three-dimensional spike feature projection" />
         <CubeAxes view={view} mode={coordinates.mode} />
-        <button
-          className="cluster-3d-reset"
-          type="button"
-          aria-label="Reset 3D view"
-          title="Reset rotation, pan and zoom"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => setCamera(DEFAULT_CLUSTER_CAMERA)}
-        >
-          <RotateCcw size={14} />
-        </button>
+        <div className="cluster-3d-controls" onPointerDown={(event) => event.stopPropagation()}>
+          <button
+            className="cluster-3d-reset"
+            type="button"
+            aria-label="Reset 3D view"
+            title="Reset rotation, pan and zoom"
+            onClick={() => setCamera(DEFAULT_CLUSTER_CAMERA)}
+          >
+            <RotateCcw size={14} />
+          </button>
+          <button
+            type="button"
+            aria-label="Cycle omitted feature"
+            title={`Omitting ${prefix}${omitted + 1}; click to omit ${prefix}${((omitted + 3) % 4) + 1}`}
+            onClick={() => {
+              cancel();
+              onOmitted((omitted + 3) % 4);
+            }}
+          >
+            −{prefix}
+            {omitted + 1}
+          </button>
+          <button
+            type="button"
+            aria-label="Copy projection"
+            title="Copy this projection as a compact text code"
+            onClick={copyProjection}
+          >
+            <Copy size={14} />
+          </button>
+          <button
+            type="button"
+            aria-label="Paste projection"
+            title="Restore a projection code from the clipboard"
+            onClick={pasteProjection}
+          >
+            <ClipboardPaste size={14} />
+          </button>
+        </div>
+        {projectionStatus && !projectionDialog && (
+          <div className="cluster-3d-status" role="status">
+            {projectionStatus}
+          </div>
+        )}
         {stroke.length > 0 && (
           <svg className="lasso-overlay">
             <polyline
@@ -373,10 +476,45 @@ export function Cluster3D({
         )}
         {error && <div className="plot-error">{error}</div>}
       </div>
+      {projectionDialog && (
+        <div
+          className="cluster-projection-dialog"
+          role="dialog"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              setProjectionDialog(null);
+            }
+          }}
+          aria-label={
+            projectionDialog === "copy" ? "Copy projection code" : "Paste projection code"
+          }
+        >
+          <p role="status">{projectionStatus}</p>
+          <textarea
+            aria-label="Projection code"
+            autoFocus
+            value={projectionText}
+            readOnly={projectionDialog === "copy"}
+            onChange={(event) => setProjectionText(event.target.value)}
+            onFocus={(event) => event.target.select()}
+          />
+          <div>
+            {projectionDialog === "paste" && (
+              <button type="button" onClick={() => restoreProjection(projectionText)}>
+                Restore projection
+              </button>
+            )}
+            <button type="button" onClick={() => setProjectionDialog(null)}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
       <div className="cluster-3d-hint">
         {tool === "orbit"
           ? "Drag to rotate · Shift-drag to pan · Scroll to zoom"
-          : "Shift-drag to pan · Right-drag to rotate · Esc to navigate"}
+          : "Shift-drag to pan · Right-drag to rotate · L cycles tools"}
         <span>
           {tool === "brush" || tool === "lasso"
             ? "Cuts include all depths."

@@ -63,10 +63,11 @@ export interface FeatureCoordinates {
   mode: FeatureMode;
   values: Uint8Array | Float32Array;
 }
-/** Orthographic camera: three affine rows mapping normalised axes 1–3 to
+/** Orthographic camera: three affine rows mapping the chosen feature axes to
  * normalised viewport x/y and depth. Shared by rendering, picking and cuts. */
 export interface FeatureProjection {
   matrix: number[];
+  axes: number[];
   width: number;
   height: number;
 }

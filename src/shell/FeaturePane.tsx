@@ -1,5 +1,6 @@
 import { Lasso, Paintbrush, Palette, Rotate3D } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState, type SetStateAction } from "react";
+import { DEFAULT_CLUSTER_CAMERA, type ClusterCamera } from "../plots/cluster-camera";
 import { Clusters } from "../plots/FeatureView";
 import { Cluster3D } from "../plots/Cluster3D";
 import { GroupSelector } from "./GroupSelector";
@@ -95,6 +96,7 @@ export function FeaturePane({
   featureError,
   threeD,
   onThreeD,
+  onPcaSamples,
 }: {
   data: ViewData | null;
   settings: Settings;
@@ -114,9 +116,26 @@ export function FeaturePane({
   featureError?: string;
   threeD: boolean;
   onThreeD: (enabled: boolean) => void;
+  onPcaSamples: (samples: number) => void;
 }) {
   const { sources, dest, tool, onSource, onDest, onNewGroup, onTool } = painting;
   const [fixedColours, setFixedColours] = usePreference("cluster-fixed-colours", false);
+  const [savedOmission, setOmitted] = usePreference("cluster-3d-omitted", 3);
+  const omitted =
+    Number.isInteger(savedOmission) && savedOmission >= 0 && savedOmission < 4 ? savedOmission : 3;
+  const cameraKey = (space: FeatureMode, samples: number) =>
+    `${data?.key}|${space}|${space === "pca" ? samples : ""}`;
+  const key = cameraKey(mode, settings.pcaSamples);
+  const [cameraState, setCameraState] = useState({ key: "", camera: DEFAULT_CLUSTER_CAMERA });
+  const camera = cameraState.key === key ? cameraState.camera : DEFAULT_CLUSTER_CAMERA;
+  const onCamera = (change: SetStateAction<ClusterCamera>) =>
+    setCameraState((state) => ({
+      key,
+      camera:
+        typeof change === "function"
+          ? change(state.key === key ? state.camera : DEFAULT_CLUSTER_CAMERA)
+          : change,
+    }));
   const clusterSettings = useMemo(
     () => (fixedColours ? { ...settings, renderMode: "fixed" as const } : settings),
     [settings, fixedColours],
@@ -158,7 +177,7 @@ export function FeaturePane({
           <ToggleButton
             pressed={threeD}
             aria-label="3D clusters"
-            title="3D cluster view: first three channels or principal components"
+            title="3D cluster view: three amplitude channels or principal components"
             disabled={!canPaint || splitting}
             onClick={() => onThreeD(!threeD)}
           >
@@ -191,7 +210,7 @@ export function FeaturePane({
               <ToggleButton
                 pressed={tool === "orbit"}
                 aria-label="Rotate 3D view"
-                title="Navigate: drag to rotate, Shift-drag to pan, scroll to zoom · Esc"
+                title="Navigate: drag to rotate, Shift-drag to pan, scroll to zoom · L cycles tools"
                 onClick={() => onTool("orbit")}
               >
                 <Rotate3D size={15} />
@@ -200,7 +219,11 @@ export function FeaturePane({
             <ToggleButton
               pressed={tool === "brush"}
               aria-label="Paint source spikes"
-              title="Paint source spikes · L toggles brush/lasso"
+              title={
+                threeD
+                  ? "Paint source spikes · L cycles navigation/paint/lasso"
+                  : "Paint source spikes · L toggles brush/lasso"
+              }
               onClick={() => onTool("brush")}
             >
               <Paintbrush size={14} />
@@ -208,7 +231,11 @@ export function FeaturePane({
             <ToggleButton
               pressed={tool === "lasso"}
               aria-label="Lasso cut"
-              title="Lasso source spikes · L toggles brush/lasso"
+              title={
+                threeD
+                  ? "Lasso source spikes · L cycles navigation/paint/lasso"
+                  : "Lasso source spikes · L toggles brush/lasso"
+              }
               onClick={() => onTool("lasso")}
             >
               <Lasso size={14} />
@@ -225,11 +252,21 @@ export function FeaturePane({
               key={coordinates.key}
               data={data}
               coordinates={coordinates}
+              camera={camera}
+              onCamera={onCamera}
+              omitted={omitted}
+              onOmitted={setOmitted}
+              onRestoreProjection={(saved) => {
+                setCameraState({ key: cameraKey(saved.mode, saved.samples), camera: saved.camera });
+                setOmitted(saved.omitted);
+                onPcaSamples(saved.samples);
+                onMode(saved.mode);
+                onTool("orbit");
+              }}
               settings={clusterSettings}
               selected={cell}
               range={FULL_RANGE}
               tool={canPaint && !splitting ? tool : "disabled"}
-              onTool={onTool}
               onPolygon={onPolygon}
               onPick={(group, source, toggle) => (source ? onSource(group, toggle) : onDest(group))}
             />

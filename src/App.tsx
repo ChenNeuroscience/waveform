@@ -46,6 +46,7 @@ import { useCopies } from "./app/copies";
 import { useFeatureSpace } from "./app/features";
 import { useSplit } from "./app/split";
 import { CopyWindow } from "./shell/CopyWindow";
+import { GrabOutline } from "./shell/GrabOutline";
 import { downloadBlob, organiseFiles } from "./files";
 function readSettings(): Settings {
   try {
@@ -697,9 +698,19 @@ export default function App() {
         setPanels((ps) => ps.filter((p) => p !== pane));
       }
       setPane(null);
-      setTool(feature3D ? "orbit" : "brush");
+      if (!feature3D) {
+        setTool("brush");
+      }
     },
-    togglePane: (name) => setPane((p) => (p === name ? null : name)),
+    togglePane: (name) => {
+      if (panels.includes(name)) {
+        setPanels((open) => open.filter((panel) => panel !== name));
+        setPane((focused) => (focused === name ? null : focused));
+      } else {
+        setPanels((open) => [...open, name]);
+        setPane(name);
+      }
+    },
     setTool,
     update,
     selectDest: (g) => selectDest(g),
@@ -841,6 +852,7 @@ export default function App() {
       onDragLeave={(e) => !e.relatedTarget && setDrag(false)}
       onDrop={drop}
     >
+      <GrabOutline active={grabMode} />
       <FileInputs fileInput={fileInput} folderInput={folderInput} onImport={importFiles} />
       {trials.length > 0 ? (
         <>
@@ -913,6 +925,7 @@ export default function App() {
                   setFeature3D(enabled);
                   setTool(enabled ? "orbit" : "brush");
                 }}
+                onPcaSamples={(samples) => update("pcaSamples", samples)}
                 mode={featureMode}
                 onMode={setFeatureMode}
                 coordinates={featureSpace.coordinates}

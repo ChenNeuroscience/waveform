@@ -11,7 +11,7 @@ layout(location=0) in vec4 amplitudes;
 layout(location=1) in uint ticks;
 layout(location=2) in uint cell;
 uniform int ax;uniform int ay;uniform float size;uniform int selected;uniform float opacity;uniform vec2 range;uniform float timeScale;
-uniform bool threeD;uniform vec4 viewX;uniform vec4 viewY;uniform vec4 viewZ;
+uniform bool threeD;uniform vec4 viewX;uniform vec4 viewY;uniform vec4 viewZ;uniform ivec3 featureAxes;
 out vec4 shade;out float time;
 float axis(int a){return a==4?time:amplitudes[a];}
 const vec3 groupColors[31]=vec3[31](${groupPalette.map((c) => `vec3(${c.map((v) => `${v}.`).join(",")})`).join(",")});
@@ -19,7 +19,7 @@ vec3 palette(float c){int i=int(c);return i<31?groupColors[i]/255.:vec3(0.);}
 void main(){
  time=float(ticks)*timeScale;
  float x=axis(ax),y=axis(ay);gl_Position=vec4(x*1.86-.93,y*1.86-.93,int(cell)==selected?-.5:0.,1.);gl_PointSize=size;
- if(threeD){vec4 p=vec4(amplitudes.xyz,1.);gl_Position=vec4(dot(viewX,p)*2.-1.,dot(viewY,p)*2.-1.,dot(viewZ,p)*1.6-.8-(int(cell)==selected?.000016:0.),1.);}
+ if(threeD){vec4 p=vec4(amplitudes[featureAxes.x],amplitudes[featureAxes.y],amplitudes[featureAxes.z],1.);gl_Position=vec4(dot(viewX,p)*2.-1.,dot(viewY,p)*2.-1.,dot(viewZ,p)*1.6-.8-(int(cell)==selected?.000016:0.),1.);}
  bool hide=time<range.x||time>range.y;
  shade=vec4(palette(float(cell)),hide?0.:opacity);
 }`;
@@ -220,6 +220,7 @@ export class ClusterGPU {
       gl.uniform1f(u("timeScale"), cached.timeScale);
       gl.uniform1i(u("threeD"), view ? 1 : 0);
       if (view) {
+        gl.uniform3iv(u("featureAxes"), view.axes);
         gl.uniform4fv(u("viewX"), view.matrix.slice(0, 4));
         gl.uniform4fv(u("viewY"), view.matrix.slice(4, 8));
         gl.uniform4fv(u("viewZ"), view.matrix.slice(8, 12));
