@@ -47,8 +47,8 @@ export function FloatingWindow({
     const observer = new ResizeObserver(() => {
       const b = root.current!.getBoundingClientRect();
       setGeometry((g) =>
-        Math.abs(g.width - b.width) > 0.5 || Math.abs(g.height - b.height) > 0.5
-          ? fitWindowLayout({ ...g, width: b.width, height: b.height }, innerWidth, innerHeight)
+        Math.abs(g.width - b.width) > 0.5 || (!autoHeight && Math.abs(g.height - b.height) > 0.5)
+          ? fitWindowLayout({ ...g, width: b.width, height: autoHeight ? g.height : b.height }, innerWidth, innerHeight)
           : g,
       );
     });
@@ -58,7 +58,7 @@ export function FloatingWindow({
       observer.disconnect();
       removeEventListener("resize", clamp);
     };
-  }, [setGeometry]);
+  }, [autoHeight, setGeometry]);
   useEffect(() => {
     if (!autoHeight || !content.current) {
       return;
