@@ -1,6 +1,13 @@
+import {
+  settingsSection,
+  projectionAction,
+  destination,
+  source,
+  ready,
+  exportCut,
+} from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { destination, source, ready, exportCut } from "./controls";
 import { pcaRecording } from "../tests/pca-fixture";
 import { decodeCut } from "../tests/wasm";
 
@@ -142,7 +149,7 @@ test("3D is optional, navigates without edits, preserves colour modes and restor
   await page.mouse.wheel(0, -160);
   await expect(root).not.toHaveAttribute("data-projection", panned!);
   expect(await page.evaluate(() => (window as any).clusterEdits)).toHaveLength(0);
-  await page.getByRole("button", { name: "Reset 3D view", exact: true }).click();
+  await projectionAction(page, "Reset 3D view");
   await expect(root).toHaveAttribute("data-projection", initial!);
   await page.keyboard.press("p");
   await expect(root).toHaveAttribute("data-colour-mode", "drift");
@@ -297,10 +304,19 @@ test("omission cycles, readable projection codes restore across feature spaces a
         nodes.every((node) => getComputedStyle(node).stroke === "rgb(0, 0, 0)"),
       ),
   ).toBe(true);
-  const reset = (await page
-    .getByRole("button", { name: "Reset 3D view", exact: true })
-    .boundingBox())!;
-  expect((await cycle.boundingBox())!.y).toBeGreaterThan(reset.y + reset.height);
+  const trigger = page.getByRole("button", { name: "3D settings", exact: true });
+  expect((await cycle.boundingBox())!.y).toBeGreaterThan((await trigger.boundingBox())!.y);
+  await trigger.click();
+  const menu = page.getByRole("menu", { name: "3D settings actions", exact: true });
+  await expect(menu.getByRole("menuitem")).toHaveText([
+    "Reset 3D view",
+    "Copy projection",
+    "Restore projection",
+  ]);
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
+  await page.screenshot({ path: "test-results/cluster-3d-settings-menu.png" });
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
   await page.keyboard.press("l");
   await expect(
     page.getByRole("button", { name: "Paint source spikes", exact: true }),
@@ -322,7 +338,7 @@ test("omission cycles, readable projection codes restore across feature spaces a
   await page.mouse.move(box.x + box.width / 2 + 33, box.y + box.height / 2 - 17, { steps: 4 });
   await page.mouse.up();
   const ampMatrix = await root.getAttribute("data-projection");
-  await page.getByRole("button", { name: "Copy projection", exact: true }).click();
+  await projectionAction(page, "Copy projection");
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toContain("waveform3d:v1:A1-A2-A4:");
@@ -333,13 +349,14 @@ test("omission cycles, readable projection codes restore across feature spaces a
   await page.getByRole("button", { name: "Principal components", exact: true }).click();
   await expect(root).toHaveAttribute("data-features", "pca");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settingsSection(page, "Cluster plots");
   await page.getByRole("slider", { name: "PCA fit sample size", exact: true }).fill("1000");
   await expect(root).toHaveAttribute("data-feature-key", /\|pca:1000$/);
   await page
     .getByRole("dialog", { name: "Settings", exact: true })
     .getByRole("button", { name: "Close panel", exact: true })
     .click();
-  await page.getByRole("button", { name: "Paste projection", exact: true }).click();
+  await projectionAction(page, "Restore projection");
   await expect(root).toHaveAttribute("data-features", "amplitudes");
   await expect(toast).toHaveText("Projection restored.");
   await expect(toast).toBeHidden({ timeout: 6500 });
@@ -350,7 +367,7 @@ test("omission cycles, readable projection codes restore across feature spaces a
   await cycle.click();
   await expect(root).toHaveAttribute("data-axes", "0,2,3");
   const pcaMatrix = await root.getAttribute("data-projection");
-  await page.getByRole("button", { name: "Copy projection", exact: true }).click();
+  await projectionAction(page, "Copy projection");
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toContain("waveform3d:v1:PC1-PC3-PC4:");
@@ -359,17 +376,32 @@ test("omission cycles, readable projection codes restore across feature spaces a
   await expect(root).toHaveAttribute("data-features", "amplitudes");
   await cycle.click();
   await page.evaluate((code) => navigator.clipboard.writeText(`Notes: \`${code}\`.`), pcaCode);
-  await page.getByRole("button", { name: "Paste projection", exact: true }).click();
+  await projectionAction(page, "Restore projection");
   await expect(root).toHaveAttribute("data-features", "pca");
   await expect(root).toHaveAttribute("data-axes", "0,2,3");
   await expect(root).toHaveAttribute("data-projection", pcaMatrix!);
   await page.evaluate(() => navigator.clipboard.writeText("not a projection"));
-  await page.getByRole("button", { name: "Paste projection", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Paste projection code", exact: true });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("textbox", { name: "Projection code", exact: true }).fill(amplitudeCode);
-  await dialog.getByRole("button", { name: "Restore projection", exact: true }).click();
-  await expect(dialog).toHaveCount(0);
+  await projectionAction(page, "Restore projection");
+  await expect(toast).toHaveAttribute("role", "alert");
+  await expect(toast).toHaveText("The clipboard does not contain a valid Waveform projection.");
+  await expect(page.getByRole("textbox", { name: "Projection code", exact: true })).toHaveCount(0);
+  await expect(root).toHaveAttribute("data-projection", pcaMatrix!);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, "readText", {
+      configurable: true,
+      value: () => Promise.reject(new DOMException("Denied", "NotAllowedError")),
+    });
+  });
+  await projectionAction(page, "Restore projection");
+  await expect(toast).toContainText("Could not read the clipboard");
+  await expect(root).toHaveAttribute("data-projection", pcaMatrix!);
+  await page.evaluate(() => {
+    delete (navigator.clipboard as any).readText;
+  });
+  await page.evaluate((code) => navigator.clipboard.writeText(code), amplitudeCode);
+  await projectionAction(page, "Restore projection");
+  await expect(toast).toHaveAttribute("role", "status");
+  await expect(toast).toHaveText("Projection restored.");
   await expect(root).toHaveAttribute("data-features", "amplitudes");
   await expect(root).toHaveAttribute("data-projection", ampMatrix!);
   await root.screenshot({ path: "test-results/cluster-3d-projection-controls.png" });

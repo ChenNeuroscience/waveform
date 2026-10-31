@@ -1,4 +1,4 @@
-import { Copy, ClipboardPaste, RotateCcw } from "lucide-react";
+import { Copy, ClipboardPaste, RotateCcw, Settings as SettingsIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -9,6 +9,7 @@ import {
   type SetStateAction,
 } from "react";
 import type { FeatureCoordinates, FeatureProjection, Settings, ViewData } from "../types";
+import { ActionMenu } from "../shell/ActionMenu";
 import { ClusterGPU } from "./cluster-gpu";
 import {
   clusterProjection,
@@ -122,7 +123,7 @@ export function Cluster3D({
   omitted: number;
   onOmitted: (axis: number) => void;
   onRestoreProjection: (saved: SavedClusterProjection) => void;
-  onNotice: (message: string) => void;
+  onNotice: (message: string, isError?: boolean) => void;
 }) {
   const wrapper = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -133,9 +134,6 @@ export function Cluster3D({
   const [size, setSize] = useState({ width: 260, height: 240 });
   const [version, setVersion] = useState(0);
   const [error, setError] = useState("");
-  const [showPasteDialog, setShowPasteDialog] = useState(false);
-  const [projectionText, setProjectionText] = useState("");
-  const [projectionStatus, setProjectionStatus] = useState("");
   const contextLost = useRef(false);
   const view = useMemo(
     () => clusterProjection(camera, size.width, size.height, omitted),
@@ -147,13 +145,6 @@ export function Cluster3D({
     setStroke([]);
     onOmitted((omitted + 3) % 4);
   }, [omitted, onOmitted]);
-  useEffect(() => {
-    if (!projectionStatus || showPasteDialog) {
-      return;
-    }
-    const timer = setTimeout(() => setProjectionStatus(""), 2400);
-    return () => clearTimeout(timer);
-  }, [projectionStatus, showPasteDialog]);
 
   useEffect(() => {
     const c = canvas.current!;
@@ -225,7 +216,14 @@ export function Cluster3D({
       const typing = (event.target as HTMLElement).matches(
         "input,select,textarea,[contenteditable=true]",
       );
-      if (typing || event.ctrlKey || event.metaKey || event.altKey || event.repeat) {
+      if (
+        typing ||
+        (event.target as HTMLElement).closest('[role="menu"]') ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.repeat
+      ) {
         return;
       }
       if (event.key === "Escape" && gesture.current?.kind === "cut") {
@@ -375,18 +373,6 @@ export function Cluster3D({
       omitted,
       mode: coordinates.mode,
     });
-  const restoreProjection = (text: string) => {
-    try {
-      const saved = decodeClusterProjection(text);
-      cancel();
-      onRestoreProjection(saved);
-      setShowPasteDialog(false);
-      setProjectionStatus("");
-      onNotice("Projection restored.");
-    } catch (error) {
-      setProjectionStatus((error as Error).message);
-    }
-  };
   const copyProjection = async () => {
     try {
       await navigator.clipboard.write([
@@ -394,21 +380,26 @@ export function Cluster3D({
           "text/plain": new Blob([projectionCode()], { type: "text/plain" }),
         }),
       ]);
-      setProjectionStatus("");
       onNotice("Projection copied.");
     } catch {
-      setProjectionStatus("Projection could not be copied.");
+      onNotice("Projection could not be copied.", true);
     }
   };
   const pasteProjection = async () => {
+    let text: string;
     try {
-      const text = await navigator.clipboard.readText();
-      decodeClusterProjection(text);
-      restoreProjection(text);
+      text = await navigator.clipboard.readText();
     } catch {
-      setProjectionText("");
-      setShowPasteDialog(true);
-      setProjectionStatus("Paste a projection code, then restore it.");
+      onNotice("Could not read the clipboard to restore the projection.", true);
+      return;
+    }
+    try {
+      const saved = decodeClusterProjection(text);
+      cancel();
+      onRestoreProjection(saved);
+      onNotice("Projection restored.");
+    } catch {
+      onNotice("The clipboard does not contain a valid Waveform projection.", true);
     }
   };
 
@@ -440,19 +431,28 @@ export function Cluster3D({
         <canvas ref={canvas} aria-label="Three-dimensional spike feature projection" />
         <CubeAxes view={view} mode={coordinates.mode} />
         <div className="cluster-3d-controls" onPointerDown={(event) => event.stopPropagation()}>
-          <button
-            className="cluster-3d-reset"
-            type="button"
-            aria-label="Reset 3D view"
-            title="Reset camera and show features 1–3"
-            onClick={() => {
-              cancel();
-              setCamera(DEFAULT_CLUSTER_CAMERA);
-              onOmitted(3);
-            }}
-          >
-            <RotateCcw size={14} />
-          </button>
+          <ActionMenu
+            label="3D settings"
+            icon={<SettingsIcon size={17} />}
+            actions={[
+              {
+                label: "Reset 3D view",
+                title: "Reset camera and show features 1–3",
+                icon: <RotateCcw size={14} />,
+                run: () => {
+                  cancel();
+                  setCamera(DEFAULT_CLUSTER_CAMERA);
+                  onOmitted(3);
+                },
+              },
+              { label: "Copy projection", icon: <Copy size={14} />, run: copyProjection },
+              {
+                label: "Restore projection",
+                icon: <ClipboardPaste size={14} />,
+                run: pasteProjection,
+              },
+            ]}
+          />
           <button
             className="cluster-3d-feature-cycle"
             type="button"
@@ -496,28 +496,7 @@ export function Cluster3D({
               ))}
             </svg>
           </button>
-          <button
-            type="button"
-            aria-label="Copy projection"
-            title="Copy this projection as a compact text code"
-            onClick={copyProjection}
-          >
-            <Copy size={14} />
-          </button>
-          <button
-            type="button"
-            aria-label="Paste projection"
-            title="Restore a projection code from the clipboard"
-            onClick={pasteProjection}
-          >
-            <ClipboardPaste size={14} />
-          </button>
         </div>
-        {projectionStatus && !showPasteDialog && (
-          <div className="cluster-3d-status" role="status">
-            {projectionStatus}
-          </div>
-        )}
         {stroke.length > 0 && (
           <svg className="lasso-overlay">
             <polyline
@@ -534,36 +513,6 @@ export function Cluster3D({
         )}
         {error && <div className="plot-error">{error}</div>}
       </div>
-      {showPasteDialog && (
-        <div
-          className="cluster-projection-dialog"
-          role="dialog"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.stopPropagation();
-              setShowPasteDialog(false);
-            }
-          }}
-          aria-label="Paste projection code"
-        >
-          <p role="status">{projectionStatus}</p>
-          <textarea
-            aria-label="Projection code"
-            autoFocus
-            value={projectionText}
-            onChange={(event) => setProjectionText(event.target.value)}
-            onFocus={(event) => event.target.select()}
-          />
-          <div>
-            <button type="button" onClick={() => restoreProjection(projectionText)}>
-              Restore projection
-            </button>
-            <button type="button" onClick={() => setShowPasteDialog(false)}>
-              Close
-            </button>
-          </div>
-        </div>
-      )}
       <div className="cluster-3d-hint">
         {tool === "orbit"
           ? "Drag to rotate · Shift-drag to pan · Scroll to zoom"

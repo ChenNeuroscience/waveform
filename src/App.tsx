@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Toolbar } from "./shell/Toolbar";
 import { RenderingToggles } from "./shell/RenderingToggles";
 import { FilesPane } from "./shell/FilesPane";
@@ -207,13 +207,19 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNoticeText] = useState("");
+  const [noticeIsError, setNoticeIsError] = useState(false);
+  const setNotice = useCallback((message: string) => {
+    setNoticeText(message);
+    setNoticeIsError(false);
+  }, []);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const showTimedNotice = (message: string) => {
+  const showTimedNotice = (message: string, isError = false) => {
     clearTimeout(noticeTimer.current);
-    setNotice(message);
+    setNoticeText(message);
+    setNoticeIsError(isError);
     noticeTimer.current = setTimeout(() => {
-      setNotice((current) => (current === message ? "" : current));
+      setNoticeText((current) => (current === message ? "" : current));
     }, 5000);
   };
   useEffect(() => () => clearTimeout(noticeTimer.current), []);
@@ -819,6 +825,8 @@ export default function App() {
     settings,
     update,
     resetSettings: () => setSettings(defaultSettings),
+    restoreSettings: setSettings,
+    notify: showTimedNotice,
     ready,
     operation: (type) => operation(type),
     history: data,
@@ -1019,7 +1027,7 @@ export default function App() {
         />
       )}
       <Notice
-        error={error}
+        error={error || (noticeIsError ? notice : "")}
         notice={notice}
         onDismiss={() => (error ? setError("") : setNotice(""))}
       />
@@ -1041,6 +1049,7 @@ export default function App() {
             x={panel.x}
             y={panel.y}
             height={panel.height}
+            autoHeight={name === "settings"}
             onFocus={() => setPane(name)}
             onClose={() => closePanel(name)}
           >

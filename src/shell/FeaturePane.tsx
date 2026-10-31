@@ -116,7 +116,7 @@ export function FeaturePane({
   featureError?: string;
   threeD: boolean;
   onThreeD: (enabled: boolean) => void;
-  onNotice: (message: string) => void;
+  onNotice: (message: string, isError?: boolean) => void;
 }) {
   const { sources, dest, tool, onSource, onDest, onNewGroup, onTool } = painting;
   const [fixedColours, setFixedColours] = usePreference("cluster-fixed-colours", false);
