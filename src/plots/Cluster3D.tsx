@@ -1,5 +1,13 @@
 import { Copy, ClipboardPaste, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { FeatureCoordinates, FeatureProjection, Settings, ViewData } from "../types";
 import { ClusterGPU } from "./cluster-gpu";
 import {
@@ -99,6 +107,7 @@ export function Cluster3D({
   omitted,
   onOmitted,
   onRestoreProjection,
+  onNotice,
 }: {
   data: ViewData;
   coordinates: FeatureCoordinates;
@@ -113,6 +122,7 @@ export function Cluster3D({
   omitted: number;
   onOmitted: (axis: number) => void;
   onRestoreProjection: (saved: SavedClusterProjection) => void;
+  onNotice: (message: string) => void;
 }) {
   const wrapper = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -123,7 +133,7 @@ export function Cluster3D({
   const [size, setSize] = useState({ width: 260, height: 240 });
   const [version, setVersion] = useState(0);
   const [error, setError] = useState("");
-  const [projectionDialog, setProjectionDialog] = useState<"copy" | "paste" | null>(null);
+  const [showPasteDialog, setShowPasteDialog] = useState(false);
   const [projectionText, setProjectionText] = useState("");
   const [projectionStatus, setProjectionStatus] = useState("");
   const contextLost = useRef(false);
@@ -132,13 +142,18 @@ export function Cluster3D({
     [camera, size, omitted],
   );
   const renderMode = settings.renderMode;
+  const cycleFeatures = useCallback(() => {
+    gesture.current = null;
+    setStroke([]);
+    onOmitted((omitted + 3) % 4);
+  }, [omitted, onOmitted]);
   useEffect(() => {
-    if (!projectionStatus || projectionDialog) {
+    if (!projectionStatus || showPasteDialog) {
       return;
     }
     const timer = setTimeout(() => setProjectionStatus(""), 2400);
     return () => clearTimeout(timer);
-  }, [projectionStatus, projectionDialog]);
+  }, [projectionStatus, showPasteDialog]);
 
   useEffect(() => {
     const c = canvas.current!;
@@ -221,6 +236,12 @@ export function Cluster3D({
         return;
       }
       const key = event.key.toLowerCase();
+      if (key === "g" && tool !== "disabled" && !gesture.current) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        cycleFeatures();
+        return;
+      }
       const p = pointer.current;
       if (!p || gesture.current || tool === "disabled" || !["e", "f"].includes(key)) {
         return;
@@ -243,7 +264,7 @@ export function Cluster3D({
     };
     window.addEventListener("keydown", pick, true);
     return () => window.removeEventListener("keydown", pick, true);
-  }, [data, coordinates, view, selected, range, tool, onPick]);
+  }, [data, coordinates, view, selected, range, tool, onPick, cycleFeatures]);
 
   const point = (event: React.PointerEvent) => {
     const box = event.currentTarget.getBoundingClientRect();
@@ -353,28 +374,30 @@ export function Cluster3D({
       camera,
       omitted,
       mode: coordinates.mode,
-      samples: settings.pcaSamples,
     });
   const restoreProjection = (text: string) => {
     try {
       const saved = decodeClusterProjection(text);
       cancel();
       onRestoreProjection(saved);
-      setProjectionDialog(null);
-      setProjectionStatus("Projection restored.");
+      setShowPasteDialog(false);
+      setProjectionStatus("");
+      onNotice("Projection restored.");
     } catch (error) {
       setProjectionStatus((error as Error).message);
     }
   };
   const copyProjection = async () => {
-    const text = projectionCode();
     try {
-      await navigator.clipboard.writeText(text);
-      setProjectionStatus("Projection copied.");
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([projectionCode()], { type: "text/plain" }),
+        }),
+      ]);
+      setProjectionStatus("");
+      onNotice("Projection copied.");
     } catch {
-      setProjectionText(text);
-      setProjectionDialog("copy");
-      setProjectionStatus("Select and copy this projection code.");
+      setProjectionStatus("Projection could not be copied.");
     }
   };
   const pasteProjection = async () => {
@@ -384,7 +407,7 @@ export function Cluster3D({
       restoreProjection(text);
     } catch {
       setProjectionText("");
-      setProjectionDialog("paste");
+      setShowPasteDialog(true);
       setProjectionStatus("Paste a projection code, then restore it.");
     }
   };
@@ -421,22 +444,57 @@ export function Cluster3D({
             className="cluster-3d-reset"
             type="button"
             aria-label="Reset 3D view"
-            title="Reset rotation, pan and zoom"
-            onClick={() => setCamera(DEFAULT_CLUSTER_CAMERA)}
+            title="Reset camera and show features 1–3"
+            onClick={() => {
+              cancel();
+              setCamera(DEFAULT_CLUSTER_CAMERA);
+              onOmitted(3);
+            }}
           >
             <RotateCcw size={14} />
           </button>
           <button
+            className="cluster-3d-feature-cycle"
             type="button"
             aria-label="Cycle omitted feature"
-            title={`Omitting ${prefix}${omitted + 1}; click to omit ${prefix}${((omitted + 3) % 4) + 1}`}
-            onClick={() => {
-              cancel();
-              onOmitted((omitted + 3) % 4);
-            }}
+            title={`Showing ${view.axes.map((axis) => `${prefix}${axis + 1}`).join(", ")}; cycle to omit ${prefix}${((omitted + 3) % 4) + 1} [G]`}
+            onClick={cycleFeatures}
           >
-            −{prefix}
-            {omitted + 1}
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+              {[0, 1, 2, 3].map((axis) => (
+                <g
+                  key={axis}
+                  data-feature={axis + 1}
+                  data-selected={axis !== omitted}
+                  transform={`translate(${(axis % 2) * 12},${Math.floor(axis / 2) * 12})`}
+                >
+                  <rect
+                    x="1"
+                    y="1"
+                    width="10"
+                    height="10"
+                    rx="1"
+                    fill={axis !== omitted ? "#dfe3e7" : "none"}
+                    stroke="currentColor"
+                    strokeWidth="0.6"
+                    strokeOpacity={axis !== omitted ? 0.35 : 0.2}
+                  />
+                  <text
+                    x="6"
+                    y="6"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontFamily="Arial"
+                    fontSize="9"
+                    fontWeight="500"
+                    fill="currentColor"
+                    opacity={axis !== omitted ? 0.9 : 0.5}
+                  >
+                    {axis + 1}
+                  </text>
+                </g>
+              ))}
+            </svg>
           </button>
           <button
             type="button"
@@ -455,7 +513,7 @@ export function Cluster3D({
             <ClipboardPaste size={14} />
           </button>
         </div>
-        {projectionStatus && !projectionDialog && (
+        {projectionStatus && !showPasteDialog && (
           <div className="cluster-3d-status" role="status">
             {projectionStatus}
           </div>
@@ -476,36 +534,31 @@ export function Cluster3D({
         )}
         {error && <div className="plot-error">{error}</div>}
       </div>
-      {projectionDialog && (
+      {showPasteDialog && (
         <div
           className="cluster-projection-dialog"
           role="dialog"
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.stopPropagation();
-              setProjectionDialog(null);
+              setShowPasteDialog(false);
             }
           }}
-          aria-label={
-            projectionDialog === "copy" ? "Copy projection code" : "Paste projection code"
-          }
+          aria-label="Paste projection code"
         >
           <p role="status">{projectionStatus}</p>
           <textarea
             aria-label="Projection code"
             autoFocus
             value={projectionText}
-            readOnly={projectionDialog === "copy"}
             onChange={(event) => setProjectionText(event.target.value)}
             onFocus={(event) => event.target.select()}
           />
           <div>
-            {projectionDialog === "paste" && (
-              <button type="button" onClick={() => restoreProjection(projectionText)}>
-                Restore projection
-              </button>
-            )}
-            <button type="button" onClick={() => setProjectionDialog(null)}>
+            <button type="button" onClick={() => restoreProjection(projectionText)}>
+              Restore projection
+            </button>
+            <button type="button" onClick={() => setShowPasteDialog(false)}>
               Close
             </button>
           </div>

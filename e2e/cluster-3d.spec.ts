@@ -278,7 +278,8 @@ test("omission cycles, readable projection codes restore across feature spaces a
     ["A1", "A2", "A3"],
   ];
   for (let i = 0; i < expected.length; i++) {
-    if (i) await cycle.click();
+    if (i === 2) await page.keyboard.press("g");
+    else if (i) await cycle.click();
     await expect(root).toHaveAttribute("data-omitted", String([4, 3, 2, 1, 4][i]));
     expect(await root.locator("text[data-axis]").allTextContents()).toEqual(expected[i]);
   }
@@ -322,8 +323,13 @@ test("omission cycles, readable projection codes restore across feature spaces a
   await page.mouse.up();
   const ampMatrix = await root.getAttribute("data-projection");
   await page.getByRole("button", { name: "Copy projection", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("waveform3d:v1:A1-A2-A4:");
   const amplitudeCode = await page.evaluate(() => navigator.clipboard.readText());
-  expect(amplitudeCode).toContain("waveform3d:v1:A1-A2-A4:5000:");
+  const toast = page.locator(".desktop-notice");
+  await expect(toast).toHaveText("Projection copied.");
+  await expect(toast).toBeHidden({ timeout: 6500 });
   await page.getByRole("button", { name: "Principal components", exact: true }).click();
   await expect(root).toHaveAttribute("data-features", "pca");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -335,16 +341,20 @@ test("omission cycles, readable projection codes restore across feature spaces a
     .click();
   await page.getByRole("button", { name: "Paste projection", exact: true }).click();
   await expect(root).toHaveAttribute("data-features", "amplitudes");
+  await expect(toast).toHaveText("Projection restored.");
+  await expect(toast).toBeHidden({ timeout: 6500 });
   await expect(root).toHaveAttribute("data-projection", ampMatrix!);
   await expect(root).toHaveAttribute("data-axes", "0,1,3");
   await page.getByRole("button", { name: "Principal components", exact: true }).click();
-  await expect(root).toHaveAttribute("data-feature-key", /\|pca:5000$/);
+  await expect(root).toHaveAttribute("data-feature-key", /\|pca:1000$/);
   await cycle.click();
   await expect(root).toHaveAttribute("data-axes", "0,2,3");
   const pcaMatrix = await root.getAttribute("data-projection");
   await page.getByRole("button", { name: "Copy projection", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("waveform3d:v1:PC1-PC3-PC4:");
   const pcaCode = await page.evaluate(() => navigator.clipboard.readText());
-  expect(pcaCode).toContain("waveform3d:v1:PC1-PC3-PC4:5000:");
   await page.getByRole("button", { name: "Amplitudes", exact: true }).click();
   await expect(root).toHaveAttribute("data-features", "amplitudes");
   await cycle.click();

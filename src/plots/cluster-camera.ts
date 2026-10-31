@@ -115,22 +115,16 @@ export interface SavedClusterProjection {
   camera: ClusterCamera;
   omitted: number;
   mode: FeatureMode;
-  samples: number;
 }
 
 /** Short, versioned text for notes. Number.toString preserves every camera bit. */
-export function encodeClusterProjection({
-  camera,
-  omitted,
-  mode,
-  samples,
-}: SavedClusterProjection) {
+export function encodeClusterProjection({ camera, omitted, mode }: SavedClusterProjection) {
   const prefix = mode === "pca" ? "PC" : "A";
   const axes = [0, 1, 2, 3]
     .filter((axis) => axis !== omitted)
     .map((axis) => `${prefix}${axis + 1}`)
     .join("-");
-  return `waveform3d:v1:${axes}:${samples}:${[
+  return `waveform3d:v1:${axes}:${[
     camera.yaw,
     camera.pitch,
     camera.zoom,
@@ -142,7 +136,7 @@ export function encodeClusterProjection({
 export function decodeClusterProjection(text: string): SavedClusterProjection {
   // Allow a code copied out of a sentence or Markdown in the user's notes.
   const match = text.match(
-    /waveform3d:v1:((?:A|PC)[1-4]-(?:A|PC)[1-4]-(?:A|PC)[1-4]):(\d+):([-+\d.eE,]+)/,
+    /waveform3d:v1:((?:A|PC)[1-4]-(?:A|PC)[1-4]-(?:A|PC)[1-4]):(?:\d+:)?([-+\d.eE,]+)/,
   );
   if (!match) {
     throw new Error("Paste a waveform3d:v1 projection code.");
@@ -151,9 +145,8 @@ export function decodeClusterProjection(text: string): SavedClusterProjection {
   const mode = labels[0].startsWith("PC") ? "pca" : "amplitudes";
   const prefix = mode === "pca" ? "PC" : "A";
   const axes = labels.map((label) => Number(label.replace(/^(A|PC)/, "")) - 1);
-  const tokens = match[3].replace(/[.,]+$/, "").split(",");
+  const tokens = match[2].replace(/[.,]+$/, "").split(",");
   const values = tokens.map(Number);
-  const samples = Number(match[2]);
   const [yaw, pitch, zoom, panX, panY] = values;
   if (
     values.length !== 5 ||
@@ -163,10 +156,7 @@ export function decodeClusterProjection(text: string): SavedClusterProjection {
     !axes.every((axis, i) => i === 0 || axis > axes[i - 1]) ||
     Math.abs(pitch) > Math.PI / 2 ||
     zoom < 0.3 ||
-    zoom > 12 ||
-    !Number.isInteger(samples) ||
-    samples < 4 ||
-    samples > 20000
+    zoom > 12
   ) {
     throw new Error("This projection code contains invalid view settings.");
   }
@@ -174,6 +164,5 @@ export function decodeClusterProjection(text: string): SavedClusterProjection {
     camera: { yaw, pitch, zoom, panX, panY },
     omitted: [0, 1, 2, 3].find((axis) => !axes.includes(axis))!,
     mode,
-    samples,
   };
 }

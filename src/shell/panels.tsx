@@ -294,6 +294,7 @@ export function HelpPanel() {
       <Shortcut keys="⌘ / Ctrl A" text="Select all cells in copy mode" />
       <h3>Views</h3>
       <Shortcut keys="Q" text="Switch amplitudes / principal components" />
+      <Shortcut keys="G" text="Cycle the three displayed features in 3D" />
       <p className="muted">
         In 3D, drag to rotate, Shift-drag to pan and scroll to zoom. Choose brush or lasso to cut
         through all depths. L cycles tools; Esc cancels a stroke.

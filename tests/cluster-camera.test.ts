@@ -100,8 +100,9 @@ it("projection codes name the displayed axes and restore every camera setting ex
   };
   for (const mode of ["amplitudes", "pca"] as const) {
     for (const omitted of [3, 2, 1, 0]) {
-      const saved = { camera, mode, omitted, samples: 1500 };
+      const saved = { camera, mode, omitted };
       const code = encodeClusterProjection(saved);
+      expect(code.split(":")).toHaveLength(4);
       const prefix = mode === "pca" ? "PC" : "A";
       const axes = [1, 2, 3, 4]
         .filter((axis) => axis !== omitted + 1)
@@ -109,6 +110,7 @@ it("projection codes name the displayed axes and restore every camera setting ex
         .join("-");
       expect(code).toContain(axes);
       expect(decodeClusterProjection(`Saved view: \`${code}\`.`)).toEqual(saved);
+      expect(decodeClusterProjection(code.replace(`${axes}:`, `${axes}:1500:`))).toEqual(saved);
       expect(clusterProjection(camera, 300, 200, omitted).axes).toEqual(
         [0, 1, 2, 3].filter((axis) => axis !== omitted),
       );

@@ -807,6 +807,9 @@ small {
   background: #ffffffe8;
   font: 10px Arial;
 }
+.cluster-3d-controls .cluster-3d-feature-cycle {
+  padding: 0;
+}
 .cluster-3d-status {
   position: absolute;
   top: 6px;

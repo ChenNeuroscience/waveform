@@ -208,6 +208,15 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const showTimedNotice = (message: string) => {
+    clearTimeout(noticeTimer.current);
+    setNotice(message);
+    noticeTimer.current = setTimeout(() => {
+      setNotice((current) => (current === message ? "" : current));
+    }, 5000);
+  };
+  useEffect(() => () => clearTimeout(noticeTimer.current), []);
   const [drag, setDrag] = useState(false);
   // Bumped when a cut file finishes preparing, to re-render its export-ready marker.
   const [, setDownloadVersion] = useState(0);
@@ -925,7 +934,7 @@ export default function App() {
                   setFeature3D(enabled);
                   setTool(enabled ? "orbit" : "brush");
                 }}
-                onPcaSamples={(samples) => update("pcaSamples", samples)}
+                onNotice={showTimedNotice}
                 mode={featureMode}
                 onMode={setFeatureMode}
                 coordinates={featureSpace.coordinates}

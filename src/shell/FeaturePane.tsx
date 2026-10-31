@@ -96,7 +96,7 @@ export function FeaturePane({
   featureError,
   threeD,
   onThreeD,
-  onPcaSamples,
+  onNotice,
 }: {
   data: ViewData | null;
   settings: Settings;
@@ -116,7 +116,7 @@ export function FeaturePane({
   featureError?: string;
   threeD: boolean;
   onThreeD: (enabled: boolean) => void;
-  onPcaSamples: (samples: number) => void;
+  onNotice: (message: string) => void;
 }) {
   const { sources, dest, tool, onSource, onDest, onNewGroup, onTool } = painting;
   const [fixedColours, setFixedColours] = usePreference("cluster-fixed-colours", false);
@@ -256,10 +256,13 @@ export function FeaturePane({
               onCamera={onCamera}
               omitted={omitted}
               onOmitted={setOmitted}
+              onNotice={onNotice}
               onRestoreProjection={(saved) => {
-                setCameraState({ key: cameraKey(saved.mode, saved.samples), camera: saved.camera });
+                setCameraState({
+                  key: cameraKey(saved.mode, settings.pcaSamples),
+                  camera: saved.camera,
+                });
                 setOmitted(saved.omitted);
-                onPcaSamples(saved.samples);
                 onMode(saved.mode);
                 onTool("orbit");
               }}
