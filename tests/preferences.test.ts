@@ -49,3 +49,8 @@ it("shows acquisition clock time and duration, including midnight rollover", () 
     durationText: "10 min 0 sec",
   });
 });
+
+it("keeps legacy directional smoothing when restoring older saved preferences", () => {
+  expect(restoreSettings({ smooth: 3 }).dirSmooth).toBe(3);
+  expect(restoreSettings({ smooth: 3, dirSmooth: 0 }).dirSmooth).toBe(0);
+});

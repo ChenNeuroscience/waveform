@@ -6,7 +6,7 @@
 export const EXPORTS = {
   alloc_bytes: 1,
   engine_amps: 1,
-  engine_analyse: 11,
+  engine_analyse: 13,
   engine_analyse_sc: 2,
   engine_analysis_sc: 1,
   engine_analysis_sc_len: 1,

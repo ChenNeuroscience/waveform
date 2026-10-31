@@ -13,6 +13,10 @@ export function restoreSettings(value: unknown): Settings {
         : fallback,
     ]),
   ) as unknown as Settings;
+  // Directional smoothing previously followed the spatial radius.
+  if (saved.dirSmooth === undefined) {
+    settings.dirSmooth = settings.smooth;
+  }
   settings.renderMode = RENDERING_MODES.includes(saved.renderMode as RenderingMode)
     ? (saved.renderMode as RenderingMode)
     : saved.drift === true

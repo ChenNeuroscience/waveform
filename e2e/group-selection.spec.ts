@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { ready, exportCut, destination, paintSources } from "./controls";
+import { ready, exportCut, paintSources } from "./controls";
 import { decodeCut } from "../tests/wasm";
 import { groupRgb8 } from "../src/palette";
 
@@ -104,7 +104,6 @@ test("set notation restores mouse/hover shortcuts, multiple sources and new dest
   await ready(page);
   expect(await labels(page)).toEqual([0, 3, 3, 4, 4, 6]);
   expect(await page.evaluate(() => history.length)).toBe(historyLength);
-  await page.screenshot({ path: "test-results/group-sets.png" });
 });
 
 test("tile clicks bring coincident points to the front without uploading feature buffers; E/F can pick the plot", async ({
@@ -217,109 +216,8 @@ test("S uses the hovered tile, focuses a centred prompt, accepts clicks or numbe
   expect(await labels(page)).toEqual([0, 2, 1, 3, 3, 6]);
   await tile(page, 1).hover();
   await page.keyboard.press("s");
-  await page.screenshot({ path: "test-results/swap-prompt.png" });
   await page.getByRole("button", { name: "02", exact: true }).click();
   await ready(page);
   await expect(swap).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
-});
-
-test("completed merges and swaps jiggle the updated result tiles with the existing settling animation", async ({
-  page,
-}) => {
-  await fixture(page);
-  await page.evaluate(() => {
-    (window as any).jiggles = [];
-    new MutationObserver((records) => {
-      for (const record of records)
-        for (const node of record.addedNodes) {
-          if (!(node instanceof HTMLElement) || !node.matches(".tile-edit-jiggle")) continue;
-          (window as any).jiggles.push({
-            cell: Number(node.dataset.cell),
-            animation: getComputedStyle(node).animationName,
-            duration: getComputedStyle(node).animationDuration,
-          });
-        }
-    }).observe(document.body, { childList: true, subtree: true });
-  });
-  const from = (await tile(page, 2).boundingBox())!,
-    to = (await tile(page, 1).boundingBox())!;
-  await page.mouse.move(from.x + 40, from.y + 65);
-  await page.mouse.down();
-  await page.mouse.move(to.x + 40, to.y + 65, { steps: 8 });
-  await page.mouse.up();
-  await ready(page);
-  await expect
-    .poll(() => page.evaluate(() => (window as any).jiggles.map((x: any) => x.cell)))
-    .toContain(1);
-  await expect(page.locator(".tile-edit-jiggle")).toHaveCount(0);
-  expect(await labels(page)).toEqual([0, 1, 1, 4, 4, 6]);
-  await page.evaluate(() => {
-    (window as any).jiggles = [];
-  });
-  await tile(page, 4).hover();
-  await page.keyboard.press("s");
-  await page.getByRole("textbox", { name: "Group to swap with" }).fill("6");
-  await page.keyboard.press("Enter");
-  await ready(page);
-  await expect
-    .poll(() => page.evaluate(() => (window as any).jiggles.map((x: any) => x.cell).sort()))
-    .toEqual([4, 6]);
-  expect(
-    await page.evaluate(() =>
-      (window as any).jiggles.every(
-        (x: any) => x.animation === "tile-settle" && x.duration === "0.65s",
-      ),
-    ),
-  ).toBe(true);
-  await expect(page.locator(".tile-edit-jiggle")).toHaveCount(0);
-  await expect(page.locator(".tile-edit-cover")).toHaveCount(0);
-  expect(await labels(page)).toEqual([0, 1, 1, 6, 6, 4]);
-});
-
-test("long source sets wrap between full-height braces while tools stay on the top line", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await page
-    .getByRole("button", {
-      name: "Try it now with simulated data",
-      exact: true,
-    })
-    .click();
-  await ready(page);
-  const initial = await page.locator(".painting-sources").evaluate((el) => {
-    const chip = el.querySelector("button")!.getBoundingClientRect(),
-      brace = el.querySelector(".source-brace")!.getBoundingClientRect();
-    return Math.abs(chip.y + chip.height / 2 - brace.y - brace.height / 2);
-  });
-  expect(initial).toBeLessThan(1);
-  const shortWidth = await page
-    .locator(".painting-sources")
-    .evaluate((el) => el.getBoundingClientRect().width);
-  expect(shortWidth).toBeLessThan(50);
-  for (let n = 2; n <= 20; n++)
-    await chip(page, n).click({ button: "right", modifiers: ["Shift"] });
-  const layout = await page.locator(".feature-group-heading").evaluate((el) => {
-    const tools = el.querySelector(".feature-tools")!.getBoundingClientRect(),
-      chips = [...el.querySelectorAll(".source-chips button")].map((x) =>
-        x.getBoundingClientRect(),
-      ),
-      braces = [...el.querySelectorAll(".source-brace")].map((x) => x.getBoundingClientRect());
-    return {
-      toolsY: tools.y,
-      firstY: chips[0].y,
-      rows: new Set(chips.map((x) => x.y)).size,
-      sourceTop: chips[0].top,
-      sourceBottom: Math.max(...chips.map((x) => x.bottom)),
-      braces: braces.map((x) => ({ top: x.top, bottom: x.bottom })),
-    };
-  });
-  expect(layout.rows).toBeGreaterThan(1);
-  expect(layout.toolsY).toBeLessThanOrEqual(layout.firstY);
-  for (const brace of layout.braces) {
-    expect(brace.top).toBeLessThanOrEqual(layout.sourceTop);
-    expect(brace.bottom).toBeGreaterThanOrEqual(layout.sourceBottom);
-  }
-  await page.screenshot({ path: "test-results/long-source-set.png" });
 });

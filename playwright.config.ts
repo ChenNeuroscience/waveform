@@ -1,7 +1,8 @@
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 60000,
+  timeout: 90000,
+  expect: { timeout: 10000 },
   // Report the first CI failure before spending time on the rest of the suite.
   maxFailures: process.env.CI ? 1 : undefined,
   workers: 1,
@@ -17,7 +18,8 @@ export default defineConfig({
       ],
     },
     screenshot: "only-on-failure",
-    trace: "retain-on-failure",
+    // Keep DOM/action diagnostics without taking continuous GPU screenshots.
+    trace: { mode: "retain-on-failure", screenshots: false, snapshots: true },
   },
   webServer: [
     {

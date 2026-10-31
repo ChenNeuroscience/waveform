@@ -79,23 +79,22 @@ const fmt = (n: number) => n.toLocaleString("en-GB");
 function HistoryPanel({ c }: { c: PanelContext }) {
   return (
     <>
-      <p className="muted">
-        Each cut keeps its own undo and redo history when you switch trials or tetrodes.
-      </p>
-      <div className="history-actions">
+      <div className="settings-actions history-actions" role="group" aria-label="History actions">
         <button
           disabled={!c.ready || !c.history?.undo.length}
-          className="secondary"
+          aria-label="Undo"
+          title="Undo"
           onClick={() => c.operation("undo")}
         >
-          <Undo2 size={14} /> Undo
+          <Undo2 size={15} />
         </button>
         <button
           disabled={!c.ready || !c.history?.redo.length}
-          className="secondary"
+          aria-label="Redo"
+          title="Redo"
           onClick={() => c.operation("redo")}
         >
-          <Redo2 size={14} /> Redo
+          <Redo2 size={15} />
         </button>
       </div>
       <div className="history-list">
@@ -252,7 +251,7 @@ export function SettingsPanel({
             step={1}
             unit="bins"
             zeroLabel="Off"
-            zeroHint="Spatial and directional smoothing is off."
+            zeroHint="Spatial smoothing is off."
             onChange={(v) => update("smooth", v)}
           />
           <Slider
@@ -299,7 +298,6 @@ export function SettingsPanel({
       title: "Directional rate map",
       content: (
         <>
-          <p className="muted">Uses the spatial rate map's smoothing radius.</p>
           <Slider
             label="Direction bin width"
             value={settings.dirBin}
@@ -308,6 +306,17 @@ export function SettingsPanel({
             step={2}
             unit="°"
             onChange={(v) => update("dirBin", v)}
+          />
+          <Slider
+            label="Directional boxcar radius"
+            value={settings.dirSmooth}
+            min={0}
+            max={10}
+            step={1}
+            unit="bins"
+            zeroLabel="Off"
+            zeroHint="Directional smoothing is off."
+            onChange={(v) => update("dirSmooth", v)}
           />
         </>
       ),
@@ -349,6 +358,15 @@ export function SettingsPanel({
             step={20}
             unit="ms"
             onChange={(v) => update("acWindow", v)}
+          />
+          <Slider
+            label="Temporal bin width"
+            value={settings.acBinMs}
+            min={0.5}
+            max={50}
+            step={0.5}
+            unit="ms"
+            onChange={(v) => update("acBinMs", v)}
           />
         </>
       ),

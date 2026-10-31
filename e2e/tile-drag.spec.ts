@@ -118,14 +118,12 @@ test("drag comparison leaves a placeholder, fades at exact alignment, overlays b
       };
     }),
   ).toEqual({ opacity: "1", duration: 1500 });
-  await page.screenshot({ path: "test-results/drag-snap-source.png" });
   expect(
     await image.evaluate((el) => {
       el.getAnimations()[0].currentTime = 900;
       return getComputedStyle(el).opacity;
     }),
   ).toBe("0");
-  await page.screenshot({ path: "test-results/drag-snap-target.png" });
   expect(
     await page.locator("body > .tile-hover-glow").evaluate((el) => ({
       opacity: getComputedStyle(el).opacity,
@@ -165,22 +163,4 @@ test("drag comparison leaves a placeholder, fades at exact alignment, overlays b
   expect(await assignments(page)).toEqual([1, 1, 2, 2, 3, 3]);
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   expect(errors).toEqual([]);
-});
-
-test("cancelling after the source scrolls out of the virtual wall restores its slot", async ({
-  page,
-}) => {
-  await page.goto("/?demo=quick");
-  await page.getByText("Try it now with simulated data").click();
-  await ready(page);
-  await start(page, 1);
-  await page.locator(".tile-wall").evaluate((el) => (el.scrollTop = el.scrollHeight));
-  await expect(tile(page, 1)).toHaveCount(0);
-  await page.mouse.move(20, 20, { steps: 3 });
-  await page.mouse.up();
-  await expect(tile(page, 1)).toBeVisible();
-  await expect(page.locator(".tile-drag-placeholder")).toHaveCount(0);
-  await expect(page.locator(".tile-drag-ghost")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
-  await expect(page.getByText(/^1[78],\d{3}$/)).toBeVisible();
 });

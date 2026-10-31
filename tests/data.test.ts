@@ -151,6 +151,19 @@ describe("analysis", () => {
       w.engine_free(e);
     }
   });
+  it("passes temporal bin widths to Rust independently of the lag window", async () => {
+    const w = await corePromise;
+    const e = seedEngine(w, [0, 5, 15, 25], [1, 1, 1, 1]);
+    try {
+      const run = (acWindow: number, acBinMs: number) =>
+        analyse(w, e, 1, 1000, 1, undefined, { ...defaultSettings, acWindow, acBinMs });
+      expect([...run(20, 5).ac]).toEqual([0, 1, 2, 1]);
+      expect([...run(18, 7).ac]).toEqual([1, 2, 1]);
+      expect([...run(20, 50).ac]).toEqual([4]);
+    } finally {
+      w.engine_free(e);
+    }
+  });
   it("normalises spikes by dwell time and excludes self from autocorrelation in Rust", async () => {
     const w = await corePromise,
       e = seedEngine(w, [100, 1100, 2100], [1, 1, 1]),

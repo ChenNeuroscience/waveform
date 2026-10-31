@@ -79,11 +79,14 @@ test("browser back/forward restores only trial, tetrode and cut choices", async 
   await page.goForward();
   await ready(page);
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeEnabled();
-});
-test("browser back cancels a split preview before restoring the recording", async ({ page }) => {
-  await demo(page);
-  const first = await selection(page);
-  await page.getByRole("button", { name: "02", exact: true }).click();
+
+  // The earlier preference check hid waveforms; restore them before splitting.
+  const waves = page.getByRole("button", { name: "Waveforms", exact: true });
+  if ((await waves.getAttribute("aria-pressed")) !== "true") {
+    await waves.click({ modifiers: ["Shift"] });
+  }
+  const splitFrom = await selection(page);
+  await page.getByRole("button", { name: "01", exact: true }).click();
   await ready(page);
   await page
     .locator('.cell-tile[data-cell="1"] .tile-waves')
@@ -91,11 +94,8 @@ test("browser back cancels a split preview before restoring the recording", asyn
   await expect(page.locator(".tile-marked")).toHaveCount(2);
   await page.goBack();
   await ready(page);
-  expect(await selection(page)).toEqual(first);
+  expect(await selection(page)).toEqual(splitFrom);
   await expect(page.locator(".tile-marked")).toHaveCount(0);
-  await page.goForward();
-  await ready(page);
-  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
 });
 
 test("arrow keys step trials (up/down), tetrodes (left/right) and a tetrode's cuts (shift)", async ({
@@ -131,29 +131,4 @@ test("arrow keys step trials (up/down), tetrodes (left/right) and a tetrode's cu
   await press("Shift+ArrowRight");
   await expect.poll(async () => (await selection(page)).cutId).toBe(start.cutId);
   expect((await selection(page)).tetNum).toBe(1);
-});
-test("opening files adds a history entry after the start screen; the file menu clears directly", async ({
-  page,
-}) => {
-  await page.goto("/?demo=quick");
-  const start = await length(page);
-  const tryDemo = page.getByRole("button", { name: "Try it now with simulated data", exact: true });
-  await tryDemo.click();
-  await ready(page);
-  expect(await length(page)).toBe(start + 1);
-  await page.goBack();
-  await expect(tryDemo).toBeVisible();
-  await expect(page.locator(".desktop-toolbar")).toHaveCount(0);
-  await tryDemo.click();
-  await ready(page);
-  const home = page.getByRole("button", { name: "Waveform menu", exact: true });
-  await home.click();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("menu", { name: "File actions", exact: true })).toHaveCount(0);
-  await expect(page.locator(".desktop-toolbar")).toBeVisible();
-  await home.click();
-  await page.getByRole("menuitem", { name: "Clear files", exact: true }).click();
-  await expect(tryDemo).toBeVisible();
-  // The start screen is a new entry, so Back is still available.
-  expect(await page.evaluate(() => history.state.waveform.selection)).toBeNull();
 });

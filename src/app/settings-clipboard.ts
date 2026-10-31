@@ -7,11 +7,13 @@ const limits: Record<Exclude<keyof Settings, "renderMode">, [number, number]> = 
   maxRate: [0, 50],
   rateMapSteps: [2, 32],
   acWindow: [20, 1000],
+  acBinMs: [0.5, 50],
   scMinOverlap: [2, 200],
   leds: [1, 2],
   maxSpeed: [0, 10],
   posSmooth: [0, 2],
   dirBin: [2, 30],
+  dirSmooth: [0, 10],
   speedBin: [1, 10],
   speedMax: [10, 200],
 };
@@ -42,7 +44,11 @@ export function decodeSettings(text: string): Settings {
     throw new Error("These are not supported Waveform settings.");
   }
   fields.delete("waveform-settings");
-  if (fields.size !== Object.keys(defaultSettings).length) {
+  if (
+    Object.keys(defaultSettings).some(
+      (key) => !["acBinMs", "dirSmooth"].includes(key) && !fields.has(key),
+    )
+  ) {
     throw new Error("Paste a complete Waveform settings mapping.");
   }
   const result = { ...defaultSettings };
@@ -71,6 +77,9 @@ export function decodeSettings(text: string): Settings {
       }
       result[setting] = value;
     }
+  }
+  if (!fields.has("dirSmooth")) {
+    result.dirSmooth = result.smooth;
   }
   return result;
 }

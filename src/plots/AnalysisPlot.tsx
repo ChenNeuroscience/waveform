@@ -109,13 +109,16 @@ export function drawAnalysis(
       ctx.lineWidth = 0.7;
       ctx.beginPath();
       for (let i = 0; i < a.length; i++) {
-        const x = (i / (a.length - 1)) * (w - 2) + 1;
+        const x = (i / Math.max(1, a.length - 1)) * (w - 2) + 1;
         const y = h - 2 - (a[i] / max) * (h - 4);
         if (!i) {
           ctx.moveTo(x, y);
         } else {
           ctx.lineTo(x, y);
         }
+      }
+      if (a.length === 1) {
+        ctx.lineTo(w - 1, h - 2 - (a[0] / max) * (h - 4));
       }
       ctx.stroke();
     } else {

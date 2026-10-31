@@ -32,3 +32,12 @@ it("rejects incomplete, unsupported or unsafe settings instead of partially rest
   ])
     expect(() => decodeSettings(bad)).toThrow();
 });
+
+it("restores settings saved before temporal bin width was configurable", () => {
+  const legacy = encodeSettings({ ...defaultSettings, smooth: 3 }).replace(
+    /^(?:acBinMs|dirSmooth):.*\n/gm,
+    "",
+  );
+  expect(decodeSettings(legacy).acBinMs).toBe(defaultSettings.acBinMs);
+  expect(decodeSettings(legacy).dirSmooth).toBe(3);
+});

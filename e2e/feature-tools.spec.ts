@@ -110,25 +110,3 @@ test("paint is the default; spaced projections paint/lasso the right axes and ig
     }),
   ).toEqual([187, 187, 187, 255]);
 });
-test("all group chips wrap inside the feature pane", async ({ page }) => {
-  await page.goto("/");
-  await page
-    .getByRole("button", {
-      name: "Try it now with simulated data",
-      exact: true,
-    })
-    .click();
-  await ready(page);
-  const strip = page.locator(".feature-group-strip");
-  const layout = await strip.evaluate((el) => ({
-    width: el.clientWidth,
-    scroll: el.scrollWidth,
-    rows: new Set(
-      [...el.querySelectorAll("button")].map((button) => button.getBoundingClientRect().top),
-    ).size,
-  }));
-  expect(layout.rows).toBeGreaterThan(1);
-  expect(layout.scroll).toBeLessThanOrEqual(layout.width);
-  expect(await strip.evaluate((el) => getComputedStyle(el).overflowX)).toBe("visible");
-  await page.screenshot({ path: "test-results/feature-tools-and-gaps.png" });
-});

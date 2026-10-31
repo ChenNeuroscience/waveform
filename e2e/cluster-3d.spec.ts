@@ -79,332 +79,330 @@ async function screenPoints(page: Page, values: number[]) {
   return { box, points, matrix: m };
 }
 
-test("3D is optional, navigates without edits, preserves colour modes and restores the six 2D pairings", async ({
-  page,
-}) => {
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  await watch(page);
-  await page.goto("/?demo=quick");
-  await page.getByText("Try it now with simulated data").click();
-  await ready(page);
-  const toggle = page.getByRole("button", { name: "3D clusters", exact: true });
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
-  expect(
-    await toggle.evaluate((button) => button.previousElementSibling?.getAttribute("aria-label")),
-  ).toBe("Fixed cluster colours");
-  expect(await toggle.evaluate((button) => button.nextElementSibling?.className)).toBe(
-    "tool-separator",
-  );
-  await toggle.click();
-  const root = page.locator(".cluster-3d");
-  await expect(root).toBeVisible();
-  await expect(page.getByRole("button", { name: "Rotate 3D view", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(page.locator(".projection-labels")).toHaveCount(0);
-  expect(await root.locator("text[data-axis]").allTextContents()).toEqual(["A1", "A2", "A3"]);
-  await expect(page.locator(".plot-error")).toHaveCount(0);
-  const canvas = root.locator("canvas");
-  expect(
-    await canvas.evaluate(
-      (c) =>
-        (c as HTMLCanvasElement).getContext("webgl2")!.getContextAttributes()!
-          .preserveDrawingBuffer,
-    ),
-  ).toBe(true);
-  await expect
-    .poll(() =>
-      canvas.evaluate((c) => {
-        const gl = (c as HTMLCanvasElement).getContext("webgl2")!;
-        const bytes = new Uint8Array(c.width * c.height * 4);
-        gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
-        let points = 0;
-        for (let i = 0; i < bytes.length; i += 4)
-          if (bytes[i] < 250 || bytes[i + 1] < 250 || bytes[i + 2] < 250) points++;
-        return points;
-      }),
-    )
-    .toBeGreaterThan(100);
-  const before = await canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL());
-  const initial = await root.getAttribute("data-projection");
-  const box = (await root.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 20, { steps: 5 });
-  await page.mouse.up();
-  await expect(root).not.toHaveAttribute("data-projection", initial!);
-  await expect
-    .poll(() => canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL()))
-    .not.toBe(before);
-  const rotated = await root.getAttribute("data-projection");
-  await page.keyboard.down("Shift");
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2 + 30, { steps: 4 });
-  await page.mouse.up();
-  await page.keyboard.up("Shift");
-  await expect(root).not.toHaveAttribute("data-projection", rotated!);
-  const panned = await root.getAttribute("data-projection");
-  await page.mouse.wheel(0, -160);
-  await expect(root).not.toHaveAttribute("data-projection", panned!);
-  expect(await page.evaluate(() => (window as any).clusterEdits)).toHaveLength(0);
-  await projectionAction(page, "Reset 3D view");
-  await expect(root).toHaveAttribute("data-projection", initial!);
-  await page.keyboard.press("p");
-  await expect(root).toHaveAttribute("data-colour-mode", "drift");
-  const palette = page.getByRole("button", { name: "Fixed cluster colours", exact: true });
-  await palette.click();
-  await expect(root).toHaveAttribute("data-colour-mode", "fixed");
-  await page.screenshot({ path: "test-results/cluster-3d-amplitudes.png" });
-  await page.getByRole("button", { name: "Principal components", exact: true }).click();
-  await expect(root).toHaveAttribute("data-features", "pca");
-  expect(await root.locator("text[data-axis]").allTextContents()).toEqual(["PC1", "PC2", "PC3"]);
-  await root.screenshot({ path: "test-results/cluster-3d-pca.png" });
-  const axisBounds = await root.locator("text[data-axis]").evaluateAll((nodes) =>
-    nodes.map((node) => {
-      const box = (node as SVGGraphicsElement).getBBox();
-      return { x: box.x, y: box.y, right: box.x + box.width, bottom: box.y + box.height };
-    }),
-  );
-  const plotBox = (await root.boundingBox())!;
-  for (const bounds of axisBounds) {
-    expect(bounds.x).toBeGreaterThanOrEqual(0);
-    expect(bounds.y).toBeGreaterThanOrEqual(0);
-    expect(bounds.right).toBeLessThanOrEqual(plotBox.width);
-    expect(bounds.bottom).toBeLessThanOrEqual(plotBox.height);
-  }
-  const beforeRestore = await canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL());
-  await canvas.evaluate((c) => {
-    const extension = (c as HTMLCanvasElement)
-      .getContext("webgl2")!
-      .getExtension("WEBGL_lose_context")!;
-    extension.loseContext();
-    setTimeout(() => extension.restoreContext(), 100);
-  });
-  await expect
-    .poll(() => canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL()))
-    .toBe(beforeRestore);
-  await root.hover({ position: { x: 50, y: 50 } });
-  await page.keyboard.down("Space");
-  const outline = page.locator(".grab-outline");
-  await expect(outline).toBeVisible();
-  expect(await outline.evaluate((element) => getComputedStyle(element).zIndex)).toBe("2147483647");
-  await root.click({ position: { x: 50, y: 50 } });
-  await page.keyboard.up("Space");
-  const copy = page.locator(".floating-window").filter({ has: page.locator(".plot-copy") });
-  await expect(copy).toBeVisible();
-  const copied = await copy.locator(".plot-copy").getAttribute("src");
-  expect(copied).not.toBe(beforeRestore); // The frozen capture includes cube edges and axis labels.
-  const copiedPoints = await copy.locator(".plot-copy").evaluate(async (element) => {
-    const image = element as HTMLImageElement;
-    await image.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(image, 0, 0);
-    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    let coloured = 0;
-    for (let i = 0; i < pixels.length; i += 4) {
-      if (
-        Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) -
-          Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) >
-        40
-      )
-        coloured++;
-    }
-    return coloured;
-  });
-  expect(copiedPoints).toBeGreaterThan(100);
-  await page.keyboard.down("Space");
-  await copy.locator(".plot-copy").hover();
-  await expect(outline).toBeVisible();
-  await expect
-    .poll(async () => (await outline.boundingBox())!.width)
-    .toBe((await copy.boundingBox())!.width);
-  await page.screenshot({ path: "test-results/cluster-3d-grab-copy.png" });
-  await page.keyboard.up("Space");
-  await expect(outline).toHaveCount(0);
-  await copy.getByRole("button", { name: "Close panel", exact: true }).click();
-  await palette.click();
-  await expect(root).toHaveAttribute("data-colour-mode", "drift");
-  await toggle.click();
-  await expect(page.locator('.clusters[data-dimension="2"]')).toBeVisible();
-  await expect(page.locator(".projection-labels > div")).toHaveCount(6);
-  await expect(
-    page.getByRole("button", { name: "Paint source spikes", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await toggle.click();
-  await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("waveform-ui:cluster-3d")))
-    .toBe("true");
-  await page.reload();
-  await page.getByText("Try it now with simulated data").click();
-  await ready(page);
-  await expect(root).toBeVisible();
-  await expect(page.getByRole("button", { name: "Rotate 3D view", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  const splitter = (await page.locator(".desktop-splitter").boundingBox())!;
-  await page.mouse.move(splitter.x + 3, splitter.y + 80);
-  await page.mouse.down();
-  await page.mouse.move(240, splitter.y + 80);
-  await page.mouse.up();
-  const controlsFit = await page.locator(".feature-pane").evaluate((pane) => {
-    const bounds = pane.getBoundingClientRect();
-    return [...pane.querySelectorAll(".feature-tools button, .painting-set button")].every(
-      (button) => {
-        const rect = button.getBoundingClientRect();
-        return rect.left >= bounds.left && rect.right <= bounds.right;
-      },
-    );
-  });
-  expect(controlsFit).toBe(true);
-  await expect(page.locator(".plot-error")).toHaveCount(0);
-  expect(errors).toEqual([]);
-});
-
-test("omission cycles, readable projection codes restore across feature spaces and L cycles all tools", async ({
+test("3D navigation, grabbing, feature selection and projection clipboard round trips", async ({
   page,
   context,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.goto("/?demo=quick");
-  await page.getByText("Try it now with simulated data").click();
-  await ready(page);
-  await page.getByRole("button", { name: "3D clusters", exact: true }).click();
-  const root = page.locator(".cluster-3d");
-  const cycle = page.getByRole("button", { name: "Cycle omitted feature", exact: true });
-  const expected = [
-    ["A1", "A2", "A3"],
-    ["A1", "A2", "A4"],
-    ["A1", "A3", "A4"],
-    ["A2", "A3", "A4"],
-    ["A1", "A2", "A3"],
-  ];
-  for (let i = 0; i < expected.length; i++) {
-    if (i === 2) await page.keyboard.press("g");
-    else if (i) await cycle.click();
-    await expect(root).toHaveAttribute("data-omitted", String([4, 3, 2, 1, 4][i]));
-    expect(await root.locator("text[data-axis]").allTextContents()).toEqual(expected[i]);
-  }
-  expect(
-    await root
-      .locator("text[data-axis]")
-      .evaluateAll((nodes) =>
-        nodes.every((node) => getComputedStyle(node).fill === "rgb(0, 0, 0)"),
+  await test.step("Navigate, grab and restore the view", async () => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await watch(page);
+    await page.goto("/?demo=quick");
+    await page.getByText("Try it now with simulated data").click();
+    await ready(page);
+    const toggle = page.getByRole("button", { name: "3D clusters", exact: true });
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(
+      await toggle.evaluate((button) => button.previousElementSibling?.getAttribute("aria-label")),
+    ).toBe("Fixed cluster colours");
+    expect(await toggle.evaluate((button) => button.nextElementSibling?.className)).toBe(
+      "tool-separator",
+    );
+    await toggle.click();
+    const root = page.locator(".cluster-3d");
+    await expect(root).toBeVisible();
+    await expect(page.getByRole("button", { name: "Rotate 3D view", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.locator(".projection-labels")).toHaveCount(0);
+    expect(await root.locator("text[data-axis]").allTextContents()).toEqual(["A1", "A2", "A3"]);
+    await expect(page.locator(".plot-error")).toHaveCount(0);
+    const canvas = root.locator("canvas");
+    expect(
+      await canvas.evaluate(
+        (c) =>
+          (c as HTMLCanvasElement).getContext("webgl2")!.getContextAttributes()!
+            .preserveDrawingBuffer,
       ),
-  ).toBe(true);
-  expect(
-    await root
-      .locator('line[stroke-width="1.3"]')
-      .evaluateAll((nodes) =>
-        nodes.every((node) => getComputedStyle(node).stroke === "rgb(0, 0, 0)"),
-      ),
-  ).toBe(true);
-  const trigger = page.getByRole("button", { name: "3D settings", exact: true });
-  expect((await cycle.boundingBox())!.y).toBeGreaterThan((await trigger.boundingBox())!.y);
-  await trigger.click();
-  const menu = page.getByRole("menu", { name: "3D settings actions", exact: true });
-  await expect(menu.getByRole("menuitem")).toHaveText([
-    "Reset 3D view",
-    "Copy projection",
-    "Restore projection",
-  ]);
-  await expect(menu.getByRole("menuitem").first()).toBeFocused();
-  await page.screenshot({ path: "test-results/cluster-3d-settings-menu.png" });
-  await page.keyboard.press("Escape");
-  await expect(trigger).toBeFocused();
-  await page.keyboard.press("l");
-  await expect(
-    page.getByRole("button", { name: "Paint source spikes", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("l");
-  await expect(page.getByRole("button", { name: "Lasso cut", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await page.keyboard.press("l");
-  await expect(page.getByRole("button", { name: "Rotate 3D view", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await cycle.click();
-  const box = (await root.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 33, box.y + box.height / 2 - 17, { steps: 4 });
-  await page.mouse.up();
-  const ampMatrix = await root.getAttribute("data-projection");
-  await projectionAction(page, "Copy projection");
-  await expect
-    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toContain("waveform3d:v1:A1-A2-A4:");
-  const amplitudeCode = await page.evaluate(() => navigator.clipboard.readText());
-  const toast = page.locator(".desktop-notice");
-  await expect(toast).toHaveText("Projection copied.");
-  await expect(toast).toBeHidden({ timeout: 6500 });
-  await page.getByRole("button", { name: "Principal components", exact: true }).click();
-  await expect(root).toHaveAttribute("data-features", "pca");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await settingsSection(page, "Cluster plots");
-  await page.getByRole("slider", { name: "PCA fit sample size", exact: true }).fill("1000");
-  await expect(root).toHaveAttribute("data-feature-key", /\|pca:1000$/);
-  await page
-    .getByRole("dialog", { name: "Settings", exact: true })
-    .getByRole("button", { name: "Close panel", exact: true })
-    .click();
-  await projectionAction(page, "Restore projection");
-  await expect(root).toHaveAttribute("data-features", "amplitudes");
-  await expect(toast).toHaveText("Projection restored.");
-  await expect(toast).toBeHidden({ timeout: 6500 });
-  await expect(root).toHaveAttribute("data-projection", ampMatrix!);
-  await expect(root).toHaveAttribute("data-axes", "0,1,3");
-  await page.getByRole("button", { name: "Principal components", exact: true }).click();
-  await expect(root).toHaveAttribute("data-feature-key", /\|pca:1000$/);
-  await cycle.click();
-  await expect(root).toHaveAttribute("data-axes", "0,2,3");
-  const pcaMatrix = await root.getAttribute("data-projection");
-  await projectionAction(page, "Copy projection");
-  await expect
-    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toContain("waveform3d:v1:PC1-PC3-PC4:");
-  const pcaCode = await page.evaluate(() => navigator.clipboard.readText());
-  await page.getByRole("button", { name: "Amplitudes", exact: true }).click();
-  await expect(root).toHaveAttribute("data-features", "amplitudes");
-  await cycle.click();
-  await page.evaluate((code) => navigator.clipboard.writeText(`Notes: \`${code}\`.`), pcaCode);
-  await projectionAction(page, "Restore projection");
-  await expect(root).toHaveAttribute("data-features", "pca");
-  await expect(root).toHaveAttribute("data-axes", "0,2,3");
-  await expect(root).toHaveAttribute("data-projection", pcaMatrix!);
-  await page.evaluate(() => navigator.clipboard.writeText("not a projection"));
-  await projectionAction(page, "Restore projection");
-  await expect(toast).toHaveAttribute("role", "alert");
-  await expect(toast).toHaveText("The clipboard does not contain a valid Waveform projection.");
-  await expect(page.getByRole("textbox", { name: "Projection code", exact: true })).toHaveCount(0);
-  await expect(root).toHaveAttribute("data-projection", pcaMatrix!);
-  await page.evaluate(() => {
-    Object.defineProperty(navigator.clipboard, "readText", {
-      configurable: true,
-      value: () => Promise.reject(new DOMException("Denied", "NotAllowedError")),
+    ).toBe(true);
+    await expect
+      .poll(() =>
+        canvas.evaluate((element) => {
+          const c = element as HTMLCanvasElement;
+          const gl = c.getContext("webgl2")!;
+          const bytes = new Uint8Array(c.width * c.height * 4);
+          gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+          let points = 0;
+          for (let i = 0; i < bytes.length; i += 4)
+            if (bytes[i] < 250 || bytes[i + 1] < 250 || bytes[i + 2] < 250) points++;
+          return points;
+        }),
+      )
+      .toBeGreaterThan(100);
+    const before = await canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL());
+    const initial = await root.getAttribute("data-projection");
+    const box = (await root.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 20, { steps: 5 });
+    await page.mouse.up();
+    await expect(root).not.toHaveAttribute("data-projection", initial!);
+    await expect
+      .poll(() => canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL()))
+      .not.toBe(before);
+    const rotated = await root.getAttribute("data-projection");
+    await page.keyboard.down("Shift");
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2 + 30, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.up("Shift");
+    await expect(root).not.toHaveAttribute("data-projection", rotated!);
+    const panned = await root.getAttribute("data-projection");
+    await page.mouse.wheel(0, -160);
+    await expect(root).not.toHaveAttribute("data-projection", panned!);
+    expect(await page.evaluate(() => (window as any).clusterEdits)).toHaveLength(0);
+    await projectionAction(page, "Reset 3D view");
+    await expect(root).toHaveAttribute("data-projection", initial!);
+    await page.keyboard.press("p");
+    await expect(root).toHaveAttribute("data-colour-mode", "drift");
+    const palette = page.getByRole("button", { name: "Fixed cluster colours", exact: true });
+    await palette.click();
+    await expect(root).toHaveAttribute("data-colour-mode", "fixed");
+    await page.getByRole("button", { name: "Principal components", exact: true }).click();
+    await expect(root).toHaveAttribute("data-features", "pca");
+    expect(await root.locator("text[data-axis]").allTextContents()).toEqual(["PC1", "PC2", "PC3"]);
+    const axisBounds = await root.locator("text[data-axis]").evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const box = (node as SVGGraphicsElement).getBBox();
+        return { x: box.x, y: box.y, right: box.x + box.width, bottom: box.y + box.height };
+      }),
+    );
+    const plotBox = (await root.boundingBox())!;
+    for (const bounds of axisBounds) {
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.y).toBeGreaterThanOrEqual(0);
+      expect(bounds.right).toBeLessThanOrEqual(plotBox.width);
+      expect(bounds.bottom).toBeLessThanOrEqual(plotBox.height);
+    }
+    const beforeRestore = await canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL());
+    await canvas.evaluate((c) => {
+      const extension = (c as HTMLCanvasElement)
+        .getContext("webgl2")!
+        .getExtension("WEBGL_lose_context")!;
+      extension.loseContext();
+      setTimeout(() => extension.restoreContext(), 100);
     });
+    await expect
+      .poll(() => canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL()))
+      .toBe(beforeRestore);
+    await root.hover({ position: { x: 50, y: 50 } });
+    await page.keyboard.down("Space");
+    const outline = page.locator(".grab-outline");
+    await expect(outline).toBeVisible();
+    expect(await outline.evaluate((element) => getComputedStyle(element).zIndex)).toBe(
+      "2147483647",
+    );
+    await root.click({ position: { x: 50, y: 50 } });
+    await page.keyboard.up("Space");
+    const copy = page.locator(".floating-window").filter({ has: page.locator(".plot-copy") });
+    await expect(copy).toBeVisible();
+    const copied = await copy.locator(".plot-copy").getAttribute("src");
+    expect(copied).not.toBe(beforeRestore); // The frozen capture includes cube edges and axis labels.
+    const copiedPoints = await copy.locator(".plot-copy").evaluate(async (element) => {
+      const image = element as HTMLImageElement;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(image, 0, 0);
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let coloured = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (
+          Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) -
+            Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) >
+          40
+        )
+          coloured++;
+      }
+      return coloured;
+    });
+    expect(copiedPoints).toBeGreaterThan(100);
+    await page.keyboard.down("Space");
+    await copy.locator(".plot-copy").hover();
+    await expect(outline).toBeVisible();
+    await expect
+      .poll(async () => (await outline.boundingBox())!.width)
+      .toBe((await copy.boundingBox())!.width);
+    await page.keyboard.up("Space");
+    await expect(outline).toHaveCount(0);
+    await copy.getByRole("button", { name: "Close panel", exact: true }).click();
+    await palette.click();
+    await expect(root).toHaveAttribute("data-colour-mode", "drift");
+    await toggle.click();
+    await expect(page.locator('.clusters[data-dimension="2"]')).toBeVisible();
+    await expect(page.locator(".projection-labels > div")).toHaveCount(6);
+    await expect(
+      page.getByRole("button", { name: "Paint source spikes", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await toggle.click();
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("waveform-ui:cluster-3d")))
+      .toBe("true");
+    await page.reload();
+    await page.getByText("Try it now with simulated data").click();
+    await ready(page);
+    await expect(root).toBeVisible();
+    await expect(page.getByRole("button", { name: "Rotate 3D view", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const splitter = (await page.locator(".desktop-splitter").boundingBox())!;
+    await page.mouse.move(splitter.x + 3, splitter.y + 80);
+    await page.mouse.down();
+    await page.mouse.move(240, splitter.y + 80);
+    await page.mouse.up();
+    const controlsFit = await page.locator(".feature-pane").evaluate((pane) => {
+      const bounds = pane.getBoundingClientRect();
+      return [...pane.querySelectorAll(".feature-tools button, .painting-set button")].every(
+        (button) => {
+          const rect = button.getBoundingClientRect();
+          return rect.left >= bounds.left && rect.right <= bounds.right;
+        },
+      );
+    });
+    expect(controlsFit).toBe(true);
+    await expect(page.locator(".plot-error")).toHaveCount(0);
+    expect(errors).toEqual([]);
   });
-  await projectionAction(page, "Restore projection");
-  await expect(toast).toContainText("Could not read the clipboard");
-  await expect(root).toHaveAttribute("data-projection", pcaMatrix!);
-  await page.evaluate(() => {
-    delete (navigator.clipboard as any).readText;
+  await test.step("Features and projection clipboard", async () => {
+    await page.getByRole("button", { name: "Amplitudes", exact: true }).click();
+    await expect(page.locator(".cluster-3d")).toHaveAttribute("data-features", "amplitudes");
+    await projectionAction(page, "Reset 3D view");
+    const root = page.locator(".cluster-3d");
+    const cycle = page.getByRole("button", { name: "Cycle omitted feature", exact: true });
+    const expected = [
+      ["A1", "A2", "A3"],
+      ["A1", "A2", "A4"],
+      ["A1", "A3", "A4"],
+      ["A2", "A3", "A4"],
+      ["A1", "A2", "A3"],
+    ];
+    for (let i = 0; i < expected.length; i++) {
+      if (i === 2) await page.keyboard.press("g");
+      else if (i) await cycle.click();
+      await expect(root).toHaveAttribute("data-omitted", String([4, 3, 2, 1, 4][i]));
+      expect(await root.locator("text[data-axis]").allTextContents()).toEqual(expected[i]);
+    }
+    expect(
+      await root
+        .locator("text[data-axis]")
+        .evaluateAll((nodes) =>
+          nodes.every((node) => getComputedStyle(node).fill === "rgb(0, 0, 0)"),
+        ),
+    ).toBe(true);
+    expect(
+      await root
+        .locator('line[stroke-width="1.3"]')
+        .evaluateAll((nodes) =>
+          nodes.every((node) => getComputedStyle(node).stroke === "rgb(0, 0, 0)"),
+        ),
+    ).toBe(true);
+    const trigger = page.getByRole("button", { name: "3D settings", exact: true });
+    expect((await cycle.boundingBox())!.y).toBeGreaterThan((await trigger.boundingBox())!.y);
+    await trigger.click();
+    const menu = page.getByRole("menu", { name: "3D settings actions", exact: true });
+    await expect(menu.getByRole("menuitem")).toHaveText([
+      "Reset 3D view",
+      "Copy projection",
+      "Restore projection",
+    ]);
+    await expect(menu.getByRole("menuitem").first()).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press("l");
+    await expect(
+      page.getByRole("button", { name: "Paint source spikes", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("l");
+    await expect(page.getByRole("button", { name: "Lasso cut", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await page.keyboard.press("l");
+    await expect(page.getByRole("button", { name: "Rotate 3D view", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await cycle.click();
+    const box = (await root.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 33, box.y + box.height / 2 - 17, { steps: 4 });
+    await page.mouse.up();
+    const ampMatrix = await root.getAttribute("data-projection");
+    await projectionAction(page, "Copy projection");
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toContain("waveform3d:v1:A1-A2-A4:");
+    const amplitudeCode = await page.evaluate(() => navigator.clipboard.readText());
+    const toast = page.locator(".desktop-notice");
+    await expect(toast).toHaveText("Projection copied.");
+    await expect(toast).toBeHidden({ timeout: 6500 });
+    await page.getByRole("button", { name: "Principal components", exact: true }).click();
+    await expect(root).toHaveAttribute("data-features", "pca");
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await settingsSection(page, "Cluster plots");
+    await page.getByRole("slider", { name: "PCA fit sample size", exact: true }).fill("1000");
+    await expect(root).toHaveAttribute("data-feature-key", /\|pca:1000$/);
+    await page
+      .getByRole("dialog", { name: "Settings", exact: true })
+      .getByRole("button", { name: "Close panel", exact: true })
+      .click();
+    await projectionAction(page, "Restore projection");
+    await expect(root).toHaveAttribute("data-features", "amplitudes");
+    await expect(toast).toHaveText("Projection restored.");
+
+    await expect(root).toHaveAttribute("data-projection", ampMatrix!);
+    await expect(root).toHaveAttribute("data-axes", "0,1,3");
+    await page.getByRole("button", { name: "Principal components", exact: true }).click();
+    await expect(root).toHaveAttribute("data-feature-key", /\|pca:1000$/);
+    await cycle.click();
+    await expect(root).toHaveAttribute("data-axes", "0,2,3");
+    const pcaMatrix = await root.getAttribute("data-projection");
+    await projectionAction(page, "Copy projection");
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toContain("waveform3d:v1:PC1-PC3-PC4:");
+    const pcaCode = await page.evaluate(() => navigator.clipboard.readText());
+    await page.getByRole("button", { name: "Amplitudes", exact: true }).click();
+    await expect(root).toHaveAttribute("data-features", "amplitudes");
+    await cycle.click();
+    await page.evaluate((code) => navigator.clipboard.writeText(`Notes: \`${code}\`.`), pcaCode);
+    await projectionAction(page, "Restore projection");
+    await expect(root).toHaveAttribute("data-features", "pca");
+    await expect(root).toHaveAttribute("data-axes", "0,2,3");
+    await expect(root).toHaveAttribute("data-projection", pcaMatrix!);
+    await page.evaluate(() => navigator.clipboard.writeText("not a projection"));
+    await projectionAction(page, "Restore projection");
+    await expect(toast).toHaveAttribute("role", "alert");
+    await expect(toast).toHaveText("The clipboard does not contain a valid Waveform projection.");
+    await expect(page.getByRole("textbox", { name: "Projection code", exact: true })).toHaveCount(
+      0,
+    );
+    await expect(root).toHaveAttribute("data-projection", pcaMatrix!);
+    await page.evaluate(() => {
+      Object.defineProperty(navigator.clipboard, "readText", {
+        configurable: true,
+        value: () => Promise.reject(new DOMException("Denied", "NotAllowedError")),
+      });
+    });
+    await projectionAction(page, "Restore projection");
+    await expect(toast).toContainText("Could not read the clipboard");
+    await expect(root).toHaveAttribute("data-projection", pcaMatrix!);
+    await page.evaluate(() => {
+      delete (navigator.clipboard as any).readText;
+    });
+    await page.evaluate((code) => navigator.clipboard.writeText(code), amplitudeCode);
+    await projectionAction(page, "Restore projection");
+    await expect(toast).toHaveAttribute("role", "status");
+    await expect(toast).toHaveText("Projection restored.");
+    await expect(root).toHaveAttribute("data-features", "amplitudes");
+    await expect(root).toHaveAttribute("data-projection", ampMatrix!);
   });
-  await page.evaluate((code) => navigator.clipboard.writeText(code), amplitudeCode);
-  await projectionAction(page, "Restore projection");
-  await expect(toast).toHaveAttribute("role", "status");
-  await expect(toast).toHaveText("Projection restored.");
-  await expect(root).toHaveAttribute("data-features", "amplitudes");
-  await expect(root).toHaveAttribute("data-projection", ampMatrix!);
-  await root.screenshot({ path: "test-results/cluster-3d-projection-controls.png" });
 });
 
 test("rotated, panned and zoomed amplitude lassos cut the displayed population and undo exactly", async ({

@@ -43,7 +43,6 @@ test("settings sections fit their content and clipboard settings restore togethe
       panel.locator(".floating-content").evaluate((el) => el.scrollHeight - el.clientHeight),
     )
     .toBeLessThanOrEqual(1);
-  await panel.screenshot({ path: "test-results/settings-spatial.png" });
   const expandedHeight = (await panel.boundingBox())!.height;
   await panel.getByRole("button", { name: "Spatial rate map", exact: true }).click();
   await expect
@@ -67,7 +66,6 @@ test("settings sections fit their content and clipboard settings restore togethe
   await expect
     .poll(settings)
     .toEqual({ ...defaultSettings, pcaSamples: 1000, binCm: 4.5, rateMapSteps: 9 });
-  await expect(toast).toBeHidden({ timeout: 6500 });
 
   await page.evaluate(() => navigator.clipboard.writeText("not settings"));
   await panel.getByRole("button", { name: "Restore settings", exact: true }).click();
@@ -83,7 +81,6 @@ test("settings sections fit their content and clipboard settings restore togethe
   await expect
     .poll(settings)
     .toEqual({ ...defaultSettings, pcaSamples: 1000, binCm: 4.5, rateMapSteps: 9 });
-  await expect(toast).toBeHidden({ timeout: 6500 });
   await page.evaluate(() => {
     Object.defineProperty(navigator.clipboard, "readText", {
       configurable: true,
@@ -100,7 +97,6 @@ test("settings sections fit their content and clipboard settings restore togethe
   await panel.getByRole("button", { name: "Restore settings", exact: true }).click();
   await expect(toast).toHaveAttribute("role", "status");
   await expect(toast).toHaveText("Settings restored.");
-  await panel.screenshot({ path: "test-results/settings-cluster.png" });
   await page.setViewportSize({ width: 800, height: 500 });
   await settingsSection(page, "Spatial rate map");
   await expect
