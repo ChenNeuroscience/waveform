@@ -48,7 +48,11 @@ export function FloatingWindow({
       const b = root.current!.getBoundingClientRect();
       setGeometry((g) =>
         Math.abs(g.width - b.width) > 0.5 || (!autoHeight && Math.abs(g.height - b.height) > 0.5)
-          ? fitWindowLayout({ ...g, width: b.width, height: autoHeight ? g.height : b.height }, innerWidth, innerHeight)
+          ? fitWindowLayout(
+              { ...g, width: b.width, height: autoHeight ? g.height : b.height },
+              innerWidth,
+              innerHeight,
+            )
           : g,
       );
     });
