@@ -63,5 +63,4 @@ test("Waveform menu offers both additive pickers and clear files; keyboard focus
   await expect(page.locator(".trial-block")).toHaveCount(6);
   await expect(page).toHaveTitle("demo_box-a [Waveform]");
   await trigger.click();
-  await page.screenshot({ path: "test-results/waveform-file-menu.png" });
 });

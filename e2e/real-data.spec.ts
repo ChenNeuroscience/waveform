@@ -58,10 +58,6 @@ test("user sample: three trials and sixteen tetrodes load without cuts", async (
   await expect(page.getByRole("button", { name: "Select cell 1", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(page.getByRole("button", { name: "Select cell 1", exact: true })).toHaveCount(0);
-  await page.screenshot({
-    path: "test-results/real-recording.png",
-    fullPage: true,
-  });
   expect(errors).toEqual([]);
 });
 test("nine million spikes and 100 cells: import, merge, undo and export", async ({ page }) => {
@@ -102,9 +98,5 @@ test("nine million spikes and 100 cells: import, merge, undo and export", async 
   const hash = (a: Uint16Array) =>
     createHash("sha256").update(new Uint8Array(a.buffer)).digest("hex");
   expect(hash(exported)).toBe(hash(expected));
-  await page.screenshot({
-    path: "test-results/nine-million.png",
-    fullPage: true,
-  });
   expect(errors).toEqual([]);
 });

@@ -111,7 +111,6 @@ test("copy mode compares trials without loading their waveform views, and produc
   expect(content.text).toContain(
     "Values above spatial rate maps and directional maps are peak firing rates (Hz).",
   );
-  await page.screenshot({ path: "test-results/multi-trial-selection.png" });
 
   // Plot toggles also update an existing multi-trial selection.
   await page.getByRole("button", { name: "Spatial rate", exact: true }).click();
@@ -144,9 +143,6 @@ test("copy mode compares trials without loading their waveform views, and produc
   );
   expect(compactContent.text).not.toContain("directional maps");
   expect(compactContent.text).not.toContain("Head direction:");
-  await compact
-    .locator("div")
-    .screenshot({ path: "test-results/multi-trial-clipboard-compact.png" });
   await compact.close();
   await page
     .getByRole("button", { name: "Waveforms", exact: true })
@@ -223,9 +219,6 @@ test("copy mode compares trials without loading their waveform views, and produc
     expect(caption.text).toMatch(/^\d+\.\d Hz$/);
     expect(caption.bottom).toBeLessThanOrEqual(caption.plotTop);
   }
-  await preview
-    .locator("div[contenteditable]")
-    .screenshot({ path: "test-results/multi-trial-clipboard.png" });
   // Editors may discard CSS or substitute fonts; column alignment is structural.
   await preview.locator("table").evaluate((table) => {
     for (const element of [table, ...table.querySelectorAll("[style]")])

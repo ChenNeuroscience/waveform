@@ -101,8 +101,14 @@ Only explicit trial/tetrode/cut choices add browser history entries, so Back/For
 
 ## Simulated recordings
 
-The start screen's demo generates five trials of eight tetrodes (about 50k spikes over 20 minutes each) in Rust, on demand by record range, so no large fake files are held. Cells are place, head-direction or untuned, with Poisson spiking and theta modulation; one or two cells per tetrode drift in amplitude. Tetrode 7 is partly cut and tetrode 8 has no cut. `?demo=quick` is a smaller fixed-seed version for tests; `?demo=stress` targets 1M spikes and 100 cells. The 9M version requires `?demo=stress-9m` and its browser test is skipped unless `WAVEFORM_STRESS_9M=1` is set explicitly.
+The start screen's demo generates five trials of eight tetrodes (about 50k spikes over 20 minutes each) in Rust, on demand by record range, so no large fake files are held. Cells are place, head-direction or untuned, with Poisson spiking and theta modulation; one or two cells per tetrode drift in amplitude. Tetrode 7 is partly cut and tetrode 8 has no cut. `?demo=quick` is a smaller fixed-seed version for tests; `?demo=stress` targets 1M spikes and 100 cells. The 9M version requires `?demo=stress-9m`; setting `WAVEFORM_STRESS_9M=1` runs the browser stress workflow at 9M instead of the default 1M.
 
 ## Static hosting
 
 Vite emits relative paths and a hashed Wasm asset, so the app runs from GitHub Pages under `/waveform/` with no server, SharedArrayBuffer or cross-origin isolation headers.
+
+## Browser coverage
+
+The regular suite has 34 cases, with two real-data cases enabled only when their external fixtures are available. Related actions share a loaded recording: 3D navigation and projection restore, PCA cuts and refitting, pane gestures and cell clipboard, and position copy and spatial autocorrelation. This avoids repeating demo generation and GPU setup for cosmetic checks. Full-population edit/undo/export, missing trial data, folder identity, GPU format fallbacks, persisted settings, and production-subpath loading remain browser workflows.
+
+Numerical binning, palette rules and small drawing edge cases belong in Rust or Vitest. Position-cache checks observe the base canvas actually drawn rather than requiring two PNGs to differ. Routine successful runs do not save screenshots; failures retain a screenshot and DOM/action trace, without continuous GPU screenshots.
