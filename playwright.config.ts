@@ -2,6 +2,8 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   timeout: 60000,
+  // Report the first CI failure before spending time on the rest of the suite.
+  maxFailures: process.env.CI ? 1 : undefined,
   workers: 1,
   use: {
     baseURL: "http://127.0.0.1:4173",
