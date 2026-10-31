@@ -713,7 +713,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     // revision, so edits only recompute cells whose membership changed.
     const hashes = new Uint32Array(w.memory.buffer, w.engine_cell_hashes(e), 2048);
     const membership = `${counts(a)[m.cell]}:${hashes[m.cell * 2]}:${hashes[m.cell * 2 + 1]}`;
-    const key = `${a.key}|${membership}|${positionKey(m)}|${opts.binCm}|${opts.smooth}|${opts.acWindow}|${opts.dirBin}|${opts.speedBin}|${opts.speedMax}|SC:${m.spatialAc ? opts.scMinOverlap : "off"}`;
+    const key = `${a.key}|${membership}|${positionKey(m)}|${opts.binCm}|${opts.smooth}|${opts.acWindow}|${opts.acBinMs}|${opts.dirBin}|${opts.dirSmooth}|${opts.speedBin}|${opts.speedMax}|SC:${m.spatialAc ? opts.scMinOverlap : "off"}`;
     let result = analyses.get(key);
     if (result) {
       analyses.delete(key);

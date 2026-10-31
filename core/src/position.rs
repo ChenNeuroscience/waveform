@@ -366,7 +366,9 @@ fn analyse(
     bin: f32,
     smoothing: usize,
     window: f64,
+    ac_bin_ms: f64,
     dir_bin: f32,
+    dir_smoothing: usize,
     speed_bin: f32,
     speed_max: f32,
 ) -> Analysis {
@@ -375,7 +377,17 @@ fn analyse(
     e.ensure_groups();
     let ids = &e.groups[cell as usize];
     let n = ids.len();
-    let mut ac = vec![0.; 100];
+    let window = if window.is_finite() {
+        window.clamp(1., 10000.)
+    } else {
+        1000.
+    };
+    let ac_bin_ms = if ac_bin_ms.is_finite() {
+        ac_bin_ms.clamp(0.1, window)
+    } else {
+        5.
+    };
+    let mut ac = vec![0.; (window / ac_bin_ms).ceil() as usize];
     let mut violations = 0;
     for pair in ids.windows(2) {
         if e.times[pair[1] as usize].saturating_sub(e.times[pair[0] as usize]) as f64 / tb < 0.002 {
@@ -390,7 +402,8 @@ fn analyse(
             if dt >= window {
                 break;
             }
-            ac[((dt / window * 100.).floor() as usize).min(99)] += 1.;
+            let bin = ((dt / ac_bin_ms).floor() as usize).min(ac.len() - 1);
+            ac[bin] += 1.;
         }
     }
     let (w, h) = pos
@@ -497,7 +510,8 @@ fn analyse(
     let mut direction = vec![0.; nd];
     for (i, v) in direction.iter_mut().enumerate() {
         let (mut a, mut b) = (0., 0.);
-        for j in -(smoothing as isize)..=smoothing as isize {
+        let radius = dir_smoothing.min(nd);
+        for j in -(radius as isize)..=radius as isize {
             let k = (i as isize + j).rem_euclid(nd as isize) as usize;
             a += hd[k];
             b += od[k];
@@ -601,7 +615,9 @@ pub unsafe extern "C" fn engine_analyse(
     bin: f32,
     smoothing: usize,
     window: f64,
+    ac_bin_ms: f64,
     dir_bin: f32,
+    dir_smoothing: usize,
     speed_bin: f32,
     speed_max: f32,
 ) {
@@ -615,7 +631,9 @@ pub unsafe extern "C" fn engine_analyse(
         bin,
         smoothing,
         window,
+        ac_bin_ms,
         dir_bin,
+        dir_smoothing,
         speed_bin,
         speed_max,
     );
@@ -747,6 +765,89 @@ mod tests {
         assert!(!pixel_swap_candidate([10, 30], [stats[0]; 2]));
     }
     #[test]
+    fn directional_smoothing_is_independent_of_spatial_binning_and_smoothing() {
+        let mut p = recording(
+            &[
+                [30, 20, 20, 20, 12, 12],
+                [20, 30, 20, 20, 12, 12],
+                [10, 20, 20, 20, 12, 12],
+                [20, 10, 20, 20, 12, 12],
+            ],
+            100.,
+            1.,
+        );
+        p.process(2, 0., 0.);
+        let mut e = Engine::new(1);
+        e.times = vec![0];
+        e.labels = vec![1];
+        let a = analyse(
+            &mut e,
+            Some(&p),
+            1,
+            1000.,
+            4.,
+            5.,
+            0,
+            1000.,
+            5.,
+            90.,
+            0,
+            4.,
+            45.,
+        );
+        let b = analyse(
+            &mut e,
+            Some(&p),
+            1,
+            1000.,
+            4.,
+            5.,
+            0,
+            1000.,
+            5.,
+            90.,
+            1,
+            4.,
+            45.,
+        );
+        let c = analyse(
+            &mut e,
+            Some(&p),
+            1,
+            1000.,
+            4.,
+            10.,
+            2,
+            1000.,
+            5.,
+            90.,
+            0,
+            4.,
+            45.,
+        );
+        assert_ne!(a.direction, b.direction);
+        assert_eq!(a.direction, c.direction);
+        assert!(a
+            .spatial
+            .iter()
+            .zip(&b.spatial)
+            .all(|(a, b)| a == b || (a.is_nan() && b.is_nan())));
+    }
+
+    #[test]
+    fn temporal_window_and_bin_width_are_independent() {
+        let mut e = Engine::new(4);
+        e.times = vec![0, 5, 15, 25];
+        e.labels = vec![1; 4];
+        let a = analyse(&mut e, None, 1, 1000., 1., 3., 1, 20., 5., 6., 1, 4., 45.);
+        assert_eq!(a.ac, vec![0., 1., 2., 1.]);
+        let b = analyse(&mut e, None, 1, 1000., 1., 3., 1, 18., 7., 6., 1, 4., 45.);
+        assert_eq!(b.ac, vec![1., 2., 1.]);
+        let c = analyse(&mut e, None, 1, 1000., 1., 3., 1, 20., 50., 6., 1, 4., 45.);
+        assert_eq!(c.ac, vec![4.]);
+    }
+
+    #[test]
     fn nominal_sampling_controls_dwell_speed_and_spike_assignment() {
         let rows: Vec<_> = (20..24).map(|x| [x, 20, 1023, 1023, 12, 0]).collect();
         let mut p = recording(&rows, 100., 50.);
@@ -759,7 +860,21 @@ mod tests {
         let mut e = Engine::new(10);
         e.times = vec![0, 10, 20, 39, 40, 59, 60, 79, 80, 1000];
         e.labels = vec![1; 10];
-        let a = analyse(&mut e, Some(&p), 1, 1000., 1., 1., 0, 100., 6., 4., 100.);
+        let a = analyse(
+            &mut e,
+            Some(&p),
+            1,
+            1000.,
+            1.,
+            1.,
+            0,
+            100.,
+            1.,
+            6.,
+            1,
+            4.,
+            100.,
+        );
         let x: Vec<_> = a
             .spikes
             .chunks_exact(2)
@@ -800,7 +915,21 @@ mod tests {
         let mut e = Engine::new(10);
         e.times = (0..10).map(|i| i * 100).collect();
         e.labels = vec![1; 10];
-        let a = analyse(&mut e, Some(&p), 1, 1000., 2., 5., 1, 100., 6., 4., 45.);
+        let a = analyse(
+            &mut e,
+            Some(&p),
+            1,
+            1000.,
+            2.,
+            5.,
+            1,
+            100.,
+            1.,
+            6.,
+            1,
+            4.,
+            45.,
+        );
         assert_eq!(a.spatial.iter().filter(|v| v.is_finite()).count(), 1);
         assert!((a.spatial[21] - 5.).abs() < 1e-4);
         assert!(a.spatial[0].is_nan());
@@ -813,7 +942,21 @@ mod tests {
         let mut e = Engine::new(1);
         e.times = vec![0];
         e.labels = vec![1];
-        let a = analyse(&mut e, Some(&p), 1, 1000., 1., 5., 0, 100., 6., 4., 45.);
+        let a = analyse(
+            &mut e,
+            Some(&p),
+            1,
+            1000.,
+            1.,
+            5.,
+            0,
+            100.,
+            1.,
+            6.,
+            1,
+            4.,
+            45.,
+        );
         assert_eq!(a.spatial.iter().filter(|v| v.is_finite()).count(), 1);
         assert!((a.spatial[21] - 2000.).abs() < 1e-3);
     }
@@ -837,7 +980,21 @@ mod tests {
         let mut e = Engine::new(3);
         e.times = vec![100, 1100, 2100];
         e.labels = vec![1; 3];
-        let a = analyse(&mut e, Some(&p), 1, 1000., 3., 5., 0, 100., 6., 4., 45.);
+        let a = analyse(
+            &mut e,
+            Some(&p),
+            1,
+            1000.,
+            3.,
+            5.,
+            0,
+            100.,
+            1.,
+            6.,
+            1,
+            4.,
+            45.,
+        );
         assert_eq!(a.spatial[0], 1.);
         assert_eq!(a.spatial[3], 0.5);
         assert_eq!(a.ac.iter().sum::<f32>(), 0.);

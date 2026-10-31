@@ -86,10 +86,12 @@ function analysisSettingsKey(s: Settings) {
     s.binCm,
     s.smooth,
     s.acWindow,
+    s.acBinMs,
     s.leds,
     s.maxSpeed,
     s.posSmooth,
     s.dirBin,
+    s.dirSmooth,
     s.speedBin,
     s.speedMax,
   ].join("|");

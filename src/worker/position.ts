@@ -92,7 +92,9 @@ export function analyse(
     s.binCm,
     s.smooth,
     s.acWindow,
+    s.acBinMs,
     s.dirBin,
+    s.dirSmooth,
     s.speedBin,
     s.speedMax,
   );

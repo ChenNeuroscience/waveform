@@ -21,6 +21,13 @@ test("K and Z toggle their own windows even when another pane has focus", async 
   await expect(help).toHaveCount(0);
   await page.keyboard.press("z");
   await expect(history).toBeVisible();
+  await expect(
+    history.getByText("Each cut keeps its own undo and redo history", { exact: false }),
+  ).toHaveCount(0);
+  const actions = history.getByRole("group", { name: "History actions", exact: true });
+  await expect(actions.getByRole("button")).toHaveText(["", ""]);
+  await expect(actions.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
+  await expect(actions.getByRole("button", { name: "Redo", exact: true })).toBeDisabled();
   await page.keyboard.press("z");
   await expect(history).toHaveCount(0);
   await page.keyboard.press("k");
@@ -54,6 +61,7 @@ test("Space closes windows; copied tiles have one title and frozen stats only on
   const copy = page.getByRole("dialog").filter({ has: page.locator(".tile-copy") });
   await expect(copy).toHaveCount(1);
   const title = (await copy.locator(".floating-titlebar > span").textContent())!;
+  expect(title).toBe("demo_box-a · t1 c1");
   await expect(copy.getByText(title, { exact: true })).toHaveCount(1);
   await expect(copy.locator(".floating-content").getByText(title, { exact: true })).toHaveCount(0);
   const image = copy.locator(".plot-copy"),

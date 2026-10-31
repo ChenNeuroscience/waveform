@@ -31,11 +31,13 @@ export interface Settings {
   maxRate: number;
   rateMapSteps: number;
   acWindow: number;
+  acBinMs: number;
   scMinOverlap: number;
   leds: number;
   maxSpeed: number;
   posSmooth: number;
   dirBin: number;
+  dirSmooth: number;
   speedBin: number;
   speedMax: number;
 }
@@ -46,12 +48,14 @@ export const defaultSettings: Settings = {
   smooth: 1,
   maxRate: 0,
   rateMapSteps: 5,
-  acWindow: 100,
+  acWindow: 1000,
+  acBinMs: 5,
   scMinOverlap: 20,
   leds: 2,
   maxSpeed: 4,
   posSmooth: 0.3,
   dirBin: 6,
+  dirSmooth: 1,
   speedBin: 4,
   speedMax: 45,
 };

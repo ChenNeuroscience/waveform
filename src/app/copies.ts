@@ -114,7 +114,7 @@ export function useCopies({
     const width = Math.min(innerWidth - 20, Math.max(280, canvas.width / ratio));
     const height = ((width - 2) * canvas.height) / canvas.width + 27;
     add({
-      title: `${trial?.name} · T${tetNum} · cell ${n} (copy)`,
+      title: `${trial?.name} · t${tetNum} c${n}`,
       cell: n,
       stats: tileStats(n),
       image: canvas.toDataURL(),
