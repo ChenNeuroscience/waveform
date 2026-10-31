@@ -1,5 +1,5 @@
+import { settingsSection, ready } from "./controls";
 import { test, expect } from "@playwright/test";
-import { ready } from "./controls";
 
 test("tetrode switches preserve position canvases without redrawing the speed histogram", async ({
   page,
@@ -82,6 +82,7 @@ test("tetrode switches preserve position canvases without redrawing the speed hi
 
   // A speed-binning change must invalidate the histogram even within one trial.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settingsSection(page, "Speed tuning");
   await page.getByRole("slider", { name: "Speed bin width", exact: true }).fill("8");
   await expect(speed).toBeVisible();
   await expect

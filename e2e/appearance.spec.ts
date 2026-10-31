@@ -1,6 +1,5 @@
-import { destination, paintSources } from "./controls";
+import { settingsSection, destination, paintSources, ready } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
-import { ready } from "./controls";
 
 async function demo(page: Page) {
   await page.goto("/?demo=quick");
@@ -114,6 +113,7 @@ test("feature corner labels survive Space copies; settings and divider positions
     .getByRole("button", { name: "Waveforms", exact: true })
     .click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settingsSection(page, "Speed tuning");
   const settings = page.getByRole("dialog", { name: "Settings", exact: true });
   await page.getByRole("slider", { name: "Maximum speed shown", exact: true }).fill("60");
   const window = (await settings.boundingBox())!;
@@ -144,6 +144,7 @@ test("feature corner labels survive Space copies; settings and divider positions
     "false",
   );
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settingsSection(page, "Speed tuning");
   await expect(page.getByRole("slider", { name: "Maximum speed shown", exact: true })).toHaveValue(
     "60",
   );

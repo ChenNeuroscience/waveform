@@ -217,6 +217,7 @@ export function Clusters({
       className="clusters"
       ref={wrapper}
       data-columns={columns}
+      data-dimension="2"
       data-features={coordinates.mode}
       data-colour-mode={settings.renderMode}
       data-feature-key={coordinates.key}
@@ -284,6 +285,26 @@ export function captureFeatureGrid(): HTMLCanvasElement | undefined {
   const ctx = copy.getContext("2d")!;
   ctx.drawImage(source, 0, 0);
   ctx.scale(scale, scale);
+  if (root.dataset.dimension === "3") {
+    for (const line of root.querySelectorAll(".cluster-3d-axes line")) {
+      ctx.strokeStyle = line.getAttribute("stroke") || "#d5d8dc";
+      ctx.lineWidth = Number(line.getAttribute("stroke-width") || 1);
+      ctx.beginPath();
+      ctx.moveTo(Number(line.getAttribute("x1")), Number(line.getAttribute("y1")));
+      ctx.lineTo(Number(line.getAttribute("x2")), Number(line.getAttribute("y2")));
+      ctx.stroke();
+    }
+    ctx.font = "10px Arial";
+    for (const label of root.querySelectorAll(".cluster-3d-axes text")) {
+      ctx.fillStyle = label.getAttribute("fill") || "#333";
+      ctx.fillText(
+        label.textContent || "",
+        Number(label.getAttribute("x")),
+        Number(label.getAttribute("y")),
+      );
+    }
+    return copy;
+  }
   ctx.font = "9px Arial";
   for (const [i, label] of [
     ...root.querySelectorAll<HTMLElement>(".projection-labels>div"),

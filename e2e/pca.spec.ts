@@ -1,8 +1,8 @@
+import { settingsSection, destination, ready, exportCut, source } from "./controls";
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { pcaRecording } from "../tests/pca-fixture";
 import { decodeCut } from "../tests/wasm";
-import { destination, ready, exportCut, source } from "./controls";
 
 async function watchFeatures(page: Page) {
   await page.addInitScript(() => {
@@ -157,6 +157,7 @@ test("sampling is configurable and persistent while every spike is still project
   expect(first.samples).toBe(5000);
   expect(first.length).toBeGreaterThan(17000 * 4);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settingsSection(page, "Cluster plots");
   const samples = page.getByRole("slider", { name: "PCA fit sample size", exact: true });
   await samples.fill("1000");
   await expect(clusters).toHaveAttribute("data-feature-key", /\|pca:1000$/);

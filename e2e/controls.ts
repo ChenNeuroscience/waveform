@@ -82,3 +82,16 @@ export async function setDensity(page: Page, enabled: boolean) {
   }
   await expect(toggle).toHaveAttribute("aria-pressed", String(enabled));
 }
+
+/** Open one settings section, leaving the accordion state unchanged if already open. */
+export async function settingsSection(page: Page, title: string) {
+  const section = page
+    .getByRole("dialog", { name: "Settings", exact: true })
+    .getByRole("button", { name: title, exact: true });
+  if ((await section.getAttribute("aria-expanded")) !== "true") await section.click();
+}
+
+export async function projectionAction(page: Page, name: string) {
+  await page.getByRole("button", { name: "3D settings", exact: true }).click();
+  await page.getByRole("menuitem", { name, exact: true }).click();
+}

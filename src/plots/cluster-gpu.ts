@@ -1,7 +1,7 @@
 import { program } from "./webgl";
 import { DENSITY_COLOUR_GLSL } from "./density-colours";
 import { groupPalette } from "../palette";
-import type { FeatureCoordinates, Settings, ViewData } from "../types";
+import type { FeatureCoordinates, FeatureProjection, Settings, ViewData } from "../types";
 import { projectionFrame, featurePlotOrigin, FEATURE_PLOT } from "./plot-geometry";
 
 /** The six feature-space projections drawn as GPU points, plus the drift view. */
@@ -11,6 +11,7 @@ layout(location=0) in vec4 amplitudes;
 layout(location=1) in uint ticks;
 layout(location=2) in uint cell;
 uniform int ax;uniform int ay;uniform float size;uniform int selected;uniform float opacity;uniform vec2 range;uniform float timeScale;
+uniform bool threeD;uniform vec4 viewX;uniform vec4 viewY;uniform vec4 viewZ;uniform ivec3 featureAxes;
 out vec4 shade;out float time;
 float axis(int a){return a==4?time:amplitudes[a];}
 const vec3 groupColors[31]=vec3[31](${groupPalette.map((c) => `vec3(${c.map((v) => `${v}.`).join(",")})`).join(",")});
@@ -18,6 +19,7 @@ vec3 palette(float c){int i=int(c);return i<31?groupColors[i]/255.:vec3(0.);}
 void main(){
  time=float(ticks)*timeScale;
  float x=axis(ax),y=axis(ay);gl_Position=vec4(x*1.86-.93,y*1.86-.93,int(cell)==selected?-.5:0.,1.);gl_PointSize=size;
+ if(threeD){vec4 p=vec4(amplitudes[featureAxes.x],amplitudes[featureAxes.y],amplitudes[featureAxes.z],1.);gl_Position=vec4(dot(viewX,p)*2.-1.,dot(viewY,p)*2.-1.,dot(viewZ,p)*1.6-.8-(int(cell)==selected?.000016:0.),1.);}
  bool hide=time<range.x||time>range.y;
  shade=vec4(palette(float(cell)),hide?0.:opacity);
 }`;
@@ -100,11 +102,12 @@ export class ClusterGPU {
   draw(
     data: ViewData,
     coordinates: FeatureCoordinates,
-    s: Settings,
+    s: Pick<Settings, "renderMode">,
     selected: number,
     range: number[],
     axes: number[][],
     columns = 3,
+    view?: FeatureProjection,
   ) {
     const gl = this.gl;
     const dpr = Math.min(2, devicePixelRatio || 1);
@@ -179,7 +182,7 @@ export class ClusterGPU {
       }
     }
     const aggregate = s.renderMode === "density" || (s.renderMode === "drift" && this.timed);
-    const countsKey = `${key}|${w}|${h}|${dpr}|${columns}|${range}`;
+    const countsKey = `${key}|${w}|${h}|${dpr}|${columns}|${range}|${view?.matrix}`;
     const reuseCounts =
       aggregate &&
       this.countsFor?.key === countsKey &&
@@ -215,28 +218,39 @@ export class ClusterGPU {
       gl.uniform1i(u("selected"), selected);
       gl.uniform2f(u("range"), range[0], range[1]);
       gl.uniform1f(u("timeScale"), cached.timeScale);
-      axes.forEach(([ax, ay], i) => {
-        const origin = featurePlotOrigin(i, columns);
-        const x = Math.round(origin.x * dpr);
-        const y = Math.round(h - (origin.y + FEATURE_PLOT) * dpr);
-        const hh = Math.round(FEATURE_PLOT * dpr);
-        const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
-        gl.viewport(
-          x + frame.x * dpr,
-          y + hh - (frame.y + frame.height) * dpr,
-          frame.width * dpr,
-          frame.height * dpr,
-        );
-        gl.scissor(
-          x + frame.x * dpr,
-          y + hh - (frame.y + frame.height) * dpr,
-          frame.width * dpr,
-          frame.height * dpr,
-        );
-        gl.uniform1i(u("ax"), ax);
-        gl.uniform1i(u("ay"), ay);
-        gl.drawArrays(gl.POINTS, 0, cached!.n);
-      });
+      gl.uniform1i(u("threeD"), view ? 1 : 0);
+      if (view) {
+        gl.uniform3iv(u("featureAxes"), view.axes);
+        gl.uniform4fv(u("viewX"), view.matrix.slice(0, 4));
+        gl.uniform4fv(u("viewY"), view.matrix.slice(4, 8));
+        gl.uniform4fv(u("viewZ"), view.matrix.slice(8, 12));
+        gl.viewport(0, 0, w, h);
+        gl.scissor(0, 0, w, h);
+        gl.drawArrays(gl.POINTS, 0, cached.n);
+      } else {
+        axes.forEach(([ax, ay], i) => {
+          const origin = featurePlotOrigin(i, columns);
+          const x = Math.round(origin.x * dpr);
+          const y = Math.round(h - (origin.y + FEATURE_PLOT) * dpr);
+          const hh = Math.round(FEATURE_PLOT * dpr);
+          const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
+          gl.viewport(
+            x + frame.x * dpr,
+            y + hh - (frame.y + frame.height) * dpr,
+            frame.width * dpr,
+            frame.height * dpr,
+          );
+          gl.scissor(
+            x + frame.x * dpr,
+            y + hh - (frame.y + frame.height) * dpr,
+            frame.width * dpr,
+            frame.height * dpr,
+          );
+          gl.uniform1i(u("ax"), ax);
+          gl.uniform1i(u("ay"), ay);
+          gl.drawArrays(gl.POINTS, 0, cached!.n);
+        });
+      }
       gl.disable(gl.SCISSOR_TEST);
       if (aggregate) {
         this.countsFor = { key: countsKey, points: coordinates.values };

@@ -15,6 +15,7 @@ export function FloatingWindow({
   grabMode = false,
   preferenceKey,
   comparison = false,
+  autoHeight = false,
 }: {
   title: string;
   children: ReactNode;
@@ -28,8 +29,10 @@ export function FloatingWindow({
   grabMode?: boolean;
   preferenceKey?: string;
   comparison?: boolean;
+  autoHeight?: boolean;
 }) {
   const root = useRef<HTMLElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const [geometry, setGeometry] = usePreference(preferenceKey || null, {
     x,
     y,
@@ -44,8 +47,12 @@ export function FloatingWindow({
     const observer = new ResizeObserver(() => {
       const b = root.current!.getBoundingClientRect();
       setGeometry((g) =>
-        Math.abs(g.width - b.width) > 0.5 || Math.abs(g.height - b.height) > 0.5
-          ? fitWindowLayout({ ...g, width: b.width, height: b.height }, innerWidth, innerHeight)
+        Math.abs(g.width - b.width) > 0.5 || (!autoHeight && Math.abs(g.height - b.height) > 0.5)
+          ? fitWindowLayout(
+              { ...g, width: b.width, height: autoHeight ? g.height : b.height },
+              innerWidth,
+              innerHeight,
+            )
           : g,
       );
     });
@@ -55,7 +62,29 @@ export function FloatingWindow({
       observer.disconnect();
       removeEventListener("resize", clamp);
     };
-  }, [setGeometry]);
+  }, [autoHeight, setGeometry]);
+  useEffect(() => {
+    if (!autoHeight || !content.current) {
+      return;
+    }
+    const fitContent = () => {
+      const height =
+        content.current!.getBoundingClientRect().height +
+        root.current!.querySelector("header")!.getBoundingClientRect().height +
+        2;
+      setGeometry((g) => {
+        const next = fitWindowLayout({ ...g, height }, innerWidth, innerHeight);
+        return Math.abs(next.height - g.height) > 0.5 || next.y !== g.y ? next : g;
+      });
+    };
+    const observer = new ResizeObserver(fitContent);
+    observer.observe(content.current);
+    addEventListener("resize", fitContent);
+    return () => {
+      observer.disconnect();
+      removeEventListener("resize", fitContent);
+    };
+  }, [autoHeight, setGeometry]);
   const focus = () => {
     setZ(++top);
     onFocus?.();
@@ -101,7 +130,7 @@ export function FloatingWindow({
   return (
     <section
       ref={root}
-      className={`floating-window ${comparison ? "comparison-window" : ""}`}
+      className={`floating-window ${comparison ? "comparison-window" : ""} ${autoHeight ? "fit-content-window" : ""}`}
       onPointerDown={comparison ? drag : undefined}
       role="dialog"
       aria-modal="false"
@@ -121,7 +150,9 @@ export function FloatingWindow({
           <X size={13} />
         </button>
       </header>
-      <div className="floating-content">{children}</div>
+      <div className="floating-content">
+        {autoHeight ? <div ref={content}>{children}</div> : children}
+      </div>
     </section>
   );
 }

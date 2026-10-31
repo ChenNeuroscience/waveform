@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Toolbar } from "./shell/Toolbar";
 import { RenderingToggles } from "./shell/RenderingToggles";
 import { FilesPane } from "./shell/FilesPane";
@@ -36,6 +36,7 @@ import {
   type SwapState,
   type TileFeedback,
   type FeatureMode,
+  type FeatureProjection,
 } from "./types";
 import { Superseded, type EditRequest } from "./worker/protocol";
 import { TOOL_PANELS, type PanelContext, type PanelName } from "./shell/panels";
@@ -45,6 +46,7 @@ import { useCopies } from "./app/copies";
 import { useFeatureSpace } from "./app/features";
 import { useSplit } from "./app/split";
 import { CopyWindow } from "./shell/CopyWindow";
+import { GrabOutline } from "./shell/GrabOutline";
 import { downloadBlob, organiseFiles } from "./files";
 function readSettings(): Settings {
   try {
@@ -164,7 +166,8 @@ export default function App() {
   const [cell, setCell] = useState(1);
   const [sources, setSources] = useState<number[]>([1]);
   const [dest, setDest] = useState(2);
-  const [tool, setTool] = useState("brush");
+  const [feature3D, setFeature3D] = usePreference("cluster-3d", false);
+  const [tool, setTool] = useState(() => (feature3D ? "orbit" : "brush"));
   const [featurePreference, setFeatureMode] = usePreference<FeatureMode>(
     "feature-mode",
     "amplitudes",
@@ -204,7 +207,22 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNoticeText] = useState("");
+  const [noticeIsError, setNoticeIsError] = useState(false);
+  const setNotice = useCallback((message: string) => {
+    setNoticeText(message);
+    setNoticeIsError(false);
+  }, []);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const showTimedNotice = (message: string, isError = false) => {
+    clearTimeout(noticeTimer.current);
+    setNoticeText(message);
+    setNoticeIsError(isError);
+    noticeTimer.current = setTimeout(() => {
+      setNoticeText((current) => (current === message ? "" : current));
+    }, 5000);
+  };
+  useEffect(() => () => clearTimeout(noticeTimer.current), []);
   const [drag, setDrag] = useState(false);
   // Bumped when a cut file finishes preparing, to re-render its export-ready marker.
   const [, setDownloadVersion] = useState(0);
@@ -615,7 +633,7 @@ export default function App() {
       });
     }
   };
-  const polygon = (points: number[], ax: number, ay: number) => {
+  const polygon = (points: number[], ax: number, ay: number, projection?: FeatureProjection) => {
     if (!featureSpace.coordinates) {
       return;
     }
@@ -630,8 +648,9 @@ export default function App() {
       ax,
       ay,
       polygon: points,
+      projection,
       featureKey: featureMode === "pca" ? featureSpace.coordinates.key : undefined,
-      description: `${tool === "brush" ? "Brush" : "Lasso"}${featureMode === "pca" ? " (PCs)" : ""} ${sources.join(", ")} → ${dest}`,
+      description: `${tool === "brush" ? "Brush" : "Lasso"}${projection ? " 3D" : ""}${featureMode === "pca" ? " (PCs)" : ""} ${sources.join(", ")} → ${dest}`,
     });
   };
   const exportCut = async () => {
@@ -655,6 +674,7 @@ export default function App() {
   // Actions are wrapped so they are looked up when a key is pressed (some are
   // declared further down this component).
   useShortcuts({
+    defaultTool: feature3D ? "orbit" : "brush",
     toggleFeatures: () => setFeatureMode((mode) => (mode === "pca" ? "amplitudes" : "pca")),
     ready,
     dragging: !!dragComparison,
@@ -693,9 +713,19 @@ export default function App() {
         setPanels((ps) => ps.filter((p) => p !== pane));
       }
       setPane(null);
-      setTool("brush");
+      if (!feature3D) {
+        setTool("brush");
+      }
     },
-    togglePane: (name) => setPane((p) => (p === name ? null : name)),
+    togglePane: (name) => {
+      if (panels.includes(name)) {
+        setPanels((open) => open.filter((panel) => panel !== name));
+        setPane((focused) => (focused === name ? null : focused));
+      } else {
+        setPanels((open) => [...open, name]);
+        setPane(name);
+      }
+    },
     setTool,
     update,
     selectDest: (g) => selectDest(g),
@@ -795,6 +825,8 @@ export default function App() {
     settings,
     update,
     resetSettings: () => setSettings(defaultSettings),
+    restoreSettings: setSettings,
+    notify: showTimedNotice,
     ready,
     operation: (type) => operation(type),
     history: data,
@@ -837,6 +869,7 @@ export default function App() {
       onDragLeave={(e) => !e.relatedTarget && setDrag(false)}
       onDrop={drop}
     >
+      <GrabOutline active={grabMode} />
       <FileInputs fileInput={fileInput} folderInput={folderInput} onImport={importFiles} />
       {trials.length > 0 ? (
         <>
@@ -904,6 +937,12 @@ export default function App() {
               <Divider part="position" onDrag={panes.dragDivider} />
               <FeaturePane
                 {...{ data, settings, cell, painting, grabMode }}
+                threeD={feature3D}
+                onThreeD={(enabled) => {
+                  setFeature3D(enabled);
+                  setTool(enabled ? "orbit" : "brush");
+                }}
+                onNotice={showTimedNotice}
                 mode={featureMode}
                 onMode={setFeatureMode}
                 coordinates={featureSpace.coordinates}
@@ -988,7 +1027,7 @@ export default function App() {
         />
       )}
       <Notice
-        error={error}
+        error={error || (noticeIsError ? notice : "")}
         notice={notice}
         onDismiss={() => (error ? setError("") : setNotice(""))}
       />
@@ -1010,6 +1049,7 @@ export default function App() {
             x={panel.x}
             y={panel.y}
             height={panel.height}
+            autoHeight={name === "settings"}
             onFocus={() => setPane(name)}
             onClose={() => closePanel(name)}
           >

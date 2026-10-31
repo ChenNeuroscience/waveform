@@ -1,5 +1,5 @@
+import { settingsSection, ready, setDensity } from "./controls";
 import { test, expect } from "@playwright/test";
-import { ready, setDensity } from "./controls";
 import { rateMapPalette } from "../src/palette";
 
 test("waveforms use the tile's full height with and without analysis plots", async ({ page }) => {
@@ -102,6 +102,7 @@ test("spatial maps default to v1 colours and save, restore and reset custom step
   await expect.poll(colours).toEqual(expect.arrayContaining(rateMapPalette()));
   await checkPalette(5);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settingsSection(page, "Spatial rate map");
   const steps = page.getByRole("slider", { name: "Rate-map colour steps", exact: true });
   await expect(steps).toHaveValue("5");
   await steps.fill("9");
@@ -124,6 +125,7 @@ test("spatial maps default to v1 colours and save, restore and reset custom step
   await page.getByText("Try it now with simulated data").click();
   await ready(page);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settingsSection(page, "Spatial rate map");
   await expect(steps).toHaveValue("9");
   await checkPalette(9);
   await page.getByRole("button", { name: "Reset settings", exact: true }).click();
