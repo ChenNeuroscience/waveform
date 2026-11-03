@@ -2,7 +2,7 @@
 
 # Waveform
 
-Waveform is a browser-based workspace for exploring tetrode recordings and editing spike clusters. Drop in a folder of LTX files to inspect waveforms and firing patterns, refine clusters and export your cuts.
+Waveform is a browser-based workspace for exploring tetrode recordings and editing spike clusters. Drop in a folder of [LTX files](https://github.com/ChenNeuroscience/ltx-format) to inspect waveforms and firing patterns, refine clusters and export your cuts.
 
 **[Open Waveform](https://chenneuroscience.github.io/waveform/)**, then try the simulated data on the start screen or drop in your own files.
 
