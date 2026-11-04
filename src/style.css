@@ -1391,6 +1391,79 @@ kbd {
   margin: 0;
   overflow-wrap: anywhere;
 }
+.headers-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.headers-section button {
+  font: 10px Arial;
+  padding: 1px 6px;
+}
+.header-editable {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.header-editable em {
+  color: #a15c00;
+  font-style: normal;
+}
+.header-editable button {
+  display: inline-flex;
+  padding: 2px;
+  margin-left: auto;
+}
+.header-editable input {
+  width: 90px;
+  font: inherit;
+}
+.header-editable input[aria-invalid="true"] {
+  outline: 1px solid #c62828;
+}
+.headers-button {
+  position: relative;
+}
+.headers-changed {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e08a00;
+  box-shadow: 0 0 0 1px white;
+}
+.position-warning {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px;
+  font: 11px/15px Arial;
+  color: #5c3b00;
+  background: #fff4d6;
+  border: 1px solid #e0b24a;
+  border-radius: 3px;
+}
+.position-warning svg {
+  flex: none;
+  margin-top: 1px;
+  color: #a15c00;
+}
+.position-warning button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
 
 @media (max-width: 900px) {
   .desktop-toolbar {

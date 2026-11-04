@@ -137,6 +137,9 @@ export type ViewMessage = Omit<ViewData, "features" | "times"> &
   Partial<Pick<ViewData, "features" | "times">>;
 /** The animal's path, shared by every cell; sent once per position settings. */
 export interface Trajectory {
+  /** The calibration used, and whether it's only a guess because no file or edit gave one. */
+  ppm: number;
+  ppmEstimated: boolean;
   path: Float32Array;
   arenaWidth: number;
   arenaHeight: number;
@@ -165,9 +168,23 @@ export interface AnalysisData {
   rate: number;
 }
 export const fileId = (f: File) => `${f.webkitRelativePath || f.name}:${f.size}:${f.lastModified}`;
-/** The worker cache key for a trial's position file, or "" without one. */
-export const positionKey = (trial: Trial | undefined) =>
-  trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : "";
+/** Header values changed in the browser, by `fileId`. They are never written to the files,
+ * and last only as long as the browser has the files. */
+export type HeaderEdits = Record<string, Header>;
+const editedPpm = (trial: Trial | undefined, edits: HeaderEdits) =>
+  trial?.pos ? edits[fileId(trial.pos)]?.pixels_per_metre : undefined;
+/** The worker cache key for a trial's position file and its calibration, or "" without one. */
+export const positionKey = (trial: Trial | undefined, edits: HeaderEdits) =>
+  trial?.pos ? `${trial.id}|${fileId(trial.pos)}|${editedPpm(trial, edits) ?? ""}` : "";
+/** What the worker needs to process a trial's position. */
+export const positionSource = (trial: Trial | undefined, edits: HeaderEdits) => {
+  const ppm = editedPpm(trial, edits);
+  return {
+    pos: trial?.pos,
+    posKey: positionKey(trial, edits),
+    ppm: ppm === undefined ? undefined : parseFloat(ppm),
+  };
+};
 export { groupTextColor } from "./palette";
 import { groupRgb8, groupTextColor } from "./palette";
 export const cellRgb = (cell: number) => groupRgb8(cell).map((value) => value / 255);

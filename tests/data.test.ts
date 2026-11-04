@@ -44,6 +44,21 @@ describe("LTX import", () => {
     expect(parseHeader(bytes).offset).toBe(h.length);
     expect(parseHeader(bytes).header.num_spikes).toBe("1");
   });
+  it("reads a file with no data, which has no markers, but not one that's lost them", () => {
+    const bytes = (text: string) => new TextEncoder().encode(text);
+    const empty = bytes("timebase 96000 hz\r\nnum_spikes 0             ");
+    expect(parseHeader(empty).offset).toBe(empty.length);
+    expect(parseHeader(empty).header.num_spikes).toBe("0");
+    const noPositions = bytes("num_pos_samples 0             ");
+    expect(parseHeader(noPositions).offset).toBe(noPositions.length);
+    for (const damaged of [
+      "num_spikes 3             ",
+      "num_spikes               ",
+      "timebase 96000 hz",
+    ]) {
+      expect(() => parseHeader(bytes(damaged))).toThrow("Missing data_start");
+    }
+  });
   it("groups incrementally and associates alternative cut suffixes", async () => {
     const file = (name: string, text = "") => new File([text], name, { lastModified: 1 });
     let { trials } = await organiseFiles([
@@ -187,7 +202,7 @@ describe("analysis", () => {
       1,
       1000,
       3,
-      { handle: pos, identity: "test", header: {} },
+      { handle: pos, identity: "test", header: {}, ppm: 100, ppmEstimated: false },
       { ...defaultSettings, binCm: 5, smooth: 0 },
     );
     expect(result.spatial[0]).toBe(1);
@@ -201,7 +216,7 @@ describe("analysis", () => {
       1,
       1000,
       3,
-      { handle: pos, identity: "test", header: {} },
+      { handle: pos, identity: "test", header: {}, ppm: 100, ppmEstimated: false },
       { ...defaultSettings, binCm: 5, smooth: 0, scMinOverlap: 2 },
       true,
     );

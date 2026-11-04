@@ -61,6 +61,8 @@ export type SplitRequest = Session &
 export interface PositionRequest {
   pos?: File;
   posKey: string;
+  /** An edited calibration, in place of the file's. */
+  ppm?: number;
   settings: Settings;
 }
 
@@ -73,6 +75,7 @@ export interface CopyRecording {
   cutKey?: string;
   pos?: File;
   posKey: string;
+  ppm?: number;
   set?: File;
 }
 export interface CopyTrialAnalysis {

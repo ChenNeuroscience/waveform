@@ -31,6 +31,8 @@ function HeadersIcon() {
 export function Toolbar(p: {
   busy: boolean;
   data: ViewData | null;
+  /** Whether a header of the active files has a value that isn't the file's. */
+  headersChanged: boolean;
   message: string;
   onOperation: (type: "undo" | "redo") => void;
   onPanel: (panel: PanelName) => void;
@@ -78,11 +80,13 @@ export function Toolbar(p: {
       </button>
       <span className="tool-separator" />
       <button
-        title="File headers [H]"
-        aria-label="File headers"
+        title={`File headers [H]${p.headersChanged ? ": some values are overridden" : ""}`}
+        aria-label={`File headers${p.headersChanged ? " (overridden)" : ""}`}
+        className="headers-button"
         onClick={() => p.onPanel("headers")}
       >
         <HeadersIcon />
+        {p.headersChanged && <span className="headers-changed" />}
       </button>
       <button title="Settings" aria-label="Settings" onClick={() => p.onPanel("settings")}>
         <SettingsIcon size={17} />

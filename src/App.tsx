@@ -25,6 +25,8 @@ import { useRecordingHistory, type RecordingSelection } from "./app/navigation";
 import { request } from "./worker/client";
 import {
   fileId,
+  type Header,
+  type HeaderEdits,
   defaultSettings,
   type Settings,
   type Trial,
@@ -40,6 +42,7 @@ import {
 } from "./types";
 import { Superseded, type EditRequest } from "./worker/protocol";
 import { TOOL_PANELS, type PanelContext, type PanelName } from "./shell/panels";
+import { headersChanged } from "./shell/header-edits";
 import { useShortcuts } from "./app/shortcuts";
 import { useAnalyses } from "./app/analyses";
 import { useCopies } from "./app/copies";
@@ -188,6 +191,7 @@ export default function App() {
   const [toolbar, setToolbar] = usePreference("toolbar", true);
   const [pane, setPane] = useState<Pane>(null);
   const [panels, setPanels] = useState<PanelName[]>([]);
+  const [headerEdits, setHeaderEdits] = useState<HeaderEdits>({});
   // Space held: clicking a plot copies it.
   const [grabMode, setGrabMode] = useState(false);
   // Whether this window has keyboard focus (shortcuts only reach a focused window).
@@ -413,6 +417,7 @@ export default function App() {
     busy,
     trial,
     settings,
+    headerEdits,
     displayCell,
     dragComparison,
     onError: setError,
@@ -429,6 +434,7 @@ export default function App() {
     trial,
     trials,
     settings,
+    headerEdits,
     shown,
     rememberedCut,
     tetNum,
@@ -545,6 +551,7 @@ export default function App() {
   const resetToStart = () => {
     ++loadGen.current; // Ignore replies for the closed recording.
     setTrials([]);
+    setHeaderEdits({});
     setTrialId("");
     setTetNum(1);
     setCutId("");
@@ -821,6 +828,15 @@ export default function App() {
     setPanels((ps) => ps.filter((p) => p !== name));
     setPane(null);
   };
+  const headerFiles = {
+    tetrode: tet?.file && fileId(tet.file),
+    cut: cut?.file && fileId(cut.file),
+    set: trial?.set && fileId(trial.set),
+    position: trial?.pos && fileId(trial.pos),
+  };
+  const estimatedHeaders: Record<string, Header> = trajectory?.ppmEstimated
+    ? { position: { pixels_per_metre: trajectory.ppm.toFixed(1) } }
+    : {};
   const panelContext: PanelContext = {
     settings,
     update,
@@ -831,6 +847,10 @@ export default function App() {
     operation: (type) => operation(type),
     history: data,
     headers: data?.headers || {},
+    headerFiles,
+    headerEdits,
+    estimatedHeaders,
+    setHeaderEdits,
   };
   // Files dragged in from outside (not a cut dragged out of the organiser).
   const dragOver = (e: React.DragEvent) => {
@@ -876,6 +896,7 @@ export default function App() {
           {toolbar ? (
             <Toolbar
               {...{ data, ready, busy, progress, message, shown }}
+              headersChanged={headersChanged(headerFiles, headerEdits, estimatedHeaders)}
               onHome={goHome}
               onOpenFiles={openFiles}
               onOpenFolder={openFolder}
@@ -927,6 +948,7 @@ export default function App() {
                 {...{ data, trial, settings, trajectory, speedDwell, analysis, comparisonAnalysis }}
                 {...{ hoverCell, dragComparison, grabMode }}
                 onPopPlot={popPlot}
+                onOpenHeaders={() => setPane("headers")}
                 onHover={(hovered) => {
                   positionHovered.current = hovered;
                 }}
@@ -1006,7 +1028,7 @@ export default function App() {
                   ref={tileWall}
                   copying={copyMode.cells}
                   copyingPath={copyMode.kind === "path"}
-                  {...{ data, settings, trial, shown, splitPoint, swap, grabMode }}
+                  {...{ data, settings, trial, shown, splitPoint, swap, grabMode, headerEdits }}
                   selected={cell}
                   feedback={tileFeedback}
                   busy={!ready}

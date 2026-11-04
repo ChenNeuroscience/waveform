@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { request } from "../worker/client";
 import { Superseded } from "../worker/protocol";
 import {
-  fileId,
   positionKey,
+  positionSource,
   type AnalysisData,
+  type HeaderEdits,
   type Settings,
   type Trajectory,
   type Trial,
@@ -19,6 +20,7 @@ export function useAnalyses({
   busy,
   trial,
   settings,
+  headerEdits,
   displayCell,
   dragComparison,
   onError,
@@ -27,6 +29,7 @@ export function useAnalyses({
   busy: boolean;
   trial: Trial | undefined;
   settings: Settings;
+  headerEdits: HeaderEdits;
   displayCell: number;
   dragComparison: DragComparison | null;
   onError: (message: string) => void;
@@ -37,9 +40,10 @@ export function useAnalyses({
   );
   const [speedDwell, setSpeedDwell] = useState<{ key: string; values: Float32Array } | null>(null);
   const [comparison, setComparison] = useState<{ key: string; data: AnalysisData } | null>(null);
+  const posKey = positionKey(trial, headerEdits);
   const trajectoryKey =
     data && trial?.pos
-      ? `${positionKey(trial)}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}`
+      ? `${posKey}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}`
       : "";
   const speedDwellKey = trajectoryKey
     ? `${trajectoryKey}|${settings.speedBin}|${settings.speedMax}`
@@ -53,7 +57,7 @@ export function useAnalyses({
       setTrajectory(null);
       return;
     }
-    request("trajectory", { pos: trial.pos, posKey: positionKey(trial), settings })
+    request("trajectory", { ...positionSource(trial, headerEdits), settings })
       .then((t) => {
         if (live) {
           setTrajectory({ key: trajectoryKey, value: t });
@@ -78,8 +82,7 @@ export function useAnalyses({
         request("analysis", {
           session: data.session,
           cell: displayCell,
-          pos: trial?.pos,
-          posKey: positionKey(trial),
+          ...positionSource(trial, headerEdits),
           settings,
         })
           .then((a) => {
@@ -111,7 +114,7 @@ export function useAnalyses({
   }, [
     data,
     displayCell,
-    trial?.pos,
+    posKey,
     settings.binCm,
     settings.smooth,
     settings.acWindow,
@@ -131,7 +134,7 @@ export function useAnalyses({
     data?.session,
     data?.revision,
     trial?.id,
-    trial?.pos ? fileId(trial.pos) : "",
+    posKey,
     settings.leds,
     settings.maxSpeed,
     settings.posSmooth,
@@ -148,8 +151,7 @@ export function useAnalyses({
         request("analysis", {
           session: data.session,
           cell: target,
-          pos: trial?.pos,
-          posKey: positionKey(trial),
+          ...positionSource(trial, headerEdits),
           settings,
         })
           .then((a) => {

@@ -245,7 +245,7 @@ async function positionFor(m: PositionRequest, w: Core) {
   let pos = positions.get(pk);
   if (m.pos && !pos) {
     const base = [...positions.values()].find((p) => p.identity === m.posKey);
-    pos = await parsePosition(m.pos, m.settings, w, m.posKey, base);
+    pos = await parsePosition(m.pos, m.settings, w, m.posKey, base, m.ppm);
     positions.set(pk, pos);
     if (positions.size > 4) {
       const oldest = positions.keys().next().value!;

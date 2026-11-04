@@ -13,6 +13,8 @@ import type { CellStat } from "../tiles/CellStats";
 import {
   fileId,
   positionKey,
+  positionSource,
+  type HeaderEdits,
   type Trial,
   type Tetrode,
   type ViewData,
@@ -59,6 +61,7 @@ export function useCopies({
   trial,
   trials,
   settings,
+  headerEdits,
   shown,
   rememberedCut,
   tetNum,
@@ -70,6 +73,7 @@ export function useCopies({
   trial: Trial | undefined;
   trials: Trial[];
   settings: Settings;
+  headerEdits: HeaderEdits;
   shown: VisiblePlots;
   rememberedCut: (tet: Tetrode) => string;
   tetNum: number;
@@ -172,13 +176,12 @@ export function useCopies({
             assetKey: `${tet.id}|${fileId(tet.file)}`,
             cut: cut?.file,
             cutKey: cut?.id,
-            pos: t.pos,
-            posKey: positionKey(t),
+            ...positionSource(t, headerEdits),
             set: t.set,
           }
         : undefined;
       const revision = t.id === trial.id ? data.revision : cut?.revision || 0;
-      const key = `${recording?.assetKey}|${cut?.id}|${revision}|${positionKey(t)}|${JSON.stringify(settings)}|SC:${shown.sc}`;
+      const key = `${recording?.assetKey}|${cut?.id}|${revision}|${positionKey(t, headerEdits)}|${JSON.stringify(settings)}|SC:${shown.sc}`;
       return { trial: t, recording, key, cut };
     });
     // Even an empty request cancels work for an older trial selection.
