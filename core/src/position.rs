@@ -89,6 +89,8 @@ pub(crate) struct Position {
     height: f32,
     rate: f64,
     ppm: f32,
+    /// The window's width and height, in the file's pixels.
+    span: [f32; 2],
     min_x: f32,
     min_y: f32,
     bearing: f32,
@@ -109,11 +111,36 @@ impl Position {
             height: (max_y - min_y) * 100. / ppm,
             rate,
             ppm,
+            span: [max_x - min_x, max_y - min_y],
             min_x,
             min_y,
             bearing: 0.,
             derived: Default::default(),
         }
+    }
+    /// Sets the calibration, before processing.
+    fn set_ppm(&mut self, ppm: f32) {
+        self.ppm = ppm;
+        self.width = self.span[0] * 100. / ppm;
+        self.height = self.span[1] * 100. / ppm;
+    }
+    /// The larger of the width and height the LEDs covered, in pixels: 0 if they were never seen.
+    fn used_extent(&self) -> f32 {
+        let (mut min, mut max) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+        for spot in &self.raw.spots {
+            for led in spot.chunks_exact(2) {
+                if led[0].is_finite() && led[1].is_finite() {
+                    for axis in 0..2 {
+                        min[axis] = min[axis].min(led[axis]);
+                        max[axis] = max[axis].max(led[axis]);
+                    }
+                }
+            }
+        }
+        if min[0] > max[0] {
+            return 0.;
+        }
+        (max[0] - min[0]).max(max[1] - min[1])
     }
     fn push(&mut self, data: &[u8]) {
         let r = Arc::get_mut(&mut self.raw).unwrap();
@@ -275,6 +302,7 @@ impl Position {
             height: self.height,
             rate: self.rate,
             ppm: self.ppm,
+            span: self.span,
             min_x: self.min_x,
             min_y: self.min_y,
             bearing: self.bearing,
@@ -570,6 +598,14 @@ pub unsafe extern "C" fn position_push(p: *mut Position, data: *const u8, n: usi
     (*p).push(slice::from_raw_parts(data, n));
 }
 #[no_mangle]
+pub unsafe extern "C" fn position_set_ppm(p: *mut Position, ppm: f32) {
+    (*p).set_ppm(ppm);
+}
+#[no_mangle]
+pub unsafe extern "C" fn position_used_extent(p: *const Position) -> f32 {
+    (*p).used_extent()
+}
+#[no_mangle]
 pub unsafe extern "C" fn position_finish(
     p: *mut Position,
     leds: u32,
@@ -701,6 +737,19 @@ mod tests {
         }
         p.push(&bytes);
         p
+    }
+    #[test]
+    fn used_extent_is_the_largest_dimension_of_either_led() {
+        // x spans 100 to 400 with both LEDs together; y only 200 to 250. 1023 is a missing LED.
+        let rows = [[100, 200, 1023, 1023, 10, 0], [300, 250, 400, 220, 10, 10]];
+        let mut p = recording(&rows, 300., 50.);
+        assert_eq!(p.used_extent(), 300.);
+        p.set_ppm(150.);
+        assert_eq!(p.width, 200., "the window, in cm");
+        assert_eq!(
+            recording(&[[1023, 1023, 1023, 1023, 0, 0]], 1., 50.).used_extent(),
+            0.
+        );
     }
     #[test]
     fn led_pixel_gate_preserves_real_turns() {
@@ -972,6 +1021,7 @@ mod tests {
             height: 10.,
             rate: 1.,
             ppm: 100.,
+            span: [10., 10.],
             min_x: 0.,
             min_y: 0.,
             bearing: 0.,

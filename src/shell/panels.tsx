@@ -5,6 +5,7 @@ import {
   ClipboardPaste,
   Copy,
   History,
+  Pencil,
   Redo2,
   RotateCcw,
   Search,
@@ -12,7 +13,8 @@ import {
 } from "lucide-react";
 import { usePreference } from "../preferences";
 import { decodeSettings, encodeSettings } from "../app/settings-clipboard";
-import type { HistoryEntry, Settings } from "../types";
+import type { HeaderEdits, HistoryEntry, Settings } from "../types";
+import { editHeader, headerRows, resetHeaders, validHeader } from "./header-edits";
 
 export type PanelName = "settings" | "history" | "headers" | "help";
 /** Everything the tool panels read or act on, assembled once by App. */
@@ -26,6 +28,12 @@ export interface PanelContext {
   operation: (type: "undo" | "redo") => void;
   history: { undo: HistoryEntry[]; redo: HistoryEntry[] } | null;
   headers: Record<string, Record<string, string>>;
+  /** Each section of `headers`' file (see `fileId`), if it has one. */
+  headerFiles: Record<string, string | undefined>;
+  headerEdits: HeaderEdits;
+  /** Values worked out because a file doesn't give them, by section. */
+  estimatedHeaders: Record<string, Record<string, string>>;
+  setHeaderEdits: (update: (edits: HeaderEdits) => HeaderEdits) => void;
 }
 /** Each tool panel's window title, default placement and content. */
 export const TOOL_PANELS: Record<
@@ -65,7 +73,7 @@ export const TOOL_PANELS: Record<
     x: 410,
     y: 65,
     height: 460,
-    render: (c) => <HeadersPanel headers={c.headers} />,
+    render: (c) => <HeadersPanel c={c} />,
   },
   help: {
     title: "Keyboard shortcuts",
@@ -543,7 +551,64 @@ function Shortcut({ keys, text }: { keys: string; text: string }) {
     </div>
   );
 }
-export function HeadersPanel({ headers }: { headers: Record<string, Record<string, string>> }) {
+/** A header that can be changed: its value, where that came from, and the box to change it. */
+function EditableHeader({
+  name,
+  value,
+  note,
+  onChange,
+}: {
+  name: string;
+  value: string;
+  note: string;
+  onChange: (value: string) => void;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const finish = () => {
+    if (text !== null && validHeader(text)) {
+      onChange(text.trim());
+      setText(null);
+    }
+  };
+  if (text === null) {
+    return (
+      <dd className="header-editable">
+        <span>{value}</span>
+        {note && <em>{note}</em>}
+        <button
+          title={`Change ${name}, in this browser only`}
+          aria-label={`Change ${name}`}
+          onClick={() => setText(validHeader(value) ? value : "")}
+        >
+          <Pencil size={11} />
+        </button>
+      </dd>
+    );
+  }
+  return (
+    <dd className="header-editable">
+      <input
+        autoFocus
+        aria-label={`New ${name}`}
+        aria-invalid={!validHeader(text)}
+        inputMode="decimal"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            finish();
+          } else if (e.key === "Escape") {
+            setText(null);
+          }
+        }}
+        onBlur={() => (validHeader(text) ? finish() : setText(null))}
+      />
+      {!validHeader(text) && <em>A number above 0</em>}
+    </dd>
+  );
+}
+export function HeadersPanel({ c }: { c: PanelContext }) {
   const [filter, setFilter] = useState("");
   return (
     <>
@@ -556,21 +621,47 @@ export function HeadersPanel({ headers }: { headers: Record<string, Record<strin
           onChange={(e) => setFilter(e.target.value)}
         />
       </div>
-      {Object.entries(headers).map(([file, h]) => (
-        <div key={file} data-text-selectable>
-          <h3>{file}</h3>
-          <dl className="headers-list">
-            {Object.entries(h)
-              .filter(([k, v]) => `${k} ${v}`.toLowerCase().includes(filter.toLowerCase()))
-              .map(([k, v]) => (
-                <div key={k}>
-                  <dt>{k}</dt>
-                  <dd>{v}</dd>
-                </div>
-              ))}
-          </dl>
-        </div>
-      ))}
+      {Object.entries(c.headers).map(([section, header]) => {
+        const id = c.headerFiles[section];
+        const edits = id ? c.headerEdits[id] : undefined;
+        const rows = headerRows(section, header, edits, c.estimatedHeaders[section]);
+        return (
+          <div key={section} data-text-selectable>
+            <h3 className="headers-section">
+              {section}
+              {edits && (
+                <button
+                  aria-label={`Reset ${section} headers`}
+                  onClick={() => c.setHeaderEdits((all) => resetHeaders(all, id!))}
+                >
+                  Reset edits
+                </button>
+              )}
+            </h3>
+            <dl className="headers-list">
+              {rows
+                .filter((r) => `${r.key} ${r.value}`.toLowerCase().includes(filter.toLowerCase()))
+                .map((r) => (
+                  <div key={r.key}>
+                    <dt>{r.key}</dt>
+                    {r.editable && id ? (
+                      <EditableHeader
+                        name={r.key}
+                        value={r.value}
+                        note={r.note}
+                        onChange={(value) =>
+                          c.setHeaderEdits((all) => editHeader(all, id, r.key, value))
+                        }
+                      />
+                    ) : (
+                      <dd>{r.value}</dd>
+                    )}
+                  </div>
+                ))}
+            </dl>
+          </div>
+        );
+      })}
     </>
   );
 }

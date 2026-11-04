@@ -9,7 +9,8 @@ import { waveX, waveY, type WaveLayout } from "../plots/plot-geometry";
 import { useTileGestures, type DragComparison } from "./tile-gestures";
 import {
   badgeStyle,
-  positionKey,
+  positionSource,
+  type HeaderEdits,
   type Trial,
   type ViewData,
   type AnalysisData,
@@ -123,6 +124,7 @@ export function TileWall({
   shown,
   splitPoint,
   swap,
+  headerEdits,
   copying,
   copyingPath = false,
   feedback,
@@ -148,6 +150,7 @@ export function TileWall({
   shown: VisiblePlots;
   splitPoint: SplitPoint | null;
   swap: SwapState | null;
+  headerEdits: HeaderEdits;
   /** The copy-mode selection, or null outside copy mode. */
   copying: number[] | null;
   copyingPath?: boolean;
@@ -157,8 +160,8 @@ export function TileWall({
   actions: TileActions;
   ref?: Ref<TileWallHandle>;
 }) {
-  const pos = trial?.pos;
-  const posKey = positionKey(trial);
+  const position = positionSource(trial, headerEdits);
+  const { pos, posKey } = position;
   const scroller = useRef<HTMLDivElement>(null);
   const waveCanvas = useRef<HTMLCanvasElement>(null);
 
@@ -245,8 +248,7 @@ export function TileWall({
         request("analysis", {
           session: data.session,
           cell,
-          pos,
-          posKey,
+          ...position,
           settings,
           summary: true,
           spatialAc: shown.sc,
@@ -342,8 +344,7 @@ export function TileWall({
         request("analysis", {
           session: data.session,
           cell,
-          pos,
-          posKey,
+          ...position,
           settings,
           summary: true,
           spatialAc: shown.sc,

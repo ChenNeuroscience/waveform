@@ -6,6 +6,8 @@ export interface Position {
   handle: number;
   identity: string;
   header: Header;
+  ppm: number;
+  ppmEstimated: boolean;
 }
 export async function parsePosition(
   file: File,
@@ -13,12 +15,15 @@ export async function parsePosition(
   w: Core,
   identity: string,
   base?: Position,
+  editedPpm?: number,
 ): Promise<Position> {
   if (base) {
     return {
       handle: w.position_variant(base.handle, s.leds, s.maxSpeed, s.posSmooth),
       identity,
       header: base.header,
+      ppm: base.ppm,
+      ppmEstimated: base.ppmEstimated,
     };
   }
   const { header: h, offset } = parseHeader(
@@ -28,7 +33,7 @@ export async function parsePosition(
     throw new Error("Unsupported LTX position format.");
   }
   const n = parseInt(h.num_pos_samples);
-  const ppm = parseFloat(h.pixels_per_metre);
+  const stated = editedPpm ?? parseFloat(h.pixels_per_metre);
   const rate = parseFloat(h.sample_rate);
   const minX = parseFloat(h.window_min_x || "0");
   const minY = parseFloat(h.window_min_y || "0");
@@ -38,21 +43,27 @@ export async function parsePosition(
     !Number.isSafeInteger(n) ||
     n < 0 ||
     offset + n * 20 > file.size ||
-    !(ppm > 0) ||
     !(rate > 0) ||
     !(maxX > minX) ||
     !(maxY > minY)
   ) {
     throw new Error("Invalid or truncated position file.");
   }
-  const handle = w.position_new(n, ppm, rate, minX, minY, maxX, maxY);
+  const ppmEstimated = !(stated > 0);
+  const handle = w.position_new(n, ppmEstimated ? 1 : stated, rate, minX, minY, maxX, maxY);
   try {
     w.position_bearing(handle, parseFloat(h.bearing_colour_1 || "0"));
     await streamFile(w, file, offset, n * 20, 32768 * 20, (p, bytes) =>
       w.position_push(handle, p, bytes),
     );
+    // With no calibration, the largest dimension used is taken to be a metre, just so that
+    // there's something to look at. If the LEDs were never seen, the same goes for the window.
+    const ppm = ppmEstimated
+      ? w.position_used_extent(handle) || Math.max(maxX - minX, maxY - minY)
+      : stated;
+    w.position_set_ppm(handle, ppm);
     w.position_finish(handle, s.leds, s.maxSpeed, s.posSmooth);
-    return { handle, identity, header: h };
+    return { handle, identity, header: h, ppm, ppmEstimated };
   } catch (e) {
     w.position_free(handle);
     throw e;
@@ -65,6 +76,8 @@ export function trajectory(w: Core, pos: Position): Trajectory {
     w.position_size(pos.handle, size);
     const [arenaWidth, arenaHeight] = new Float32Array(w.memory.buffer, size, 2);
     return {
+      ppm: pos.ppm,
+      ppmEstimated: pos.ppmEstimated,
       path: copyF32(w, w.position_path(pos.handle), w.position_path_len(pos.handle)),
       arenaWidth,
       arenaHeight,

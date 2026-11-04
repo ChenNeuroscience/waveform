@@ -27,6 +27,11 @@ export function parseHeader(bytes: Uint8Array): {
     break;
   }
   if (offset < 0) {
+    // Markers are only written along with data, so a file with nothing in it is all header.
+    const header = textHeader(new TextDecoder("latin1").decode(bytes));
+    if (parseInt(header.num_spikes) === 0 || parseInt(header.num_pos_samples) === 0) {
+      return { header, offset: bytes.length };
+    }
     throw new Error("Missing data_start marker in LTX header.");
   }
   return {

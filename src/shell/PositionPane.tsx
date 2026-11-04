@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { TriangleAlert } from "lucide-react";
 import { SpeedDwellPlot } from "../plots/SpeedPlot";
 import { PathPlot, type SpikeLayer } from "../plots/PathPlot";
 import {
@@ -26,6 +27,7 @@ export function PositionPane({
   dragComparison,
   grabMode,
   onPopPlot,
+  onOpenHeaders,
   onHover,
   copyLayers,
 }: {
@@ -41,6 +43,7 @@ export function PositionPane({
   dragComparison: DragComparison | null;
   grabMode: boolean;
   onPopPlot: (kind: "path", x: number, y: number) => void;
+  onOpenHeaders: () => void;
   onHover: (hovered: boolean) => void;
   copyLayers: SpikeLayer[] | null;
 }) {
@@ -108,6 +111,16 @@ export function PositionPane({
         >
           <PathPlot trajectory={trajectory} layers={pathLayers} />
         </div>
+        {trajectory.ppmEstimated && (
+          <div className="position-warning" role="status">
+            <TriangleAlert size={14} aria-hidden="true" />
+            <span>
+              <strong>pixels_per_metre isn't set.</strong> A rough guess is in use, just for
+              visualising: the largest dimension used is taken to be 1 m, so distances, speeds and
+              rate maps aren't real. <button onClick={onOpenHeaders}>Set it in File headers</button>
+            </span>
+          </div>
+        )}
       </div>
     </section>
   );
