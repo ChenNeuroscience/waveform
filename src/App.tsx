@@ -20,7 +20,7 @@ import {
 } from "./tiles/TileWall";
 import { PanelTopOpen } from "lucide-react";
 import { CutDownloads, cutDownloadKey, writeCutDrag } from "./app/cut-downloads";
-import { usePreference, restoreSettings } from "./preferences";
+import { clearPreferences, usePreference, restoreSettings } from "./preferences";
 import { useRecordingHistory, type RecordingSelection } from "./app/navigation";
 import { request } from "./worker/client";
 import {
@@ -600,6 +600,16 @@ export default function App() {
     pushHome();
     resetToStart();
   };
+  const resetSettings = () => {
+    const edits = dirtySessions.current.size ? " Unexported cut edits will be lost." : "";
+    if (!confirm(`Reset settings and layout, and close open files?${edits}`)) {
+      return;
+    }
+    // Already confirmed, and a cancelled unload prompt would strand a half-reset page.
+    dirtySessions.current.clear();
+    clearPreferences();
+    location.reload();
+  };
   const selectSource = (group: number, toggle = false) => {
     setSources((current) => nextSources(current, group, toggle));
   };
@@ -900,6 +910,7 @@ export default function App() {
               onHome={goHome}
               onOpenFiles={openFiles}
               onOpenFolder={openFolder}
+              onResetSettings={resetSettings}
               onOperation={operation}
               onPanel={setPane}
               onToggle={showPlot}
