@@ -43,13 +43,19 @@ export function Toolbar(p: {
   onHome: () => void;
   onOpenFiles: () => void;
   onOpenFolder: () => void;
+  onResetSettings: () => void;
   /** Extra controls after the plot toggles. */
   children?: ReactNode;
 }) {
   const timing = experimentTiming(p.data?.headers || {}, p.data?.duration || 0);
   return (
     <div className="desktop-toolbar" role="toolbar" aria-label="Waveform tools">
-      <FileMenu onHome={p.onHome} onOpenFiles={p.onOpenFiles} onOpenFolder={p.onOpenFolder} />
+      <FileMenu
+        onHome={p.onHome}
+        onOpenFiles={p.onOpenFiles}
+        onOpenFolder={p.onOpenFolder}
+        onResetSettings={p.onResetSettings}
+      />
       <span className="tool-separator" />
       <button
         title="Keyboard shortcuts [K]"

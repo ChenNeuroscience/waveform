@@ -16,6 +16,7 @@ export function ActionMenu({
   actions,
   className = "",
   shortcuts = {},
+  footer,
 }: {
   label: string;
   title?: string;
@@ -24,6 +25,8 @@ export function ActionMenu({
   actions: (MenuAction | null)[];
   className?: string;
   shortcuts?: Record<string, () => void>;
+  /** Plain text under a divider, outside the keyboard-navigable items. */
+  footer?: ReactNode;
 }) {
   const [isOpen, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -128,6 +131,14 @@ export function ActionMenu({
             ) : (
               <div key={i} className="menu-separator" role="separator" />
             ),
+          )}
+          {footer && (
+            <>
+              <div className="menu-separator" role="separator" />
+              <div className="menu-footer" role="none">
+                {footer}
+              </div>
+            </>
           )}
         </div>
       )}

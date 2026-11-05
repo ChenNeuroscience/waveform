@@ -15,7 +15,14 @@ test("Waveform menu offers both additive pickers and clear files; keyboard focus
   const trigger = page.getByRole("button", { name: "Waveform menu", exact: true });
   const menu = page.getByRole("menu", { name: "File actions", exact: true });
   await trigger.click();
-  await expect(menu.getByRole("menuitem")).toHaveText(["Add folder…", "Add files…", "Clear files"]);
+  await expect(menu.getByRole("menuitem")).toHaveText([
+    "Add folder…",
+    "Add files…",
+    "Clear files",
+    "Reset settings…",
+    "View on GitHub",
+  ]);
+  await expect(menu.locator(".menu-footer")).toHaveText(/^Version \d+\.\d+\.\d+$/);
   await expect(menu.getByRole("menuitem", { name: "Add folder…", exact: true })).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(menu.getByRole("menuitem", { name: "Add files…", exact: true })).toBeFocused();
@@ -63,4 +70,40 @@ test("Waveform menu offers both additive pickers and clear files; keyboard focus
   await expect(page.locator(".trial-block")).toHaveCount(6);
   await expect(page).toHaveTitle("demo_box-a [Waveform]");
   await trigger.click();
+});
+
+test("Reset settings forgets only Waveform's saved state, after confirmation", async ({ page }) => {
+  await demo(page);
+  const stored = () => page.evaluate(() => ({ ...localStorage }));
+  await page.evaluate(() => {
+    localStorage.setItem("waveform-ui:probe", "1");
+    localStorage.setItem("another-site", "kept");
+  });
+  const reset = async () => {
+    await page.getByRole("button", { name: "Waveform menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Reset settings…", exact: true }).click();
+  };
+
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await reset();
+  await expect(page.locator(".trial-block")).not.toHaveCount(0);
+  expect(await stored()).toHaveProperty(["waveform-ui:probe"], "1");
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await Promise.all([page.waitForEvent("load"), reset()]);
+  await expect(page.getByText("Try it now with simulated data")).toBeVisible();
+  const after = await stored();
+  expect(after).not.toHaveProperty(["waveform-ui:probe"]);
+  expect(after).toHaveProperty(["another-site"], "kept");
+});
+
+test("View on GitHub opens the repository in a new tab", async ({ page, context }) => {
+  await demo(page);
+  await context.route("https://github.com/**", (route) => route.fulfill({ body: "" }));
+  await page.getByRole("button", { name: "Waveform menu", exact: true }).click();
+  const [tab] = await Promise.all([
+    context.waitForEvent("page"),
+    page.getByRole("menuitem", { name: "View on GitHub", exact: true }).click(),
+  ]);
+  await expect(tab).toHaveURL("https://github.com/ChenNeuroscience/waveform");
 });

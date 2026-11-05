@@ -27,6 +27,17 @@ export function restoreSettings(value: unknown): Settings {
   return settings;
 }
 const prefix = "waveform-ui:";
+/**
+ * Forget saved settings and layout. Only Waveform's own keys go: GitHub Pages
+ * shares this origin with the organisation's other sites.
+ */
+export function clearPreferences() {
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith("waveform-")) {
+      localStorage.removeItem(key);
+    }
+  }
+}
 export function readPreference<T>(name: string | null, fallback: T): T {
   if (name === null) {
     return fallback;

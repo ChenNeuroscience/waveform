@@ -1,16 +1,21 @@
-import { ChevronDown, Folder, FolderOpen, X } from "lucide-react";
+import { ChevronDown, Folder, FolderOpen, Github, RotateCcw, X } from "lucide-react";
 import icon from "../../img/icon.svg";
+import { version } from "../../package.json";
 import { ActionMenu } from "./ActionMenu";
+
+const REPOSITORY = "https://github.com/ChenNeuroscience/waveform";
 
 /** File actions behind the Waveform icon. */
 export function FileMenu({
   onHome,
   onOpenFiles,
   onOpenFolder,
+  onResetSettings,
 }: {
   onHome: () => void;
   onOpenFiles: () => void;
   onOpenFolder: () => void;
+  onResetSettings: () => void;
 }) {
   return (
     <ActionMenu
@@ -25,6 +30,7 @@ export function FileMenu({
         </>
       }
       shortcuts={{ o: onOpenFiles }}
+      footer={`Version ${version}`}
       actions={[
         { label: "Add folder…", icon: <Folder size={15} />, run: onOpenFolder },
         {
@@ -35,6 +41,13 @@ export function FileMenu({
         },
         null,
         { label: "Clear files", icon: <X size={15} />, run: onHome },
+        { label: "Reset settings…", icon: <RotateCcw size={15} />, run: onResetSettings },
+        null,
+        {
+          label: "View on GitHub",
+          icon: <Github size={15} />,
+          run: () => open(REPOSITORY, "_blank", "noopener,noreferrer"),
+        },
       ]}
     />
   );
