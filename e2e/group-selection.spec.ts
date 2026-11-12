@@ -129,8 +129,10 @@ test("tile clicks bring coincident points to the front without uploading feature
       out.height = source.height;
       const context = out.getContext("2d")!;
       context.drawImage(source, 0, 0);
-      const x = Math.floor(2 + (0.035 + (0.93 * 40) / 255) * 124),
-        y = Math.floor(2 + (0.965 - (0.93 * 40) / 255) * 124);
+      const frame = Number(source.closest<HTMLElement>(".clusters")!.dataset.plot) - 4,
+        ratio = source.width / source.clientWidth,
+        x = Math.floor((2 + (0.035 + (0.93 * 40) / 255) * frame) * ratio),
+        y = Math.floor((2 + (0.965 - (0.93 * 40) / 255) * frame) * ratio);
       return [...context.getImageData(x - 1, y - 1, 3, 3).data];
     });
   const has = (bytes: number[], rgb: readonly number[]) =>
@@ -143,10 +145,11 @@ test("tile clicks bring coincident points to the front without uploading feature
   expect(await page.evaluate(() => (window as any).featureUploads)).toBe(uploads);
   await tile(page, 1).click({ position: { x: 30, y: 65 } });
   await expect.poll(async () => has(await pixels(), groupRgb8(1))).toBe(true);
-  const box = (await page.locator(".clusters canvas").boundingBox())!;
+  const box = (await page.locator(".clusters canvas").boundingBox())!,
+    frame = Number(await page.locator(".clusters").getAttribute("data-plot")) - 4;
   await page.mouse.move(
-    box.x + 2 + (0.035 + (0.93 * 40) / 255) * 124,
-    box.y + 2 + (0.965 - (0.93 * 40) / 255) * 124,
+    box.x + 2 + (0.035 + (0.93 * 40) / 255) * frame,
+    box.y + 2 + (0.965 - (0.93 * 40) / 255) * frame,
   );
   await page.keyboard.press("e");
   await expect(page.locator(".painting-destination button")).toHaveText("1");

@@ -55,9 +55,10 @@ for (const fallback of [false, true]) {
         const ctx = canvas.getContext("2d")!;
         ctx.drawImage(source, 0, 0);
         const ratio = source.width / source.clientWidth;
+        const frame = Number(source.closest<HTMLElement>(".clusters")!.dataset.plot) - 4;
         return [20, 40, 60].map((a) => {
-          const x = Math.floor((2 + (0.035 + (0.93 * a) / 255) * 124) * ratio);
-          const y = Math.floor((2 + (0.965 - (0.93 * a) / 255) * 124) * ratio);
+          const x = Math.floor((2 + (0.035 + (0.93 * a) / 255) * frame) * ratio);
+          const y = Math.floor((2 + (0.965 - (0.93 * a) / 255) * frame) * ratio);
           return [...ctx.getImageData(x - 1, y - 1, 3, 3).data];
         });
       });

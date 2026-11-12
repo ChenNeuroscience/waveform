@@ -108,9 +108,13 @@ export class ClusterGPU {
     axes: number[][],
     columns = 3,
     view?: FeatureProjection,
+    /** Displayed 2D plot size in CSS px. */
+    plot = FEATURE_PLOT,
   ) {
     const gl = this.gl;
-    const dpr = Math.min(2, devicePixelRatio || 1);
+    // 2D plots always rasterise at FEATURE_PLOT CSS px per plot; CSS stretches the
+    // canvas to the displayed size, so points and density look the same at any size.
+    const dpr = Math.min(2, devicePixelRatio || 1) * (view ? 1 : FEATURE_PLOT / plot);
     const w = Math.round(this.canvas.clientWidth * dpr);
     const h = Math.round(this.canvas.clientHeight * dpr);
     if (w !== this.canvas.width || h !== this.canvas.height) {
@@ -210,7 +214,7 @@ export class ClusterGPU {
       }
       gl.enable(gl.SCISSOR_TEST);
       const u = (n: string) => gl.getUniformLocation(p, n);
-      gl.uniform1f(u("size"), dpr); // Fixed at one CSS pixel.
+      gl.uniform1f(u("size"), dpr * (view ? 1 : plot / FEATURE_PLOT)); // One raster CSS px.
       gl.uniform1f(u("opacity"), 1);
       if (aggregate) {
         gl.uniform1f(u("unit"), this.unit);
@@ -229,11 +233,11 @@ export class ClusterGPU {
         gl.drawArrays(gl.POINTS, 0, cached.n);
       } else {
         axes.forEach(([ax, ay], i) => {
-          const origin = featurePlotOrigin(i, columns);
+          const origin = featurePlotOrigin(i, columns, plot);
           const x = Math.round(origin.x * dpr);
-          const y = Math.round(h - (origin.y + FEATURE_PLOT) * dpr);
-          const hh = Math.round(FEATURE_PLOT * dpr);
-          const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
+          const y = Math.round(h - (origin.y + plot) * dpr);
+          const hh = Math.round(plot * dpr);
+          const frame = projectionFrame(plot, plot);
           gl.viewport(
             x + frame.x * dpr,
             y + hh - (frame.y + frame.height) * dpr,

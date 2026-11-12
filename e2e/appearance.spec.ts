@@ -17,12 +17,15 @@ test("feature corner labels survive Space copies; settings and divider positions
   await expect(labels).toHaveCount(6);
   await expect(labels.first().locator(".axis-y")).toHaveText("A2");
   await expect(labels.first().locator(".axis-x")).toHaveText("A1");
+  const plotBefore = await page.locator(".clusters").getAttribute("data-plot");
   const grip = (await page.locator(".desktop-splitter").boundingBox())!;
   await page.mouse.move(grip.x + 3, grip.y + 60);
   await page.mouse.down();
   await page.mouse.move(600, grip.y + 60);
   await page.mouse.up();
-  await expect(page.locator(".clusters")).toHaveAttribute("data-columns", "4");
+  // The grid refits to the wider pane: 3x2 or 2x3 square plots.
+  await expect(page.locator(".clusters")).toHaveAttribute("data-columns", /^[23]$/);
+  await expect(page.locator(".clusters")).not.toHaveAttribute("data-plot", plotBefore!);
   const frame = await page.locator(".clusters canvas").evaluate((el) => {
     const gl = (el as HTMLCanvasElement).getContext("webgl2")!;
     return Array.from(gl.getParameter(gl.VIEWPORT) as Int32Array);
@@ -32,7 +35,8 @@ test("feature corner labels survive Space copies; settings and divider positions
   await page.locator(".feature-stage").click({ position: { x: 50, y: 50 } });
   await page.keyboard.up("Space");
   // Both corner labels must be drawn into the PNG, even where the raw GPU canvas is blank.
-  const labelInk = await page.locator(".plot-copy").evaluate(async (el) => {
+  const copied = Number(await page.locator(".clusters").getAttribute("data-plot"));
+  const labelInk = await page.locator(".plot-copy").evaluate(async (el, plot) => {
     const image = el as HTMLImageElement;
     await image.decode();
     const c = document.createElement("canvas");
@@ -46,8 +50,8 @@ test("feature corner labels survive Space copies; settings and divider positions
       for (let i = 0; i < a.length; i += 4) if (a[i] < 150 && a[i + 1] < 150 && a[i + 2] < 150) n++;
       return n;
     };
-    return [ink(2, 2), ink(106, 113)];
-  });
+    return [ink(2, 2), ink(plot - 22, plot - 15)];
+  }, copied);
   for (const ink of labelInk) expect(ink).toBeGreaterThan(5);
   const png = await page.locator(".plot-copy").getAttribute("src");
   await page.getByRole("button", { name: "demo_box-b 8", exact: true }).click();

@@ -714,6 +714,78 @@ small {
   min-height: 0;
   background: white;
   overflow: auto;
+  container-type: size;
+}
+/* The 2D feature grid: six square plots, laid out 1x6, 2x3, 3x2 or 6x1 by the
+   stage's aspect ratio (whichever gives the biggest plots) and as large as fits
+   without scrolling. Where no layout fits 128px plots, they fill the width
+   instead with as many columns as fit at 128px or more, and the stage scrolls
+   vertically. FeatureView reads the resulting tracks back for drawing and hits.
+   Widths/heights of n 128px plots: 1 = 128, 2 = 260, 3 = 392, 6 = 788 (4px gaps). */
+.clusters[data-dimension="2"] {
+  --gap: 4px; /* FEATURE_GAP */
+  --cols: 1;
+  --rows: 6;
+  --fit-x: calc((100cqw - (var(--cols) - 1) * var(--gap)) / var(--cols));
+  --fit-y: calc((100cqh - (var(--rows) - 1) * var(--gap)) / var(--rows));
+  --fit: round(down, min(var(--fit-x), var(--fit-y)), 1px);
+  --plot: round(down, max(128px, var(--fit-x)), 1px);
+  width: calc(var(--cols) * var(--plot) + (var(--cols) - 1) * var(--gap));
+  height: calc(var(--rows) * var(--plot) + (var(--rows) - 1) * var(--gap));
+  min-height: 0;
+}
+/* Scrolling fallback: the most columns that fit at 128px or more. */
+@container (min-width: 260px) {
+  .clusters[data-dimension="2"] {
+    --cols: 2;
+    --rows: 3;
+  }
+}
+@container (min-width: 392px) {
+  .clusters[data-dimension="2"] {
+    --cols: 3;
+    --rows: 2;
+  }
+}
+@container (min-width: 788px) {
+  .clusters[data-dimension="2"] {
+    --cols: 6;
+    --rows: 1;
+  }
+}
+/* No scrolling: the best layout for the aspect ratio, where it fits 128px plots. */
+@container (max-aspect-ratio: 1/3) and (min-height: 788px) {
+  .clusters[data-dimension="2"] {
+    --cols: 1;
+    --rows: 6;
+    --plot: var(--fit);
+  }
+}
+@container (min-aspect-ratio: 1/3) and (orientation: portrait) and (min-width: 260px) and (min-height: 392px) {
+  .clusters[data-dimension="2"] {
+    --cols: 2;
+    --rows: 3;
+    --plot: var(--fit);
+  }
+}
+@container (orientation: landscape) and (max-aspect-ratio: 3/1) and (min-width: 392px) and (min-height: 260px) {
+  .clusters[data-dimension="2"] {
+    --cols: 3;
+    --rows: 2;
+    --plot: var(--fit);
+  }
+}
+@container (min-aspect-ratio: 3/1) and (min-width: 788px) and (min-height: 128px) {
+  .clusters[data-dimension="2"] {
+    --cols: 6;
+    --rows: 1;
+    --plot: var(--fit);
+  }
+}
+.clusters[data-dimension="2"] .projection-labels {
+  gap: var(--gap);
+  grid-template-columns: repeat(var(--cols), var(--plot));
+  grid-template-rows: repeat(var(--rows), var(--plot));
 }
 .clusters {
   margin: auto;
@@ -730,6 +802,10 @@ small {
   display: block;
   width: 100%;
   height: 100%;
+}
+/* 2D plots rasterise at 128px each and are stretched to the displayed size. */
+.clusters[data-dimension="2"] > canvas {
+  image-rendering: pixelated;
 }
 .projection-labels {
   position: absolute;
