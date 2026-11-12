@@ -1,4 +1,9 @@
 //! Seeded virtual LTX recordings. Any record can be regenerated independently.
+//!
+//! [`Dataset`] lays them out as a dataset: trials of tetrode recordings with .set, .pos, raw tetrode
+//! and .cut files. Every file is a random-access byte range, so the browser can
+//! synthesise multi-GB recordings only when read and the `synthetic` CLI (core/cli)
+//! can write the same bytes to disk.
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -305,10 +310,11 @@ fn poisson(mean: f64, u: f64) -> u32 {
     k
 }
 impl Synthetic {
+    #[cfg(test)]
     fn new(seed: u32, cells: usize, total: usize, duration: usize, tetrode: u32) -> Self {
         Self::new_trial(seed, 0, cells, total, duration, tetrode)
     }
-    fn new_trial(
+    pub(crate) fn new_trial(
         family: u32,
         trial: u32,
         cells: usize,
@@ -577,95 +583,316 @@ impl Synthetic {
         });
     }
 }
-#[no_mangle]
-pub extern "C" fn synthetic_new(
-    seed: u32,
-    cells: usize,
-    total: usize,
-    duration: usize,
-    tetrode: u32,
-) -> *mut Synthetic {
-    if total == 0 || total > 20_000_000 || duration == 0 || duration > 36000 {
-        return std::ptr::null_mut();
+/// Byte-level output used by `dataset`; each fills fixed-size records so any
+/// range can be produced independently.
+impl Synthetic {
+    /// The simulated spike count (Poisson, so close to but not exactly the requested total).
+    pub(crate) fn spikes(&self) -> usize {
+        self.total
     }
-    Box::into_raw(Box::new(Synthetic::new(
-        seed, cells, total, duration, tetrode,
-    )))
-}
-/// Trial-specific trajectories and grid geometry, with stable module/cell identities.
-#[no_mangle]
-pub extern "C" fn synthetic_new_trial(
-    seed: u32,
-    trial: u32,
-    cells: usize,
-    total: usize,
-    duration: usize,
-    tetrode: u32,
-) -> *mut Synthetic {
-    if total == 0 || total > 20_000_000 || duration == 0 || duration > 36000 {
-        return std::ptr::null_mut();
+    pub(crate) fn ticks(&self) -> usize {
+        self.positions.len()
     }
-    Box::into_raw(Box::new(Synthetic::new_trial(
-        seed, trial, cells, total, duration, tetrode,
-    )))
-}
-/// The simulated spike count (Poisson, so close to but not exactly the requested total).
-#[no_mangle]
-pub unsafe extern "C" fn synthetic_spikes(s: *const Synthetic) -> usize {
-    (*s).total
-}
-#[no_mangle]
-pub unsafe extern "C" fn synthetic_free(s: *mut Synthetic) {
-    drop(Box::from_raw(s));
-}
-#[no_mangle]
-pub unsafe extern "C" fn synthetic_records(
-    s: *const Synthetic,
-    first: usize,
-    n: usize,
-    out: *mut u8,
-) {
-    let s = &*s;
-    assert!(first <= s.total && n <= s.total - first);
-    s.records(first, slice::from_raw_parts_mut(out, n * 216));
-}
-/// Cut labels for a range. With `keep` > 0 only cells 1..=keep are sorted and all
-/// other spikes stay in noise group 0, like a partially cut tetrode.
-#[no_mangle]
-pub unsafe extern "C" fn synthetic_cut(
-    s: *const Synthetic,
-    first: usize,
-    n: usize,
-    out: *mut u8,
-    keep: usize,
-) {
-    let s = &*s;
-    assert!(first <= s.total && n <= s.total - first);
-    let output = slice::from_raw_parts_mut(out, n * 4);
-    s.each_spike(first, n, |index, cell, _| {
-        let cell = if keep == 0 || cell <= keep { cell } else { 0 };
-        output[(index - first) * 4..][..4].copy_from_slice(&[
-            b'0' + (cell / 100) as u8,
-            b'0' + (cell / 10 % 10) as u8,
-            b'0' + (cell % 10) as u8,
-            b' ',
-        ]);
-    });
-}
-#[no_mangle]
-pub unsafe extern "C" fn synthetic_position(s: *const Synthetic, out: *mut u8) {
-    let s = &*s;
-    let output = slice::from_raw_parts_mut(out, s.positions.len() * 20);
-    output.fill(0);
-    for (i, record) in output.chunks_exact_mut(20).enumerate() {
-        record[..4].copy_from_slice(&(i as u32 * 1920).to_be_bytes());
-        for channel in 0..4 {
-            record[4 + channel * 2..6 + channel * 2]
-                .copy_from_slice(&s.positions[i][channel].to_be_bytes());
+    /// 216-byte tetrode records for spikes `first..`, one per 216 bytes of `output`.
+    pub(crate) fn tetrode(&self, first: usize, output: &mut [u8]) {
+        assert!(first + output.len() / 216 <= self.total);
+        self.records(first, output);
+    }
+    /// 4-byte cut labels for spikes `first..`. With `keep` > 0 only cells 1..=keep are
+    /// sorted and all other spikes stay in noise group 0, like a partially cut tetrode.
+    pub(crate) fn cut(&self, first: usize, output: &mut [u8], keep: usize) {
+        let n = output.len() / 4;
+        assert!(first + n <= self.total);
+        self.each_spike(first, n, |index, cell, _| {
+            let cell = if keep == 0 || cell <= keep { cell } else { 0 };
+            output[(index - first) * 4..][..4].copy_from_slice(&[
+                b'0' + (cell / 100) as u8,
+                b'0' + (cell / 10 % 10) as u8,
+                b'0' + (cell % 10) as u8,
+                b' ',
+            ]);
+        });
+    }
+    /// 20-byte position records for ticks `first..`.
+    pub(crate) fn position(&self, first: usize, output: &mut [u8]) {
+        output.fill(0);
+        for (k, record) in output.chunks_exact_mut(20).enumerate() {
+            let i = first + k;
+            record[..4].copy_from_slice(&(i as u32 * TICK).to_be_bytes());
+            for channel in 0..4 {
+                record[4 + channel * 2..6 + channel * 2]
+                    .copy_from_slice(&self.positions[i][channel].to_be_bytes());
+            }
+            record[12..14].copy_from_slice(&12u16.to_be_bytes());
+            record[14..16].copy_from_slice(&8u16.to_be_bytes());
         }
-        record[12..14].copy_from_slice(&12u16.to_be_bytes());
-        record[14..16].copy_from_slice(&8u16.to_be_bytes());
     }
+}
+const TAIL: &[u8] = b"\r\ndata_end";
+
+/// What to simulate. Files are named `{name}-a.set`, `{name}-a.1`, `{name}-a_1.cut`, ...
+pub struct Params {
+    pub seed: u32,
+    pub name: String,
+    pub trials: usize,
+    pub tetrodes: usize,
+    /// Seconds per trial.
+    pub duration: usize,
+    /// Cells per tetrode, cycled over tetrodes.
+    pub cells: Vec<usize>,
+    /// Requested spikes per recording in trial-major order, cycled: one value for
+    /// all, `tetrodes` values for per-tetrode counts, or one per recording.
+    pub spikes: Vec<usize>,
+}
+impl Params {
+    fn check(&self) -> Result<(), String> {
+        let bad = |what: &str| Err(format!("invalid {what}"));
+        if self.name.is_empty() || self.name.contains(['/', '\\']) {
+            return bad("name");
+        }
+        if !(1..=26).contains(&self.trials) {
+            return bad("trials (1-26)");
+        }
+        if !(1..=64).contains(&self.tetrodes) {
+            return bad("tetrodes (1-64)");
+        }
+        if !(1..=36000).contains(&self.duration) {
+            return bad("duration (1-36000 s)");
+        }
+        if self.cells.is_empty() || self.cells.iter().any(|c| !(1..=100).contains(c)) {
+            return bad("cells (1-100)");
+        }
+        if self.spikes.is_empty() || self.spikes.iter().any(|s| !(1..=20_000_000).contains(s)) {
+            return bad("spikes (1-20000000)");
+        }
+        Ok(())
+    }
+}
+
+enum Body {
+    Text,
+    Tetrode(Rc<Synthetic>),
+    Position(Rc<Synthetic>),
+    Cut(Rc<Synthetic>, usize),
+}
+
+pub struct SyntheticFile {
+    pub name: String,
+    header: Vec<u8>,
+    body: Body,
+}
+impl SyntheticFile {
+    /// Raw tetrode recordings, which are too large to materialise up front.
+    pub fn is_recording(&self) -> bool {
+        matches!(self.body, Body::Tetrode(_))
+    }
+    fn record(&self) -> usize {
+        match self.body {
+            Body::Text => 1,
+            Body::Tetrode(_) => 216,
+            Body::Position(_) => 20,
+            Body::Cut(..) => 4,
+        }
+    }
+    fn body_len(&self) -> usize {
+        match &self.body {
+            Body::Text => 0,
+            Body::Tetrode(s) => s.spikes() * 216,
+            Body::Position(s) => s.ticks() * 20,
+            Body::Cut(s, _) => s.spikes() * 4,
+        }
+    }
+    fn tail(&self) -> &'static [u8] {
+        match self.body {
+            Body::Tetrode(_) | Body::Position(_) => TAIL,
+            _ => b"",
+        }
+    }
+    pub fn size(&self) -> usize {
+        self.header.len() + self.body_len() + self.tail().len()
+    }
+    /// Fill `out` with the file's bytes starting at `offset`.
+    pub fn read(&self, offset: usize, mut out: &mut [u8]) {
+        assert!(offset + out.len() <= self.size());
+        let (h, b) = (self.header.len(), self.body_len());
+        let mut pos = offset;
+        while !out.is_empty() {
+            let end = if pos < h {
+                h
+            } else if pos < h + b {
+                h + b
+            } else {
+                self.size()
+            };
+            let n = (end - pos).min(out.len());
+            let (part, rest) = std::mem::take(&mut out).split_at_mut(n);
+            if pos < h {
+                part.copy_from_slice(&self.header[pos..][..part.len()]);
+            } else if pos < h + b {
+                self.read_body(pos - h, part);
+            } else {
+                part.copy_from_slice(&self.tail()[pos - h - b..][..part.len()]);
+            }
+            pos += part.len();
+            out = rest;
+        }
+    }
+    /// Generate whole records covering the range, then copy the requested bytes.
+    fn read_body(&self, offset: usize, out: &mut [u8]) {
+        let size = self.record();
+        let first = offset / size;
+        let mut buf = vec![0; (offset + out.len()).div_ceil(size) * size - first * size];
+        match &self.body {
+            Body::Text => unreachable!(),
+            Body::Tetrode(s) => s.tetrode(first, &mut buf),
+            Body::Position(s) => s.position(first, &mut buf),
+            Body::Cut(s, keep) => s.cut(first, &mut buf, *keep),
+        }
+        out.copy_from_slice(&buf[offset - first * size..][..out.len()]);
+    }
+}
+
+pub struct Dataset {
+    pub files: Vec<SyntheticFile>,
+}
+impl Dataset {
+    pub fn new(p: &Params) -> Result<Self, String> {
+        p.check()?;
+        let (seed, duration) = (p.seed, p.duration);
+        let mut files = vec![];
+        for trial in 0..p.trials {
+            let name = format!("{}-{}", p.name, (b'a' + trial as u8) as char);
+            files.push(SyntheticFile {
+                name: format!("{name}.set"),
+                header: format!(
+                    "duration {duration}\ntrial_date SIMULATED\ntrial_time {}:00:00\nexperimenter Simulated data\nsynthetic_seed {seed}\n",
+                    if trial > 0 { 13 } else { 12 }
+                )
+                .into(),
+                body: Body::Text,
+            });
+            for tet in 1..=p.tetrodes {
+                let cells = p.cells[(tet - 1) % p.cells.len()];
+                let requested = p.spikes[(trial * p.tetrodes + tet - 1) % p.spikes.len()];
+                let s = Rc::new(Synthetic::new_trial(
+                    seed,
+                    trial as u32,
+                    cells,
+                    requested,
+                    duration,
+                    tet as u32,
+                ));
+                // Poisson spiking: the count is near the requested size, not exact.
+                let spikes = s.spikes();
+                files.push(SyntheticFile {
+                    name: format!("{name}.{tet}"),
+                    header: format!("duration {duration}\nnum_spikes {spikes}\nnum_chans 4\nsamples_per_spike 50\nbytes_per_sample 1\nbytes_per_timestamp 4\ntimebase 96000 hz\nspike_format t,ch1,t,ch2,t,ch3,t,ch4\r\ndata_start").into(),
+                    body: Body::Tetrode(s.clone()),
+                });
+                if tet == 1 {
+                    files.push(SyntheticFile {
+                        name: format!("{name}.pos"),
+                        header: format!("duration {duration}\nnum_pos_samples {}\nsample_rate 50 hz\ntimestamp_timebase 96000 hz\npixels_per_metre 300\nwindow_min_x 0\nwindow_min_y 0\nwindow_max_x 300\nwindow_max_y 300\npos_format t,x1,y1,x2,y2,numpix1,numpix2\r\ndata_start", duration * 50).into(),
+                        body: Body::Position(s.clone()),
+                    });
+                }
+                // Like data you come to yourself: the last tetrode is uncut and the
+                // one before has only two cells sorted, the rest left in noise group 0.
+                if tet != p.tetrodes {
+                    let keep = if tet + 1 == p.tetrodes { 2 } else { 0 };
+                    files.push(SyntheticFile {
+                        name: format!("{name}_{tet}.cut"),
+                        header: format!(
+                            "n_clusters: {}\nn_channels: 4\nExact_cut_for: {name} spikes: {spikes}\n",
+                            if keep > 0 { keep } else { cells } + 1
+                        )
+                        .into(),
+                        body: Body::Cut(s, keep),
+                    });
+                }
+            }
+        }
+        Ok(Self { files })
+    }
+}
+
+/// `cells` and `spikes` are u32 arrays (see `Params`); null if the parameters are invalid.
+#[no_mangle]
+pub unsafe extern "C" fn synthetic_dataset_new(
+    seed: u32,
+    name: *const u8,
+    name_len: usize,
+    trials: usize,
+    tetrodes: usize,
+    duration: usize,
+    cells: *const u32,
+    cells_len: usize,
+    spikes: *const u32,
+    spikes_len: usize,
+) -> *mut Dataset {
+    let list = |p: *const u32, n: usize| {
+        if n == 0 {
+            vec![]
+        } else {
+            slice::from_raw_parts(p, n)
+                .iter()
+                .map(|&v| v as usize)
+                .collect()
+        }
+    };
+    let params = Params {
+        seed,
+        name: String::from_utf8_lossy(if name_len == 0 {
+            &[]
+        } else {
+            slice::from_raw_parts(name, name_len)
+        })
+        .into(),
+        trials,
+        tetrodes,
+        duration,
+        cells: list(cells, cells_len),
+        spikes: list(spikes, spikes_len),
+    };
+    Dataset::new(&params).map_or(std::ptr::null_mut(), |d| Box::into_raw(Box::new(d)))
+}
+#[no_mangle]
+pub unsafe extern "C" fn synthetic_dataset_free(d: *mut Dataset) {
+    drop(Box::from_raw(d));
+}
+#[no_mangle]
+pub unsafe extern "C" fn synthetic_dataset_files(d: *const Dataset) -> usize {
+    (&(*d).files).len()
+}
+#[no_mangle]
+pub unsafe extern "C" fn synthetic_dataset_name(d: *const Dataset, i: usize) -> *const u8 {
+    (&(*d).files)[i].name.as_ptr()
+}
+#[no_mangle]
+pub unsafe extern "C" fn synthetic_dataset_name_len(d: *const Dataset, i: usize) -> usize {
+    (&(*d).files)[i].name.len()
+}
+#[no_mangle]
+pub unsafe extern "C" fn synthetic_dataset_size(d: *const Dataset, i: usize) -> usize {
+    (&(*d).files)[i].size()
+}
+#[no_mangle]
+pub unsafe extern "C" fn synthetic_dataset_header_len(d: *const Dataset, i: usize) -> usize {
+    (&(*d).files)[i].header.len()
+}
+#[no_mangle]
+pub unsafe extern "C" fn synthetic_dataset_is_recording(d: *const Dataset, i: usize) -> u32 {
+    (&(*d).files)[i].is_recording() as u32
+}
+#[no_mangle]
+pub unsafe extern "C" fn synthetic_dataset_read(
+    d: *const Dataset,
+    i: usize,
+    offset: usize,
+    n: usize,
+    out: *mut u8,
+) {
+    (&(*d).files)[i].read(offset, slice::from_raw_parts_mut(out, n));
 }
 #[cfg(test)]
 mod tests {
@@ -807,9 +1034,7 @@ mod tests {
         assert!(e.amplitudes.iter().any(|&a| a > 50));
         for keep in [0, 2] {
             let mut cut = vec![0; n * 4];
-            unsafe {
-                synthetic_cut(&s, 0, n, cut.as_mut_ptr(), keep);
-            }
+            s.cut(0, &mut cut, keep);
             let labels: Vec<usize> = std::str::from_utf8(&cut)
                 .unwrap()
                 .split_whitespace()
@@ -960,9 +1185,7 @@ mod tests {
     fn position_clock_and_arena_are_consistent() {
         let s = Synthetic::new(12, 100, 1000, 60, 0);
         let mut raw = vec![0; 60 * 50 * 20];
-        unsafe {
-            synthetic_position(&s, raw.as_mut_ptr());
-        }
+        s.position(0, &mut raw);
         assert_eq!(u32::from_be_bytes(raw[20..24].try_into().unwrap()), 1920);
         for p in s.positions.iter() {
             assert!(p[0] < 300 && p[1] < 300 && p[2] < 300 && p[3] < 300);
@@ -1010,6 +1233,36 @@ mod tests {
             let lo = a.positions.iter().map(|p| p[axis]).min().unwrap();
             let hi = a.positions.iter().map(|p| p[axis]).max().unwrap();
             assert!(hi - lo > 200);
+        }
+    }
+    #[test]
+    fn reads_of_any_range_match_the_whole_file() {
+        let dataset = Dataset::new(&Params {
+            seed: 4271,
+            name: "demo_box".into(),
+            trials: 2,
+            tetrodes: 8,
+            duration: 60,
+            cells: vec![12],
+            spikes: vec![2000],
+        })
+        .unwrap();
+        assert_eq!(dataset.files.len(), 2 * (1 + 8 + 1 + 7));
+        for name in [
+            "demo_box-a.1",
+            "demo_box-a.pos",
+            "demo_box-a_7.cut",
+            "demo_box-a.set",
+        ] {
+            let f = dataset.files.iter().find(|f| f.name == name).unwrap();
+            let mut whole = vec![0; f.size()];
+            f.read(0, &mut whole);
+            let n = f.size();
+            for (a, b) in [(0, 1), (3, 500.min(n)), (37, n), (n - 11, n)] {
+                let mut part = vec![0; b - a];
+                f.read(a, &mut part);
+                assert_eq!(part, whole[a..b], "{name} {a}..{b}");
+            }
         }
     }
 }

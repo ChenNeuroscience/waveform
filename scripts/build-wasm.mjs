@@ -7,6 +7,7 @@ const r = spawnSync(
     "--manifest-path",
     "core/Cargo.toml",
     "--release",
+    "--lib",
     "--target",
     "wasm32-unknown-unknown",
   ],
