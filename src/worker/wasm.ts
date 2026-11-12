@@ -93,13 +93,15 @@ export const EXPORTS = {
   position_size: 2,
   position_used_extent: 1,
   position_variant: 4,
-  synthetic_cut: 5,
-  synthetic_free: 1,
-  synthetic_new: 5,
-  synthetic_new_trial: 6,
-  synthetic_position: 2,
-  synthetic_records: 4,
-  synthetic_spikes: 1,
+  synthetic_dataset_files: 1,
+  synthetic_dataset_free: 1,
+  synthetic_dataset_header_len: 2,
+  synthetic_dataset_is_recording: 2,
+  synthetic_dataset_name: 2,
+  synthetic_dataset_name_len: 2,
+  synthetic_dataset_new: 10,
+  synthetic_dataset_read: 5,
+  synthetic_dataset_size: 2,
 } as const;
 type Args<N extends number, A extends number[] = []> = A["length"] extends N
   ? A
