@@ -56,8 +56,9 @@ test("paint is the default; spaced projections paint/lasso the right axes and ig
     first = (await plots.nth(0).boundingBox())!,
     second = (await plots.nth(1).boundingBox())!;
   expect(second.x - first.x - first.width).toBe(4);
-  expect(first.width).toBe(128);
-  expect(first.height).toBe(128);
+  // Square plots, never under 128px, sized to the pane by CSS.
+  expect(first.width).toBe(first.height);
+  expect(first.width).toBeGreaterThanOrEqual(128);
   for (const p of await plots.all()) {
     expect(
       await p.evaluate((el) =>
@@ -72,8 +73,8 @@ test("paint is the default; spaced projections paint/lasso the right axes and ig
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   // Known amplitudes (A1=20, A3=30) in the second projection; one brush dab.
   await page.mouse.click(
-    second.x + 2 + (0.035 + (0.93 * 20) / 255) * 124,
-    second.y + 2 + (0.965 - (0.93 * 30) / 255) * 124,
+    second.x + 2 + (0.035 + (0.93 * 20) / 255) * (second.width - 4),
+    second.y + 2 + (0.965 - (0.93 * 30) / 255) * (second.height - 4),
   );
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeEnabled();
   expect(await labels(page)).toEqual([3, 1, 2]);
@@ -82,10 +83,11 @@ test("paint is the default; spaced projections paint/lasso the right axes and ig
   await page.getByRole("button", { name: "Lasso cut", exact: true }).click();
   await page.mouse.move(second.x + 8, second.y + 8);
   await page.mouse.down();
+  const far = second.width - 8;
   for (const [x, y] of [
-    [120, 8],
-    [120, 120],
-    [8, 120],
+    [far, 8],
+    [far, far],
+    [8, far],
     [8, 8],
   ])
     await page.mouse.move(second.x + x, second.y + y, { steps: 3 });

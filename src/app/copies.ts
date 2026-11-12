@@ -138,8 +138,12 @@ export function useCopies({
       return;
     }
     const ratio = Math.min(2, devicePixelRatio || 1);
-    const sourceWidth = kind === "features" ? source.width / ratio : source.clientWidth;
-    const width = Math.max(240, Math.min(700, sourceWidth));
+    // The feature grid copies at its displayed size (plus the 1px window border
+    // each side), so the copy matches the plots on screen.
+    const width =
+      kind === "features"
+        ? Math.max(240, Math.min(innerWidth - 16, source.width / ratio + 2))
+        : Math.max(240, Math.min(700, source.clientWidth));
     const height = ((width - 2) * source.height) / source.width + 27;
     add({
       title: `${trial?.name} · T${tetNum} · ${kind}`,

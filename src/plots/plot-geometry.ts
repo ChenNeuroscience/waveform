@@ -50,19 +50,24 @@ export interface WaveLayout {
   top?: number;
 }
 
+/** The 2D feature grid: square plots of `plot` CSS px (at least FEATURE_PLOT,
+ * sized by the CSS in style.css) separated by FEATURE_GAP. */
 export const FEATURE_PLOT = 128;
+/** Feature values 0..1 span the middle FEATURE_SPAN of each projection frame, with
+ * FEATURE_MARGIN either side. */
+export const FEATURE_MARGIN = 0.035;
+export const FEATURE_SPAN = 0.93;
 export const FEATURE_GAP = 4;
-export const FEATURE_STRIDE = FEATURE_PLOT + FEATURE_GAP;
-export function featureGridSize(columns: number, plots = 6) {
+export function featureGridSize(columns: number, plot = FEATURE_PLOT, plots = 6) {
   const rows = Math.ceil(plots / columns);
   return {
-    width: columns * FEATURE_STRIDE - FEATURE_GAP,
-    height: rows * FEATURE_STRIDE - FEATURE_GAP,
+    width: columns * (plot + FEATURE_GAP) - FEATURE_GAP,
+    height: rows * (plot + FEATURE_GAP) - FEATURE_GAP,
   };
 }
-export function featurePlotOrigin(index: number, columns: number) {
+export function featurePlotOrigin(index: number, columns: number, plot = FEATURE_PLOT) {
   return {
-    x: (index % columns) * FEATURE_STRIDE,
-    y: Math.floor(index / columns) * FEATURE_STRIDE,
+    x: (index % columns) * (plot + FEATURE_GAP),
+    y: Math.floor(index / columns) * (plot + FEATURE_GAP),
   };
 }

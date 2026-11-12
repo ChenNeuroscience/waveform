@@ -94,8 +94,8 @@ test("PCA picking, cuts, undo and configurable sampling project the full populat
     const pcs: number[] = await page.evaluate(() => (window as any).lastPCs);
     expect(pcs).toHaveLength(data.spikes * 4);
     const corner = (await plots.first().boundingBox())!;
-    const x = corner.x + 2 + 0.965 * 124;
-    const y = corner.y + 2 + 0.965 * 124;
+    const x = corner.x + 2 + 0.965 * (corner.width - 4);
+    const y = corner.y + 2 + 0.965 * (corner.height - 4);
     await page.mouse.move(x, y);
     await page.keyboard.press("f");
     await expect(page.locator('.painting-sources button[data-group="1"]')).toBeVisible();
@@ -115,13 +115,15 @@ test("PCA picking, cuts, undo and configurable sampling project the full populat
     await page.getByRole("button", { name: "Lasso cut", exact: true }).click();
     // Enclose the upper endpoint as well as the lower: the visible plot margin
     // must allow lassoing points whose normalised PC coordinates are exactly 1.
-    await page.mouse.move(corner.x + 64, corner.y + 1);
+    const mid = corner.width / 2,
+      far = corner.width - 1;
+    await page.mouse.move(corner.x + mid, corner.y + 1);
     await page.mouse.down();
     for (const [dx, dy] of [
-      [127, 1],
-      [127, 127],
-      [64, 127],
-      [64, 1],
+      [far, 1],
+      [far, far],
+      [mid, far],
+      [mid, 1],
     ]) {
       await page.mouse.move(corner.x + dx, corner.y + dy, { steps: 2 });
     }

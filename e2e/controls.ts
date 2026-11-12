@@ -34,13 +34,14 @@ export async function paintSources(page: Page) {
   await page.getByRole("button", { name: "Lasso cut", exact: true }).click();
   const plot = page.locator(".projection-labels > div").nth(0);
   await plot.scrollIntoViewIfNeeded();
-  const box = (await plot.boundingBox())!;
+  const box = (await plot.boundingBox())!,
+    far = box.width - 1;
   await page.mouse.move(box.x + 1, box.y + 1);
   await page.mouse.down();
   for (const [x, y] of [
-    [127, 1],
-    [127, 127],
-    [1, 127],
+    [far, 1],
+    [far, far],
+    [1, far],
     [1, 1],
   ])
     await page.mouse.move(box.x + x, box.y + y, { steps: 2 });

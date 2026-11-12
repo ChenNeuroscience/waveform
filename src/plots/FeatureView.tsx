@@ -4,23 +4,26 @@ import {
   projectionFrame,
   FEATURE_PLOT,
   FEATURE_GAP,
-  FEATURE_STRIDE,
+  FEATURE_MARGIN,
+  FEATURE_SPAN,
   featureGridSize,
   featurePlotOrigin,
 } from "./plot-geometry";
 import { ClusterGPU, projections } from "./cluster-gpu";
 import { type ViewData, type Settings, type FeatureCoordinates } from "../types";
 
-// Feature axes span the middle FEATURE_SPAN of each square projection frame
-// (FEATURE_MARGIN either side), matching the cluster shader's x*1.86-.93.
-const FEATURE_MARGIN = 0.035;
-const FEATURE_SPAN = 0.93;
+/** Columns and plot size (CSS px) of the 2D grid, as laid out by style.css. */
+interface Layout {
+  columns: number;
+  plot: number;
+}
 
 /** The projection index under a point in the grid, or null over a gap or edge. */
-function plotUnder([x, y]: number[], columns: number) {
-  const col = Math.floor(x / FEATURE_STRIDE);
-  const plot = Math.floor(y / FEATURE_STRIDE) * columns + col;
-  const inFrame = x % FEATURE_STRIDE < FEATURE_PLOT && y % FEATURE_STRIDE < FEATURE_PLOT;
+function plotUnder([x, y]: number[], { columns, plot: size }: Layout) {
+  const stride = size + FEATURE_GAP;
+  const col = Math.floor(x / stride);
+  const plot = Math.floor(y / stride) * columns + col;
+  const inFrame = x % stride < size && y % stride < size;
   return col < columns && plot < projections.length && inFrame ? plot : null;
 }
 
@@ -31,12 +34,12 @@ function nearestGroup(
   coordinates: FeatureCoordinates,
   [px, py]: number[],
   plot: number,
-  columns: number,
+  layout: Layout,
   { selected, range }: { selected: number; range: number[] },
 ) {
   const [ax, ay] = projections[plot];
-  const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
-  const origin = featurePlotOrigin(plot, columns);
+  const frame = projectionFrame(layout.plot, layout.plot);
+  const origin = featurePlotOrigin(plot, layout.columns, layout.plot);
   const timeScale = 1 / Math.max(1, data.times[data.times.length - 1] || 0);
   const scale = coordinates.values instanceof Uint8Array ? 1 / 255 : 1;
   let group: number | null = null;
@@ -61,9 +64,9 @@ function nearestGroup(
 }
 
 /** Stroke points (pixels in the grid) as normalised feature values in one plot. */
-function toFeatureSpace(points: number[][], plot: number, columns: number) {
-  const origin = featurePlotOrigin(plot, columns);
-  const frame = projectionFrame(FEATURE_PLOT, FEATURE_PLOT);
+function toFeatureSpace(points: number[][], plot: number, layout: Layout) {
+  const origin = featurePlotOrigin(plot, layout.columns, layout.plot);
+  const frame = projectionFrame(layout.plot, layout.plot);
   // Permit the visible margin around the unit box, so a lasso can enclose
   // extrema at exactly 0 or 1 (particularly common after PCA scaling).
   const clamp = (v: number) => Math.max(-0.05, Math.min(1.05, v));
@@ -93,12 +96,14 @@ export function Clusters({
   onPick: (group: number, source: boolean, toggle: boolean) => void;
 }) {
   const wrapper = useRef<HTMLDivElement>(null);
+  const labels = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const axes = projections;
 
-  // Projections per row (from the pane width), and a counter that forces a
-  // redraw after resizes or a restored WebGL context.
-  const [columns, setColumns] = useState(2);
+  // The grid as laid out by CSS (3x2 or 2x3, plot size from the pane), and a
+  // counter that forces a redraw after resizes or a restored WebGL context.
+  const [layout, setLayout] = useState<Layout>({ columns: 3, plot: FEATURE_PLOT });
+  const { columns } = layout;
   const [version, setVersion] = useState(0);
   const gpu = useRef<ClusterGPU | null>(null);
   const [error, setError] = useState("");
@@ -125,18 +130,18 @@ export function Clusters({
       }
       event.preventDefault();
       event.stopImmediatePropagation();
-      const plot = plotUnder(p, columns);
+      const plot = plotUnder(p, layout);
       if (plot === null) {
         return;
       }
-      const group = nearestGroup(data, coordinates, p, plot, columns, { selected, range });
+      const group = nearestGroup(data, coordinates, p, plot, layout, { selected, range });
       if (group !== null) {
         onPick(group, key === "f", event.shiftKey);
       }
     };
     window.addEventListener("keydown", pick, true);
     return () => window.removeEventListener("keydown", pick, true);
-  }, [data, coordinates, selected, range, columns, tool, onPick, axes]);
+  }, [data, coordinates, selected, range, layout, tool, onPick, axes]);
   useEffect(() => {
     const c = canvas.current!;
     const restore = () => setVersion((v) => v + 1);
@@ -151,12 +156,17 @@ export function Clusters({
     } catch (e) {
       setError(String(e));
     }
+    // CSS sizes the grid from the pane; read its tracks back for drawing and hits.
     const ro = new ResizeObserver(() => {
-      const width = wrapper.current!.parentElement!.clientWidth;
-      setColumns(Math.max(1, Math.min(6, Math.floor((width + FEATURE_GAP) / FEATURE_STRIDE))));
+      const tracks = getComputedStyle(labels.current!)
+        .gridTemplateColumns.split(" ")
+        .map(parseFloat)
+        .filter((v) => v > 0);
+      const next = { columns: tracks.length || 3, plot: tracks[0] || FEATURE_PLOT };
+      setLayout((l) => (l.columns === next.columns && l.plot === next.plot ? l : next));
       setVersion((v) => v + 1);
     });
-    ro.observe(wrapper.current!.parentElement!);
+    ro.observe(wrapper.current!);
     return () => {
       ro.disconnect();
       gpu.current?.dispose();
@@ -169,15 +179,25 @@ export function Clusters({
       if (!gpu.current && canvas.current) {
         gpu.current = new ClusterGPU(canvas.current);
       }
-      gpu.current?.draw(data, coordinates, settings, selected, range, axes, columns);
+      gpu.current?.draw(
+        data,
+        coordinates,
+        settings,
+        selected,
+        range,
+        axes,
+        columns,
+        undefined,
+        layout.plot,
+      );
     } catch (e) {
       setError(String(e));
     }
     // Only colour mode affects the points; other settings (rate maps,
     // analysis windows) must not redraw the whole population.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only colour mode among the settings affects the drawn points
-  }, [data, coordinates, settings.renderMode, selected, range, axes, version, columns]);
-  const grid = featureGridSize(columns);
+  }, [data, coordinates, settings.renderMode, selected, range, axes, version, layout]);
+  const grid = featureGridSize(columns, layout.plot);
   const point = (e: React.PointerEvent) => {
     const b = e.currentTarget.getBoundingClientRect();
     return [e.clientX - b.left, e.clientY - b.top];
@@ -187,7 +207,7 @@ export function Clusters({
       return;
     }
     const p = point(e);
-    const plot = plotUnder(p, columns);
+    const plot = plotUnder(p, layout);
     if (plot === null || p[0] >= grid.width || p[1] >= grid.height) {
       return;
     }
@@ -210,18 +230,18 @@ export function Clusters({
     if (!d || (tool !== "brush" && d.points.length < 3)) {
       return;
     }
-    onPolygon(toFeatureSpace(d.points, d.plot, columns), axes[d.plot][0], axes[d.plot][1]);
+    onPolygon(toFeatureSpace(d.points, d.plot, layout), axes[d.plot][0], axes[d.plot][1]);
   };
   return (
     <div
       className="clusters"
       ref={wrapper}
       data-columns={columns}
+      data-plot={layout.plot}
       data-dimension="2"
       data-features={coordinates.mode}
       data-colour-mode={settings.renderMode}
       data-feature-key={coordinates.key}
-      style={grid}
       onPointerDown={startStroke}
       onPointerMove={extendStroke}
       onPointerLeave={() => {
@@ -229,16 +249,8 @@ export function Clusters({
       }}
       onPointerUp={finishStroke}
     >
-      <canvas ref={canvas} style={grid} aria-label="Six WebGL2 spike feature projections" />
-      <div
-        className="projection-labels"
-        style={{
-          ...grid,
-          gap: FEATURE_GAP,
-          gridTemplateColumns: `repeat(${columns},${FEATURE_PLOT}px)`,
-          gridTemplateRows: `repeat(${Math.ceil(6 / columns)},${FEATURE_PLOT}px)`,
-        }}
-      >
+      <canvas ref={canvas} aria-label="Six WebGL2 spike feature projections" />
+      <div className="projection-labels" ref={labels}>
         {axes.map(([x, y], i) => (
           <div
             key={i}
@@ -278,12 +290,15 @@ export function captureFeatureGrid(): HTMLCanvasElement | undefined {
     return;
   }
   const columns = Number(root.dataset.columns);
-  const scale = source.width / source.clientWidth;
+  const plot = Number(root.dataset.plot) || FEATURE_PLOT;
+  // Copy at the displayed size: 2D plots rasterise smaller and are stretched.
+  const scale = Math.min(2, devicePixelRatio || 1);
   const copy = document.createElement("canvas");
-  copy.width = source.width;
-  copy.height = source.height;
+  copy.width = Math.round(source.clientWidth * scale);
+  copy.height = Math.round(source.clientHeight * scale);
   const ctx = copy.getContext("2d")!;
-  ctx.drawImage(source, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(source, 0, 0, copy.width, copy.height);
   ctx.scale(scale, scale);
   if (root.dataset.dimension === "3") {
     for (const line of root.querySelectorAll(".cluster-3d-axes line")) {
@@ -309,18 +324,18 @@ export function captureFeatureGrid(): HTMLCanvasElement | undefined {
   for (const [i, label] of [
     ...root.querySelectorAll<HTMLElement>(".projection-labels>div"),
   ].entries()) {
-    const { x, y } = featurePlotOrigin(i, columns);
+    const { x, y } = featurePlotOrigin(i, columns, plot);
     ctx.strokeStyle = "#bbb";
     ctx.lineWidth = 1;
-    ctx.strokeRect(x + 0.5, y + 0.5, FEATURE_PLOT - 1, FEATURE_PLOT - 1);
+    ctx.strokeRect(x + 0.5, y + 0.5, plot - 1, plot - 1);
     ctx.fillStyle = "#ffffffe8";
     ctx.fillRect(x + 2, y + 2, 20, 13);
-    ctx.fillRect(x + 106, y + 113, 20, 13);
+    ctx.fillRect(x + plot - 22, y + plot - 15, 20, 13);
     ctx.fillStyle = "#333";
     ctx.textAlign = "left";
     ctx.fillText(label.dataset.yAxis || "", x + 4, y + 12);
     ctx.textAlign = "right";
-    ctx.fillText(label.dataset.xAxis || "", x + 124, y + 124);
+    ctx.fillText(label.dataset.xAxis || "", x + plot - 4, y + plot - 4);
   }
   return copy;
 }
