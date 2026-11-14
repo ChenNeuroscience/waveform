@@ -151,7 +151,7 @@ describe("analysis", () => {
       binCm: 1,
       dirBin: 90,
     };
-    const p = await parsePosition(new File([header, raw], "test.pos"), opts, w, "clock");
+    const p = await parsePosition(new File([header, raw], "test.pos"), opts, w);
     const e = seedEngine(w, [960, 2880, 4800], [1, 1, 1]);
     try {
       const a = analyse(w, e, 1, 96000, 0.08, p, opts);
@@ -162,7 +162,7 @@ describe("analysis", () => {
       expect(a.direction[3]).toBeGreaterThan(0);
       expect(a.spatial[12]).toBeCloseTo(50);
     } finally {
-      w.position_free(p.handle);
+      w.position_free(p);
       w.engine_free(e);
     }
   });
@@ -196,15 +196,7 @@ describe("analysis", () => {
     w.position_push(pos, p, raw.length);
     w.free_bytes(p, raw.length);
     w.position_finish(pos, 1, 0, 0, 0);
-    const result = analyse(
-      w,
-      e,
-      1,
-      1000,
-      3,
-      { handle: pos, identity: "test", header: {}, ppm: 100, ppmEstimated: false },
-      { ...defaultSettings, binCm: 5, smooth: 0 },
-    );
+    const result = analyse(w, e, 1, 1000, 3, pos, { ...defaultSettings, binCm: 5, smooth: 0 });
     expect(result.spatial[0]).toBe(1);
     expect(result.spatial[3]).toBe(0.5);
     expect(result.ac.reduce((a, b) => a + b, 0)).toBe(0);
@@ -216,7 +208,7 @@ describe("analysis", () => {
       1,
       1000,
       3,
-      { handle: pos, identity: "test", header: {}, ppm: 100, ppmEstimated: false },
+      pos,
       { ...defaultSettings, binCm: 5, smooth: 0, scMinOverlap: 2 },
       true,
     );
@@ -224,7 +216,7 @@ describe("analysis", () => {
     expect(withSc.spatialAc![4]).toBeCloseTo(1);
     expect(Number.isNaN(withSc.spatialAc![0])).toBe(true);
     analyse(w, e, 1, 1000, 3, undefined, defaultSettings);
-    expect(w.engine_analysis_sc_len(e)).toBe(0);
+    expect(w.analysis_sc_len()).toBe(0);
     w.position_free(pos);
     w.engine_free(e);
   });

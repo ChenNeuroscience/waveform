@@ -1,10 +1,14 @@
 /** The analyses the position pane shows: the trajectory, the displayed cell's
- * analysis and, while dragging one tile onto another, the target's analysis. */
+ * analysis and, while dragging one tile onto another, the target's analysis.
+ *
+ * Nothing is cached here. Whenever an input might have changed, the worker is asked again
+ * and answers from its cache (core/src/cache.rs) when it can. Each answer carries the
+ * cache's key, and an answer with the key already held keeps the held object, so an
+ * unchanged plot isn't redrawn. */
 import { useEffect, useState } from "react";
 import { request } from "../worker/client";
 import { Superseded } from "../worker/protocol";
 import {
-  positionKey,
   positionSource,
   type AnalysisData,
   type HeaderEdits,
@@ -14,6 +18,10 @@ import {
   type ViewData,
 } from "../types";
 import type { DragComparison } from "../tiles/tile-gestures";
+
+/** `next`, unless `held` has the same cache key (and so the same values). */
+const fresh = <T extends { key?: string }>(held: T | null, next: T) =>
+  held && next.key && held.key === next.key ? held : next;
 
 export function useAnalyses({
   data,
@@ -35,41 +43,41 @@ export function useAnalyses({
   onError: (message: string) => void;
 }) {
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
-  const [trajectory, setTrajectory] = useState<{ key: string; value: Trajectory | null } | null>(
-    null,
-  );
+  // Each held with what it was asked for, so a different trial or cell shows nothing
+  // rather than the last one's until its answer arrives.
+  const [trajectory, setTrajectory] = useState<{ posFile: string; value: Trajectory } | null>(null);
   const [speedDwell, setSpeedDwell] = useState<{ key: string; values: Float32Array } | null>(null);
-  const [comparison, setComparison] = useState<{ key: string; data: AnalysisData } | null>(null);
-  const posKey = positionKey(trial, headerEdits);
-  // The sync offset is left out: it moves the path relative to spikes, not the path absolutely.
-  const trajectoryKey =
-    data && trial?.pos
-      ? `${posKey}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}`
-      : "";
-  const speedDwellKey = trajectoryKey
-    ? `${trajectoryKey}|${settings.speedBin}|${settings.speedMax}`
-    : "";
+  const [comparison, setComparison] = useState<{ target: number; data: AnalysisData } | null>(null);
+  const position = positionSource(trial, headerEdits);
+  const hasRecording = !!data;
 
-  // The path is shared by every cell, so it is fetched once per position file and
-  // processing settings rather than with each cell's analysis.
+  // The path is shared by every cell, so it is asked for apart from cells' analyses.
   useEffect(() => {
     let live = true;
-    if (!trajectoryKey || !trial?.pos) {
+    const source = positionSource(trial, headerEdits);
+    if (!hasRecording || !source.pos || !source.posFile) {
       setTrajectory(null);
       return;
     }
-    request("trajectory", { ...positionSource(trial, headerEdits), settings })
+    const posFile = source.posFile;
+    request("trajectory", { ...source, settings })
       .then((t) => {
         if (live) {
-          setTrajectory({ key: trajectoryKey, value: t });
+          setTrajectory((held) =>
+            t
+              ? {
+                  posFile,
+                  value: held?.posFile === posFile ? fresh(held.value, t) : t,
+                }
+              : null,
+          );
         }
       })
       .catch(() => {});
     return () => {
       live = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- trajectoryKey covers recording availability, position identity and processing settings; tetrode and cut changes reuse the path
-  }, [trajectoryKey]);
+  }, [hasRecording, trial, headerEdits, settings]);
 
   // The hovered (or selected) cell's analysis, debounced so sweeping the pointer
   // across tiles requests only where it settles.
@@ -88,16 +96,16 @@ export function useAnalyses({
         })
           .then((a) => {
             if (live) {
-              setAnalysis(a);
-              // Every cell carries the same position-only dwell histogram. Retain
-              // its array across cell, cut and tetrode changes so it isn't redrawn.
-              if (speedDwellKey) {
-                setSpeedDwell((current) =>
-                  current?.key === speedDwellKey
-                    ? current
-                    : { key: speedDwellKey, values: a.speedDwell },
-                );
-              }
+              setAnalysis((held) => (held?.cell === a.cell ? fresh(held, a) : a));
+              // Every cell carries the same position-only dwell histogram. Keep its
+              // array across cell, cut and tetrode changes so it isn't redrawn.
+              setSpeedDwell((held) =>
+                !a.speedDwellKey
+                  ? null
+                  : held?.key === a.speedDwellKey
+                    ? held
+                    : { key: a.speedDwellKey, values: a.speedDwell },
+              );
             }
           })
           .catch((e) => {
@@ -111,41 +119,13 @@ export function useAnalyses({
       live = false;
       clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the listed analysis settings change the result; trial.id travels with trial.pos
-  }, [
-    data,
-    displayCell,
-    posKey,
-    settings.binCm,
-    settings.smooth,
-    settings.acWindow,
-    settings.acBinMs,
-    settings.leds,
-    settings.maxSpeed,
-    settings.posSmooth,
-    settings.dirBin,
-    settings.dirSmooth,
-    settings.speedBin,
-    settings.speedMax,
-    settings.syncMs,
-    busy,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onError is a fresh callback each render
+  }, [data, displayCell, trial, headerEdits, settings, busy]);
 
   // The drag-comparison target's analysis, for its spikes on the path.
-  const comparisonKey = [
-    data?.session,
-    data?.revision,
-    trial?.id,
-    posKey,
-    settings.leds,
-    settings.maxSpeed,
-    settings.posSmooth,
-    settings.syncMs,
-    dragComparison?.target,
-  ].join("|");
+  const target = dragComparison?.target;
   useEffect(() => {
     let live = true;
-    const target = dragComparison?.target;
     if (!data || busy || target == null) {
       return;
     }
@@ -159,7 +139,10 @@ export function useAnalyses({
         })
           .then((a) => {
             if (live) {
-              setComparison({ key: comparisonKey, data: a });
+              setComparison((held) => ({
+                target,
+                data: held?.target === target ? fresh(held.data, a) : a,
+              }));
             }
           })
           .catch((e) => {
@@ -173,14 +156,15 @@ export function useAnalyses({
       live = false;
       clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- comparisonKey covers the comparison's inputs
-  }, [comparisonKey, trial?.pos, busy]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onError is a fresh callback each render
+  }, [data, target, trial, headerEdits, settings, busy]);
 
   return {
     analysis,
-    trajectory: trajectory?.key === trajectoryKey ? trajectory.value : null,
-    speedDwell: speedDwell?.key === speedDwellKey ? speedDwell.values : null,
-    comparisonAnalysis: comparison?.key === comparisonKey ? comparison.data : null,
+    trajectory:
+      position.posFile && trajectory?.posFile === position.posFile ? trajectory.value : null,
+    speedDwell: position.pos ? (speedDwell?.values ?? null) : null,
+    comparisonAnalysis: target != null && comparison?.target === target ? comparison.data : null,
     clearAnalysis: () => setAnalysis(null),
   };
 }

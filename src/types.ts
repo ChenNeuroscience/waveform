@@ -36,8 +36,6 @@ export interface Settings {
   leds: number;
   maxSpeed: number;
   posSmooth: number;
-  /** Shift applied to position times (ms); spike times are the reference. */
-  syncMs: number;
   dirBin: number;
   dirSmooth: number;
   speedBin: number;
@@ -56,7 +54,6 @@ export const defaultSettings: Settings = {
   leds: 2,
   maxSpeed: 4,
   posSmooth: 0.3,
-  syncMs: 0,
   dirBin: 6,
   dirSmooth: 1,
   speedBin: 4,
@@ -140,6 +137,8 @@ export type ViewMessage = Omit<ViewData, "features" | "times"> &
   Partial<Pick<ViewData, "features" | "times">>;
 /** The animal's path, shared by every cell; sent once per position settings. */
 export interface Trajectory {
+  /** The worker cache's key for it: equal keys mean an identical path. */
+  key: string;
   /** The calibration used, and whether it's only a guess because no file or edit gave one. */
   ppm: number;
   ppmEstimated: boolean;
@@ -153,6 +152,12 @@ export const membershipKey = (data: ViewData, cell: number) =>
 export interface AnalysisData {
   /** The membership key the worker analysed (see membershipKey). */
   membership?: string;
+  /** The worker cache's key for it: equal keys mean identical results. */
+  key?: string;
+  /** Likewise for `speedDwell`, which depends on the position alone. */
+  speedDwellKey?: string;
+  /** The cell's spike count. */
+  count: number;
   arenaWidth: number;
   arenaHeight: number;
   cell: number;
@@ -174,20 +179,23 @@ export const fileId = (f: File) => `${f.webkitRelativePath || f.name}:${f.size}:
 /** Header values changed in the browser, by `fileId`. They are never written to the files,
  * and last only as long as the browser has the files. */
 export type HeaderEdits = Record<string, Header>;
-const editedPpm = (trial: Trial | undefined, edits: HeaderEdits) =>
-  trial?.pos ? edits[fileId(trial.pos)]?.pixels_per_metre : undefined;
-/** The worker cache key for a trial's position file and its calibration, or "" without one. */
-export const positionKey = (trial: Trial | undefined, edits: HeaderEdits) =>
-  trial?.pos ? `${trial.id}|${fileId(trial.pos)}|${editedPpm(trial, edits) ?? ""}` : "";
-/** What the worker needs to process a trial's position. */
-export const positionSource = (trial: Trial | undefined, edits: HeaderEdits) => {
-  const ppm = editedPpm(trial, edits);
-  return {
-    pos: trial?.pos,
-    posKey: positionKey(trial, edits),
-    ppm: ppm === undefined ? undefined : parseFloat(ppm),
-  };
-};
+/** The position header for a sync correction. Files never have it: it exists only as an
+ * edit, in ms added to position times (spike times are the reference). */
+export const SYNC_HEADER = "sync_offset_ms";
+/** A position header's edited value as a number, if it has a valid one. Parsed with
+ * `Number`, as edits are validated (see header-edits.ts). */
+function editedNumber(trial: Trial | undefined, edits: HeaderEdits, key: string) {
+  const text = trial?.pos ? edits[fileId(trial.pos)]?.[key] : undefined;
+  const value = Number(text);
+  return text !== undefined && text.trim() !== "" && Number.isFinite(value) ? value : undefined;
+}
+/** A trial's position, as the worker needs it and cache keys read it (see cache.ts). */
+export const positionSource = (trial: Trial | undefined, edits: HeaderEdits) => ({
+  pos: trial?.pos,
+  posFile: trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : undefined,
+  ppm: editedNumber(trial, edits, "pixels_per_metre"),
+  sync: editedNumber(trial, edits, SYNC_HEADER),
+});
 export { groupTextColor } from "./palette";
 import { groupRgb8, groupTextColor } from "./palette";
 export const cellRgb = (cell: number) => groupRgb8(cell).map((value) => value / 255);

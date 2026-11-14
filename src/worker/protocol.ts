@@ -58,11 +58,15 @@ export type SplitRequest = Session &
     | { phase: "finish"; newCut?: NewCut }
     | { phase: "cancel" }
   );
+/** A trial's position (see `positionSource`) and the settings to process it with. */
 export interface PositionRequest {
   pos?: File;
-  posKey: string;
+  /** The position file's identity: its trial and `fileId`. */
+  posFile?: string;
   /** An edited calibration, in place of the file's. */
   ppm?: number;
+  /** ms added to position times, from the in-memory sync header. */
+  sync?: number;
   settings: Settings;
 }
 
@@ -73,9 +77,12 @@ export interface CopyRecording {
   assetKey: string;
   cut?: File;
   cutKey?: string;
+  /** The cut's revision, which names its cells' analyses while it isn't loaded. */
+  revision?: number;
   pos?: File;
-  posKey: string;
+  posFile?: string;
   ppm?: number;
+  sync?: number;
   set?: File;
 }
 export interface CopyTrialAnalysis {

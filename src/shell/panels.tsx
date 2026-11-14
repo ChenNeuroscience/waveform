@@ -14,7 +14,14 @@ import {
 import { usePreference } from "../preferences";
 import { decodeSettings, encodeSettings } from "../app/settings-clipboard";
 import type { HeaderEdits, HistoryEntry, Settings } from "../types";
-import { editHeader, headerRows, resetHeaders, validHeader } from "./header-edits";
+import {
+  editHeader,
+  headerRows,
+  headerRule,
+  resetHeaders,
+  stepHeader,
+  validHeader,
+} from "./header-edits";
 
 export type PanelName = "settings" | "history" | "headers" | "help";
 /** Everything the tool panels read or act on, assembled once by App. */
@@ -218,21 +225,6 @@ export function SettingsPanel({
             zeroLabel="Off"
             hint={(v) => v === 0 && "Position coordinates are not smoothed."}
             onChange={(v) => update("posSmooth", v)}
-          />
-          <Slider
-            label="Position sync offset"
-            value={settings.syncMs}
-            min={-1000}
-            max={1000}
-            step={20}
-            unit="ms"
-            zeroLabel="Off"
-            hint={(v) =>
-              v === 0
-                ? "Position times are used as recorded."
-                : `${fmt(Math.abs(v))} ms ${v > 0 ? "added to" : "subtracted from"} position times.`
-            }
-            onChange={(v) => update("syncMs", v)}
           />
         </>
       ),
@@ -570,19 +562,22 @@ function Shortcut({ keys, text }: { keys: string; text: string }) {
 }
 /** A header that can be changed: its value, where that came from, and the box to change it. */
 function EditableHeader({
+  section,
   name,
   value,
   note,
   onChange,
 }: {
+  section: string;
   name: string;
   value: string;
   note: string;
   onChange: (value: string) => void;
 }) {
   const [text, setText] = useState<string | null>(null);
+  const valid = (t: string) => validHeader(section, name, t);
   const finish = () => {
-    if (text !== null && validHeader(text)) {
+    if (text !== null && valid(text)) {
       onChange(text.trim());
       setText(null);
     }
@@ -595,7 +590,7 @@ function EditableHeader({
         <button
           title={`Change ${name}, in this browser only`}
           aria-label={`Change ${name}`}
-          onClick={() => setText(validHeader(value) ? value : "")}
+          onClick={() => setText(valid(value) ? value : "")}
         >
           <Pencil size={11} />
         </button>
@@ -607,7 +602,7 @@ function EditableHeader({
       <input
         autoFocus
         aria-label={`New ${name}`}
-        aria-invalid={!validHeader(text)}
+        aria-invalid={!valid(text)}
         inputMode="decimal"
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -617,11 +612,14 @@ function EditableHeader({
             finish();
           } else if (e.key === "Escape") {
             setText(null);
+          } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            setText(stepHeader(section, name, text, e.key === "ArrowUp" ? 1 : -1));
           }
         }}
-        onBlur={() => (validHeader(text) ? finish() : setText(null))}
+        onBlur={() => (valid(text) ? finish() : setText(null))}
       />
-      {!validHeader(text) && <em>A number above 0</em>}
+      {!valid(text) && <em>{headerRule(section, name)}</em>}
     </dd>
   );
 }
@@ -663,6 +661,7 @@ export function HeadersPanel({ c }: { c: PanelContext }) {
                     <dt>{r.key}</dt>
                     {r.editable && id ? (
                       <EditableHeader
+                        section={section}
                         name={r.key}
                         value={r.value}
                         note={r.note}

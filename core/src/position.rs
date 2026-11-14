@@ -1,10 +1,6 @@
 //! Position decoding/post-processing and numeric cell analysis, entirely in Wasm.
 use crate::Engine;
-use std::{
-    cell::{OnceCell, RefCell},
-    slice,
-    sync::Arc,
-};
+use std::{cell::OnceCell, slice, sync::Arc};
 #[derive(Default, Clone)]
 struct Raw {
     spots: Vec<[f32; 4]>,
@@ -68,18 +64,7 @@ fn pixel_swap_candidate(pixels: [u16; 2], stats: [PixelStats; 2]) -> bool {
         a < b
     }
 }
-/// Cell-independent results derived from a processed position, computed on first
-/// use and reused by every cell's analysis.
-#[derive(Default)]
-struct Derived {
-    /// Normalised (x, y) of every binnable sample, for the trajectory plot.
-    path: Option<Vec<f32>>,
-    /// Occupancy (spatial, direction, speed dwell) for one set of bin settings.
-    occupancy: Option<(OccupancyKey, [Vec<f32>; 3])>,
-}
-type OccupancyKey = (usize, usize, usize, u32, u32);
 pub(crate) struct Position {
-    derived: RefCell<Derived>,
     raw: Arc<Raw>,
     x: Vec<f32>,
     y: Vec<f32>,
@@ -96,6 +81,8 @@ pub(crate) struct Position {
     bearing: f32,
     /// Shift applied to position times, in seconds: sample i is at i / rate + sync.
     sync: f64,
+    /// Whether `ppm` is only a guess, with no calibration from the file or an edit.
+    estimated: bool,
 }
 impl Position {
     fn new(n: usize, ppm: f32, rate: f64, min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> Self {
@@ -118,12 +105,13 @@ impl Position {
             min_y,
             bearing: 0.,
             sync: 0.,
-            derived: Default::default(),
+            estimated: false,
         }
     }
     /// Sets the calibration, before processing.
-    fn set_ppm(&mut self, ppm: f32) {
+    fn set_ppm(&mut self, ppm: f32, estimated: bool) {
         self.ppm = ppm;
+        self.estimated = estimated;
         self.width = self.span[0] * 100. / ppm;
         self.height = self.span[1] * 100. / ppm;
     }
@@ -170,7 +158,6 @@ impl Position {
         }
     }
     fn process(&mut self, leds: u32, max_speed: f32, smoothing: f64, sync_ms: f64) {
-        self.derived = Default::default();
         // Spike times are the reference; sync moves the position track against them.
         self.sync = if sync_ms.is_finite() {
             sync_ms.clamp(-10000., 10000.) / 1000.
@@ -290,17 +277,7 @@ impl Position {
         }
         Some((1. / self.rate) as f32)
     }
-    fn path(&self) -> std::cell::Ref<'_, Vec<f32>> {
-        if self.derived.borrow().path.is_none() {
-            let path = (0..self.x.len())
-                .filter(|&i| self.dwell(i).is_some())
-                .flat_map(|i| [self.x[i] / self.width, self.y[i] / self.height])
-                .collect();
-            self.derived.borrow_mut().path = Some(path);
-        }
-        std::cell::Ref::map(self.derived.borrow(), |d| d.path.as_ref().unwrap())
-    }
-    fn variant(&self, leds: u32, max_speed: f32, smoothing: f64, sync_ms: f64) -> Self {
+    pub(crate) fn variant(&self, leds: u32, max_speed: f32, smoothing: f64, sync_ms: f64) -> Self {
         let mut p = Self {
             raw: self.raw.clone(),
             x: vec![],
@@ -316,7 +293,7 @@ impl Position {
             min_y: self.min_y,
             bearing: self.bearing,
             sync: 0.,
-            derived: Default::default(),
+            estimated: self.estimated,
         };
         p.process(leds, max_speed, smoothing, sync_ms);
         p
@@ -358,16 +335,18 @@ fn smooth(a: &mut [f32], k: usize) {
         *v = ((sum[hi] - sum[lo]) / (hi - lo) as f64) as f32;
     }
 }
+/// Every analysis of a cell, computed together without the cache (see `analyse`).
 #[derive(Default)]
 pub(crate) struct Analysis {
-    meta: [f64; 8],
-    spatial: Vec<f32>,
-    sc: Vec<f32>,
-    spikes: Vec<f32>,
-    direction: Vec<f32>,
-    speed: Vec<f32>,
-    speed_dwell: Vec<f32>,
-    ac: Vec<f32>,
+    /// Cell, map width and height, peak, refractory %, rate, arena width and height, spikes.
+    pub(crate) meta: [f64; 9],
+    pub(crate) spatial: Vec<f32>,
+    pub(crate) sc: Vec<f32>,
+    pub(crate) spikes: Vec<f32>,
+    pub(crate) direction: Vec<f32>,
+    pub(crate) speed: Vec<f32>,
+    pub(crate) speed_dwell: Vec<f32>,
+    pub(crate) ac: Vec<f32>,
 }
 fn box2(a: &[f32], w: usize, h: usize, k: usize) -> Vec<f32> {
     let mut integral = vec![0f64; (w + 1) * (h + 1)];
@@ -395,7 +374,250 @@ fn box2(a: &[f32], w: usize, h: usize, k: usize) -> Vec<f32> {
     }
     out
 }
-fn analyse(
+/// The speed histogram's bin width, maximum and bin count, from its settings.
+pub(crate) fn speed_bins(speed_bin: f32, speed_max: f32) -> (f32, f32, usize) {
+    let speed_bin = speed_bin.clamp(0.5, 100.);
+    let speed_max = speed_max.clamp(1., 1000.);
+    (
+        speed_bin,
+        speed_max,
+        (speed_max / speed_bin).ceil() as usize,
+    )
+}
+/// The directional map's bin count, from its bin width in degrees.
+pub(crate) fn direction_bins(dir_bin: f32) -> usize {
+    (360. / dir_bin).ceil() as usize
+}
+impl Position {
+    /// The spatial grid's width and height in bins of `bin` cm.
+    pub(crate) fn grid(&self, bin: f32) -> (usize, usize) {
+        (
+            ((self.width / bin).ceil() as usize).clamp(1, 200),
+            ((self.height / bin).ceil() as usize).clamp(1, 200),
+        )
+    }
+    pub(crate) fn arena(&self) -> [f32; 2] {
+        [self.width, self.height]
+    }
+    /// Sample `i`'s spatial bin in a `w` by `h` grid; it must be in the arena.
+    fn spatial_bin(&self, i: usize, w: usize, h: usize) -> usize {
+        let x = ((self.x[i] / self.width * w as f32) as usize).min(w - 1);
+        let y = ((self.y[i] / self.height * h as f32) as usize).min(h - 1);
+        y * w + x
+    }
+    fn direction_bin(&self, i: usize, nd: usize) -> Option<usize> {
+        self.dir[i].is_finite().then(|| {
+            (((self.dir[i] as f64 + std::f64::consts::PI) / (2. * std::f64::consts::PI) * nd as f64)
+                .floor() as usize)
+                .min(nd - 1)
+        })
+    }
+    fn speed_bin(&self, i: usize, speed_bin: f32, speed_max: f32, ns: usize) -> Option<usize> {
+        let s = self.speed[i];
+        (s.is_finite() && s >= 0. && s < speed_max)
+            .then(|| ((s / speed_bin).floor() as usize).min(ns - 1))
+    }
+    /// Normalised (x, y) of every sample in the arena, for the trajectory plot.
+    pub(crate) fn path(&self) -> Vec<f32> {
+        (0..self.x.len())
+            .filter(|&i| self.dwell(i).is_some())
+            .flat_map(|i| [self.x[i] / self.width, self.y[i] / self.height])
+            .collect()
+    }
+    /// Seconds spent in each spatial bin.
+    pub(crate) fn spatial_occupancy(&self, w: usize, h: usize) -> Vec<f32> {
+        let mut occupancy = vec![0.; w * h];
+        for i in 0..self.x.len() {
+            if let Some(dt) = self.dwell(i) {
+                occupancy[self.spatial_bin(i, w, h)] += dt;
+            }
+        }
+        occupancy
+    }
+    /// Seconds spent facing each direction, in the arena.
+    pub(crate) fn direction_occupancy(&self, nd: usize) -> Vec<f32> {
+        let mut occupancy = vec![0.; nd];
+        for i in 0..self.x.len() {
+            if let (Some(dt), Some(b)) = (self.dwell(i), self.direction_bin(i, nd)) {
+                occupancy[b] += dt;
+            }
+        }
+        occupancy
+    }
+    /// Seconds spent at each speed, in the arena.
+    pub(crate) fn speed_dwell(&self, speed_bin: f32, speed_max: f32, ns: usize) -> Vec<f32> {
+        let mut dwell = vec![0.; ns];
+        for i in 0..self.x.len() {
+            if let (Some(dt), Some(b)) =
+                (self.dwell(i), self.speed_bin(i, speed_bin, speed_max, ns))
+            {
+                dwell[b] += dt;
+            }
+        }
+        dwell
+    }
+    /// The position sample of each of `ids`' spikes that falls in the arena.
+    pub(crate) fn spike_samples(&self, times: &[u32], ids: &[u32], tb: f64) -> Vec<u32> {
+        // Spike times are the reference clock; the position track was moved by
+        // `sync`, so a spike at time t takes the sample recorded at t - sync.
+        let shift = self.sync * tb;
+        ids.iter()
+            .filter_map(|&id| {
+                let at = (times[id as usize] as f64 - shift) * self.rate / tb;
+                let cursor = at.floor() as usize;
+                (at >= 0. && cursor < self.x.len() && self.dwell(cursor).is_some())
+                    .then_some(cursor as u32)
+            })
+            .collect()
+    }
+    /// Normalised (x, y) of each spike's sample.
+    pub(crate) fn spike_positions(&self, samples: &[u32]) -> Vec<f32> {
+        samples
+            .iter()
+            .flat_map(|&i| {
+                [
+                    self.x[i as usize] / self.width,
+                    self.y[i as usize] / self.height,
+                ]
+            })
+            .collect()
+    }
+    /// Spikes per second in each spatial bin (NaN where unvisited), and the peak.
+    pub(crate) fn rate_map(
+        &self,
+        samples: &[u32],
+        occupancy: &[f32],
+        w: usize,
+        h: usize,
+        smoothing: usize,
+    ) -> (Vec<f32>, f32) {
+        let mut hits = vec![0.; w * h];
+        for &i in samples {
+            hits[self.spatial_bin(i as usize, w, h)] += 1.;
+        }
+        let so = box2(occupancy, w, h, smoothing);
+        let sh = box2(&hits, w, h, smoothing);
+        let mut peak = 0f32;
+        let map = so
+            .iter()
+            .zip(sh)
+            .enumerate()
+            .map(|(i, (&o, h))| {
+                let v = if occupancy[i] > 0. && o > 0. {
+                    h / o
+                } else {
+                    f32::NAN
+                };
+                if v.is_finite() {
+                    peak = peak.max(v);
+                }
+                v
+            })
+            .collect();
+        (map, peak)
+    }
+    /// Spikes per second facing each direction, smoothed around the circle.
+    pub(crate) fn direction_map(
+        &self,
+        samples: &[u32],
+        occupancy: &[f32],
+        nd: usize,
+        smoothing: usize,
+    ) -> Vec<f32> {
+        let mut hits = vec![0.; nd];
+        for &i in samples {
+            if let Some(b) = self.direction_bin(i as usize, nd) {
+                hits[b] += 1.;
+            }
+        }
+        let radius = smoothing.min(nd) as isize;
+        (0..nd)
+            .map(|i| {
+                let (mut a, mut b) = (0., 0.);
+                for j in -radius..=radius {
+                    let k = (i as isize + j).rem_euclid(nd as isize) as usize;
+                    a += hits[k];
+                    b += occupancy[k];
+                }
+                if b > 0. {
+                    a / b
+                } else {
+                    0.
+                }
+            })
+            .collect()
+    }
+    /// Spikes per second at each speed.
+    pub(crate) fn speed_map(
+        &self,
+        samples: &[u32],
+        dwell: &[f32],
+        speed_bin: f32,
+        speed_max: f32,
+    ) -> Vec<f32> {
+        let mut hits = vec![0.; dwell.len()];
+        for &i in samples {
+            if let Some(b) = self.speed_bin(i as usize, speed_bin, speed_max, dwell.len()) {
+                hits[b] += 1.;
+            }
+        }
+        dwell
+            .iter()
+            .zip(hits)
+            .map(|(&o, h)| if o > 0. { h / o } else { 0. })
+            .collect()
+    }
+}
+/// Counts of spike pairs by lag, up to `window` ms in bins of `ac_bin_ms`.
+pub(crate) fn temporal_ac(
+    times: &[u32],
+    ids: &[u32],
+    tb: f64,
+    window: f64,
+    ac_bin_ms: f64,
+) -> Vec<f32> {
+    let window = if window.is_finite() {
+        window.clamp(1., 10000.)
+    } else {
+        1000.
+    };
+    let ac_bin_ms = if ac_bin_ms.is_finite() {
+        ac_bin_ms.clamp(0.1, window)
+    } else {
+        5.
+    };
+    let mut ac = vec![0.; (window / ac_bin_ms).ceil() as usize];
+    // Every spike pair within the window; the cost scales with those pairs only.
+    for j in 0..ids.len() {
+        let t = times[ids[j] as usize];
+        for &k in &ids[j + 1..] {
+            let dt = times[k as usize].saturating_sub(t) as f64 / tb * 1000.;
+            if dt >= window {
+                break;
+            }
+            let bin = ((dt / ac_bin_ms).floor() as usize).min(ac.len() - 1);
+            ac[bin] += 1.;
+        }
+    }
+    ac
+}
+/// The percentage of interspike intervals under 2 ms.
+pub(crate) fn refractory(times: &[u32], ids: &[u32], tb: f64) -> f64 {
+    let violations = ids
+        .windows(2)
+        .filter(|pair| {
+            times[pair[1] as usize].saturating_sub(times[pair[0] as usize]) as f64 / tb < 0.002
+        })
+        .count();
+    if ids.len() > 1 {
+        violations as f64 / (ids.len() - 1) as f64 * 100.
+    } else {
+        0.
+    }
+}
+/// Every analysis of a cell at once, without the cache (see analysis.rs for the cached ones).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn analyse(
     e: &mut Engine,
     pos: Option<&Position>,
     cell: u16,
@@ -410,189 +632,52 @@ fn analyse(
     speed_bin: f32,
     speed_max: f32,
 ) -> Analysis {
-    let speed_bin = speed_bin.clamp(0.5, 100.);
-    let speed_max = speed_max.clamp(1., 1000.);
+    let (speed_bin, speed_max, ns) = speed_bins(speed_bin, speed_max);
+    let nd = direction_bins(dir_bin);
     e.ensure_groups();
     let ids = &e.groups[cell as usize];
     let n = ids.len();
-    let window = if window.is_finite() {
-        window.clamp(1., 10000.)
-    } else {
-        1000.
-    };
-    let ac_bin_ms = if ac_bin_ms.is_finite() {
-        ac_bin_ms.clamp(0.1, window)
-    } else {
-        5.
-    };
-    let mut ac = vec![0.; (window / ac_bin_ms).ceil() as usize];
-    let mut violations = 0;
-    for pair in ids.windows(2) {
-        if e.times[pair[1] as usize].saturating_sub(e.times[pair[0] as usize]) as f64 / tb < 0.002 {
-            violations += 1;
-        }
-    }
-    // Every spike pair within the window; the cost scales with those pairs only.
-    for j in 0..n {
-        let t = e.times[ids[j] as usize];
-        for k in j + 1..n {
-            let dt = e.times[ids[k] as usize].saturating_sub(t) as f64 / tb * 1000.;
-            if dt >= window {
-                break;
-            }
-            let bin = ((dt / ac_bin_ms).floor() as usize).min(ac.len() - 1);
-            ac[bin] += 1.;
-        }
-    }
-    let (w, h) = pos
-        .map(|p| {
+    let ac = temporal_ac(&e.times, ids, tb, window, ac_bin_ms);
+    let (w, h) = pos.map(|p| p.grid(bin)).unwrap_or((0, 0));
+    let (spatial, peak, spikes, direction, speed, speed_dwell) = match pos {
+        Some(p) => {
+            let samples = p.spike_samples(&e.times, ids, tb);
+            let (spatial, peak) = p.rate_map(&samples, &p.spatial_occupancy(w, h), w, h, smoothing);
+            let dwell = p.speed_dwell(speed_bin, speed_max, ns);
             (
-                ((p.width / bin).ceil() as usize).clamp(1, 200),
-                ((p.height / bin).ceil() as usize).clamp(1, 200),
+                spatial,
+                peak,
+                p.spike_positions(&samples),
+                p.direction_map(&samples, &p.direction_occupancy(nd), nd, dir_smoothing),
+                p.speed_map(&samples, &dwell, speed_bin, speed_max),
+                dwell,
             )
-        })
-        .unwrap_or((0, 0));
-    let nd = (360. / dir_bin).ceil() as usize;
-    let ns = (speed_max / speed_bin).ceil() as usize;
-    let (mut hits, mut hd, mut hs) = (vec![0.; w * h], vec![0.; nd], vec![0.; ns]);
-    let mut spikes = vec![];
-    let mut occupancy = [vec![0.; w * h], vec![0.; nd], vec![0.; ns]];
-    if let Some(p) = pos {
-        let bin = |i: usize| -> Option<usize> {
-            let x = (p.x[i] / p.width * w as f32).floor();
-            let y = (p.y[i] / p.height * h as f32).floor();
-            if x.is_finite() && y.is_finite() && x >= 0. && x < w as f32 && y >= 0. && y < h as f32
-            {
-                Some(y as usize * w + x as usize)
-            } else {
-                None
-            }
-        };
-        let db = |i: usize| {
-            (((p.dir[i] as f64 + std::f64::consts::PI) / (2. * std::f64::consts::PI) * nd as f64)
-                .floor() as usize)
-                .min(nd - 1)
-        };
-        let sb = |i: usize| {
-            if p.speed[i].is_finite() && p.speed[i] >= 0. && p.speed[i] < speed_max {
-                Some(((p.speed[i] / speed_bin).floor() as usize).min(ns - 1))
-            } else {
-                None
-            }
-        };
-        // Occupancy depends only on the position and bin settings, so it is
-        // computed once and shared by every cell's analysis.
-        let key = (w, h, nd, speed_bin.to_bits(), speed_max.to_bits());
-        let cached = p
-            .derived
-            .borrow()
-            .occupancy
-            .as_ref()
-            .filter(|(k, _)| *k == key)
-            .map(|(_, o)| o.clone());
-        occupancy = cached.unwrap_or_else(|| {
-            let [mut occ, mut od, mut os] = [vec![0.; w * h], vec![0.; nd], vec![0.; ns]];
-            for i in 0..p.x.len() {
-                let (Some(b), Some(dt)) = (bin(i), p.dwell(i)) else {
-                    continue;
-                };
-                occ[b] += dt;
-                if p.dir[i].is_finite() {
-                    od[db(i)] += dt;
-                }
-                if let Some(b) = sb(i) {
-                    os[b] += dt;
-                }
-            }
-            let maps = [occ, od, os];
-            p.derived.borrow_mut().occupancy = Some((key, maps.clone()));
-            maps
-        });
-        // Spike times are the reference clock; the position track was moved by
-        // `p.sync`, so a spike at time t takes the sample recorded at t - sync.
-        let shift = p.sync * tb;
-        for &id in ids {
-            let at = (e.times[id as usize] as f64 - shift) * p.rate / tb;
-            if at < 0. {
-                continue;
-            }
-            let cursor = at.floor() as usize;
-            if cursor >= p.x.len() {
-                continue;
-            }
-            if let Some(b) = bin(cursor) {
-                hits[b] += 1.;
-                if p.dir[cursor].is_finite() {
-                    hd[db(cursor)] += 1.;
-                }
-                if let Some(b) = sb(cursor) {
-                    hs[b] += 1.;
-                }
-                spikes.extend([p.x[cursor] / p.width, p.y[cursor] / p.height]);
-            }
         }
-    }
-    let [occ, od, os] = occupancy;
-    let so = box2(&occ, w, h, smoothing);
-    let sh = box2(&hits, w, h, smoothing);
-    let mut peak = 0f32;
-    let spatial: Vec<f32> = so
-        .iter()
-        .zip(sh)
-        .enumerate()
-        .map(|(i, (&o, h))| {
-            let v = if occ[i] > 0. && o > 0. {
-                h / o
-            } else {
-                f32::NAN
-            };
-            if v.is_finite() {
-                peak = peak.max(v);
-            }
-            v
-        })
-        .collect();
-    let mut direction = vec![0.; nd];
-    for (i, v) in direction.iter_mut().enumerate() {
-        let (mut a, mut b) = (0., 0.);
-        let radius = dir_smoothing.min(nd);
-        for j in -(radius as isize)..=radius as isize {
-            let k = (i as isize + j).rem_euclid(nd as isize) as usize;
-            a += hd[k];
-            b += od[k];
-        }
-        *v = if b > 0. { a / b } else { 0. };
-    }
-    let speed = os
-        .iter()
-        .zip(hs)
-        .map(|(&o, h)| if o > 0. { h / o } else { 0. })
-        .collect();
+        None => (vec![], 0., vec![], vec![0.; nd], vec![0.; ns], vec![0.; ns]),
+    };
+    let arena = pos.map(|p| p.arena()).unwrap_or([0., 0.]);
     Analysis {
         meta: [
             cell as f64,
             w as f64,
             h as f64,
             peak as f64,
-            if n > 1 {
-                violations as f64 / (n - 1) as f64 * 100.
-            } else {
-                0.
-            },
+            refractory(&e.times, ids, tb),
             if duration > 0. {
                 n as f64 / duration
             } else {
                 0.
             },
-            pos.map(|p| p.width as f64).unwrap_or(0.),
-            pos.map(|p| p.height as f64).unwrap_or(0.),
+            arena[0] as f64,
+            arena[1] as f64,
+            n as f64,
         ],
         spatial,
         sc: vec![],
         spikes,
         direction,
         speed,
-        speed_dwell: os,
+        speed_dwell,
         ac,
     }
 }
@@ -615,8 +700,16 @@ pub unsafe extern "C" fn position_push(p: *mut Position, data: *const u8, n: usi
     (*p).push(slice::from_raw_parts(data, n));
 }
 #[no_mangle]
-pub unsafe extern "C" fn position_set_ppm(p: *mut Position, ppm: f32) {
-    (*p).set_ppm(ppm);
+pub unsafe extern "C" fn position_set_ppm(p: *mut Position, ppm: f32, estimated: u32) {
+    (*p).set_ppm(ppm, estimated != 0);
+}
+#[no_mangle]
+pub unsafe extern "C" fn position_ppm(p: *const Position) -> f32 {
+    (*p).ppm
+}
+#[no_mangle]
+pub unsafe extern "C" fn position_ppm_estimated(p: *const Position) -> u32 {
+    (*p).estimated as u32
 }
 #[no_mangle]
 pub unsafe extern "C" fn position_used_extent(p: *const Position) -> f32 {
@@ -642,15 +735,6 @@ pub unsafe extern "C" fn position_variant(
 ) -> *mut Position {
     Box::into_raw(Box::new((*p).variant(leds, max_speed, smoothing, sync_ms)))
 }
-/// The trajectory (normalised x, y pairs), computed once per processed position.
-#[no_mangle]
-pub unsafe extern "C" fn position_path(p: *const Position) -> *const f32 {
-    (*p).path().as_ptr()
-}
-#[no_mangle]
-pub unsafe extern "C" fn position_path_len(p: *const Position) -> usize {
-    (*p).path().len()
-}
 #[no_mangle]
 pub unsafe extern "C" fn position_size(p: *const Position, out: *mut f32) {
     let out = slice::from_raw_parts_mut(out, 2);
@@ -660,91 +744,10 @@ pub unsafe extern "C" fn position_size(p: *const Position, out: *mut f32) {
 pub unsafe extern "C" fn position_free(p: *mut Position) {
     drop(Box::from_raw(p));
 }
-#[no_mangle]
-pub unsafe extern "C" fn engine_analyse(
-    e: *mut Engine,
-    p: *const Position,
-    cell: u16,
-    tb: f64,
-    duration: f64,
-    bin: f32,
-    smoothing: usize,
-    window: f64,
-    ac_bin_ms: f64,
-    dir_bin: f32,
-    dir_smoothing: usize,
-    speed_bin: f32,
-    speed_max: f32,
-) {
-    let e = &mut *e;
-    e.analysis = analyse(
-        e,
-        p.as_ref(),
-        cell,
-        tb,
-        duration,
-        bin,
-        smoothing,
-        window,
-        ac_bin_ms,
-        dir_bin,
-        dir_smoothing,
-        speed_bin,
-        speed_max,
-    );
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_analysis_meta(e: *const Engine) -> *const f64 {
-    (*e).analysis.meta.as_ptr()
-}
-macro_rules! getter {
-    ($ptr:ident,$len:ident,$field:ident) => {
-        #[no_mangle]
-        pub unsafe extern "C" fn $ptr(e: *const Engine) -> *const f32 {
-            let e = &*e;
-            e.analysis.$field.as_ptr()
-        }
-        #[no_mangle]
-        pub unsafe extern "C" fn $len(e: *const Engine) -> usize {
-            let e = &*e;
-            e.analysis.$field.len()
-        }
-    };
-}
-getter!(
-    engine_analysis_spatial,
-    engine_analysis_spatial_len,
-    spatial
-);
-getter!(engine_analysis_spikes, engine_analysis_spikes_len, spikes);
-getter!(
-    engine_analysis_direction,
-    engine_analysis_direction_len,
-    direction
-);
-getter!(engine_analysis_speed, engine_analysis_speed_len, speed);
-getter!(
-    engine_analysis_speed_dwell,
-    engine_analysis_speed_dwell_len,
-    speed_dwell
-);
-getter!(engine_analysis_ac, engine_analysis_ac_len, ac);
-/// Computed only when the spatial autocorrelation plot is requested.
-#[no_mangle]
-pub unsafe extern "C" fn engine_analyse_sc(e: *mut Engine, minimum: usize) {
-    let a = &mut (*e).analysis;
-    a.sc = crate::spatial_ac::autocorrelation(
-        &a.spatial,
-        a.meta[1] as usize,
-        a.meta[2] as usize,
-        minimum,
-    );
-}
-getter!(engine_analysis_sc, engine_analysis_sc_len, sc);
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    fn recording(rows: &[[u16; 6]], ppm: f32, rate: f64) -> Position {
+    pub(crate) fn recording(rows: &[[u16; 6]], ppm: f32, rate: f64) -> Position {
         let mut p = Position::new(rows.len(), ppm, rate, 0., 0., ppm, ppm);
         let mut bytes = vec![0u8; rows.len() * 20];
         for (i, row) in rows.iter().enumerate() {
@@ -763,7 +766,7 @@ mod tests {
         let rows = [[100, 200, 1023, 1023, 10, 0], [300, 250, 400, 220, 10, 10]];
         let mut p = recording(&rows, 300., 50.);
         assert_eq!(p.used_extent(), 300.);
-        p.set_ppm(150.);
+        p.set_ppm(150., false);
         assert_eq!(p.width, 200., "the window, in cm");
         assert_eq!(
             recording(&[[1023, 1023, 1023, 1023, 0, 0]], 1., 50.).used_extent(),
@@ -1082,7 +1085,7 @@ mod tests {
             min_y: 0.,
             bearing: 0.,
             sync: 0.,
-            derived: Default::default(),
+            estimated: false,
         };
         let mut e = Engine::new(3);
         e.times = vec![100, 1100, 2100];

@@ -12,7 +12,6 @@ import { downloadBlob } from "../files";
 import type { CellStat } from "../tiles/CellStats";
 import {
   fileId,
-  positionKey,
   positionSource,
   type HeaderEdits,
   type Trial,
@@ -21,7 +20,7 @@ import {
   type Settings,
 } from "../types";
 import { request } from "../worker/client";
-import { Superseded, type CopyTrialAnalysis } from "../worker/protocol";
+import { Superseded } from "../worker/protocol";
 
 export interface PlotCopy {
   id: string;
@@ -90,9 +89,6 @@ export function useCopies({
   const [trialIds, setTrialIds] = useState<string[]>([]);
   const [copyCuts, setCopyCuts] = useState<Record<string, string>>({});
   const [preparing, setPreparing] = useState(false);
-  // Summaries only: changing the selected cells/trials can reuse completed analyses.
-  const analysisCache = useRef(new Map<string, Map<number, CopyTrialAnalysis["cells"][number]>>());
-  const pathCache = useRef(new Map<string, CopyTrialAnalysis>());
   const latestWrite = useRef(0);
   // Copy mode ends when the window loses focus (its keys no longer reach it).
   useEffect(() => {
@@ -180,27 +176,21 @@ export function useCopies({
             assetKey: `${tet.id}|${fileId(tet.file)}`,
             cut: cut?.file,
             cutKey: cut?.id,
+            revision: t.id === trial.id ? data.revision : cut?.revision || 0,
             ...positionSource(t, headerEdits),
             set: t.set,
           }
         : undefined;
-      const revision = t.id === trial.id ? data.revision : cut?.revision || 0;
-      const key = `${recording?.assetKey}|${cut?.id}|${revision}|${positionKey(t, headerEdits)}|${JSON.stringify(settings)}|SC:${shown.sc}`;
-      return { trial: t, recording, key, cut };
+      return { trial: t, recording, cut };
     });
     // Even an empty request cancels work for an older trial selection.
     const analyses =
       kind === "path"
         ? Promise.resolve([])
         : request("copy_analysis", {
+            // The worker answers what it has already analysed from its cache.
             recordings: cells.length
-              ? sources
-                  .filter(
-                    (s) =>
-                      s.recording &&
-                      cells.some((cell) => !analysisCache.current.get(s.key)?.has(cell)),
-                  )
-                  .map((s) => s.recording!)
+              ? sources.flatMap((s) => (s.recording ? [s.recording] : []))
               : [],
             cells,
             settings,
@@ -218,7 +208,6 @@ export function useCopies({
             cells,
             settings,
             tetNum,
-            pathCache.current,
             checkCurrent,
           ).then((content) => {
             checkCurrent();
@@ -249,24 +238,19 @@ export function useCopies({
             ];
             for (const source of sources) {
               const result = results.find((r) => r.trialId === source.trial.id);
-              if (result) {
-                const cache = analysisCache.current.get(source.key) || new Map();
-                result.cells.forEach((cell) => cache.set(cell.cell, cell));
-                analysisCache.current.set(source.key, cache);
-              }
               columns.push({
                 name: source.trial.name,
                 cutName:
                   source.cut?.name || (source.recording ? "Unsorted" : `No tetrode ${tetNum}`),
                 cells: cells.map((cell) => {
-                  const result = analysisCache.current.get(source.key)?.get(cell);
-                  const spikes = result?.spikes || 0;
+                  const cellResult = result?.cells.find((c) => c.cell === cell);
+                  const spikes = cellResult?.spikes || 0;
                   return {
                     cell,
                     spikes,
-                    stats: cellStatEntries(result?.data, !!source.trial.pos, spikes),
+                    stats: cellStatEntries(cellResult?.data, !!source.trial.pos, spikes),
                     plots: captureAnalysisPlots(
-                      result?.data,
+                      cellResult?.data,
                       spikes,
                       !!source.trial.pos,
                       settings,
@@ -366,8 +350,6 @@ export function useCopies({
     },
     /** Enter copy mode, starting with the hovered cell if there is one. */
     start: (hovered: number | null, kind: CopyKind = "cells") => {
-      analysisCache.current.clear();
-      pathCache.current.clear();
       setPathPreview([]);
       copyCells(kind === "path" || hovered === null ? [] : [hovered], [], {}, kind);
     },

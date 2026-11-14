@@ -9,6 +9,8 @@ macro_rules! getter{($ptr:ident,$len:ident,[$($field:ident).+],$typ:ty)=>{
  #[no_mangle]pub unsafe extern "C" fn $ptr(e:*mut Engine)->*const $typ{let e=&*e;e.$($field).+.as_ptr()}
  #[no_mangle]pub unsafe extern "C" fn $len(e:*mut Engine)->usize{let e=&*e;e.$($field).+.len()}
 };}
+mod analysis;
+mod cache;
 mod dsp;
 mod pca;
 mod position;
@@ -29,7 +31,6 @@ pub struct Engine {
     gates: Vec<processing::Gate>,
     edit: processing::EditState,
     cut: Option<processing::CutParser>,
-    analysis: position::Analysis,
     output: Vec<u8>,
     groups: Vec<Vec<u32>>,
     groups_dirty: bool,
@@ -49,7 +50,6 @@ impl Engine {
             gates: vec![],
             edit: Default::default(),
             cut: None,
-            analysis: Default::default(),
             output: vec![],
             groups: vec![],
             groups_dirty: true,
