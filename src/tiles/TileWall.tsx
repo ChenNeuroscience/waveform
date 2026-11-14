@@ -204,11 +204,10 @@ export function TileWall({
   const wavesReady = wavesDone === waveKey;
   // Cancels in-flight tile gestures whenever the cut or anything analyses read changes.
   const scope = `${data.session}|${data.revision}|${JSON.stringify([position.posFile, position.ppm, position.sync, settings, shown.sc])}`;
-  // The parts tiles show: the rate map and directional map always, for the stats line's
-  // peaks, and the others only when their plots are on.
+  // Only the parts of the plots that are on (the stats line shows only their peaks).
   const parts: AnalysisPart[] = [
-    "spatial",
-    "direction",
+    ...(shown.spatial ? (["spatial"] as const) : []),
+    ...(shown.direction ? (["direction"] as const) : []),
     ...(shown.sc ? (["sc"] as const) : []),
     ...(shown.speed ? (["speed"] as const) : []),
     ...(shown.ac ? (["ac"] as const) : []),
@@ -269,7 +268,7 @@ export function TileWall({
       if (waves) {
         plots.unshift({ mode: "waveforms", name: "Waveforms", canvas: waves });
       }
-      return { cell, spikes, stats: cellStatEntries(a, !!pos, spikes), plots };
+      return { cell, spikes, stats: cellStatEntries(a, !!pos, spikes, shown), plots };
     });
   };
   useImperativeHandle(ref, () => ({ capture }));
@@ -356,7 +355,18 @@ export function TileWall({
       current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- visible follows signature; position follows trial and headerEdits; parts follow the shown plots
-  }, [signature, data, trial, headerEdits, settings, shown.sc, shown.speed, shown.ac]);
+  }, [
+    signature,
+    data,
+    trial,
+    headerEdits,
+    settings,
+    shown.spatial,
+    shown.direction,
+    shown.sc,
+    shown.speed,
+    shown.ac,
+  ]);
   useEffect(() => {
     if (!shown.waveforms || !waveCanvas.current) {
       return;
@@ -661,7 +671,7 @@ export function TileWall({
                   </div>
                 )}
                 {jiggles.some((tile) => tile.cell === cell) && <div className="tile-edit-cover" />}
-                <CellStats entries={cellStatEntries(a, !!pos, data.counts[cell])} />
+                <CellStats entries={cellStatEntries(a, !!pos, data.counts[cell], shown)} />
               </section>
             );
           })}

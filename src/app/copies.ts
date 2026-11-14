@@ -248,7 +248,7 @@ export function useCopies({
                   return {
                     cell,
                     spikes,
-                    stats: cellStatEntries(cellResult?.data, !!source.trial.pos, spikes),
+                    stats: cellStatEntries(cellResult?.data, !!source.trial.pos, spikes, shown),
                     plots: captureAnalysisPlots(
                       cellResult?.data,
                       spikes,

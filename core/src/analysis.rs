@@ -228,22 +228,35 @@ impl Answer for Rates {
         ]
     }
 }
-/// The spatial autocorrelogram of a cell's rate map.
+/// The spatial autocorrelogram of a cell's rate map, with the map's shape, so it can be shown
+/// without the map.
 pub(crate) struct SpatialAc;
+pub(crate) struct Correlation {
+    values: Vec<f32>,
+    w: usize,
+    h: usize,
+}
 impl Handler for SpatialAc {
-    type Value = Values;
+    type Value = Correlation;
     const NODE: Node = Node::SpatialAc;
     const IGNORE: &'static [Part] = &COLOURS;
     const LIMIT: usize = PER_CELL;
-    fn compute(cx: &mut Context) -> Result<Values, Missing> {
+    fn compute(cx: &mut Context) -> Result<Correlation, Missing> {
         let rates = cx.call::<Ratemap>()?;
         let g = &rates.grid;
-        Ok(Values(autocorrelation(
-            &g.values,
-            g.w,
-            g.h,
-            cx.number(ScMinOverlap) as usize,
-        )))
+        Ok(Correlation {
+            values: autocorrelation(&g.values, g.w, g.h, cx.number(ScMinOverlap) as usize),
+            w: g.w,
+            h: g.h,
+        })
+    }
+}
+impl Answer for Correlation {
+    fn buffers(&self) -> Vec<(&'static str, Buffer)> {
+        vec![
+            ("values", f32s(&self.values)),
+            ("shape", Buffer::F64(vec![self.w as f64, self.h as f64])),
+        ]
     }
 }
 
@@ -426,7 +439,7 @@ mod tests {
             assert_eq!(stats.0, [m[8], m[4], m[5]]);
             for (name, a, b) in [
                 ("spatial", &rates.grid.values, &direct.spatial),
-                ("sc", &sc.0, &direct_sc),
+                ("sc", &sc.values, &direct_sc),
                 ("spikes", &spikes.0, &direct.spikes),
                 ("direction", &direction.0, &direct.direction),
                 ("speed", &speed.0, &direct.speed),

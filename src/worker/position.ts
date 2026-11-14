@@ -271,6 +271,7 @@ export async function analysis(
         break;
       case "sc":
         result.spatialAc = values as Float32Array;
+        [result.width, result.height] = shape;
         break;
       default:
         result[part] = values as Float32Array;

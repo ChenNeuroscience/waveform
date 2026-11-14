@@ -180,7 +180,8 @@ export interface AnalysisData {
   width: number;
   height: number;
   peak: number;
-  /** Full linear spatial autocorrelation, (2*width-1) by (2*height-1), if asked for. */
+  /** Full linear spatial autocorrelation, (2*width-1) by (2*height-1), if asked for. Either
+   * part gives the rate map's width and height. */
   spatialAc?: Float32Array;
   direction: Float32Array;
   speed: Float32Array;
@@ -193,7 +194,7 @@ export interface AnalysisData {
 const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
   stats: ["count", "refractory", "rate"],
   spatial: ["spatial", "width", "height", "peak"],
-  sc: ["spatialAc"],
+  sc: ["spatialAc", "width", "height"],
   direction: ["direction"],
   speed: ["speed"],
   speedDwell: ["speedDwell"],
