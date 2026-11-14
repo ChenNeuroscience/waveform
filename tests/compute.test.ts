@@ -69,9 +69,9 @@ describe("the worker's compute graph", () => {
       expect((await at(coloured))!.keys).toEqual(first.keys);
 
       // The sync offset moves spikes along the path: not the path, its dwell or the stats.
+      // It is computed from the cell's spike times already kept, so needs no recording.
       const synced = { ...inputs, sync: -20 };
-      expect(await at(synced)).toBeUndefined();
-      const moved = (await at(synced, e))!;
+      const moved = (await at(synced))!;
       expect(moved.keys.spatial).not.toBe(first.keys.spatial);
       expect(moved.keys.spikes).not.toBe(first.keys.spikes);
       expect(moved.keys.speedDwell).toBe(first.keys.speedDwell);
