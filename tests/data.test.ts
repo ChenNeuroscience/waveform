@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseHeader, organiseFiles } from "../src/files";
 import { corePromise, decodeCut as readCut, seedEngine } from "./wasm";
-import { analysis, trajectory, type CacheInputs } from "../src/worker/position";
+import { analysis, trajectory, type ComputeInputs } from "../src/worker/position";
 import { ANALYSIS_PARTS } from "../src/types";
 import { defaultSettings } from "../src/types";
 import { fitGrid, projectionFrame, waveX, waveY, wavePoint } from "../src/plots/plot-geometry";
@@ -152,7 +152,7 @@ describe("analysis", () => {
       binCm: 1,
       dirBin: 90,
     };
-    const inputs: CacheInputs = {
+    const inputs: ComputeInputs = {
       pos: new File([header, raw], "test.pos"),
       posFile: "clock|test.pos",
       settings: opts,
@@ -206,7 +206,7 @@ describe("analysis", () => {
       d.setUint16(i * 20 + 10, 1023);
       d.setUint16(i * 20 + 12, 12);
     }
-    const inputs = (settings: typeof defaultSettings): CacheInputs => ({
+    const inputs = (settings: typeof defaultSettings): ComputeInputs => ({
       pos: new File([header, raw], "dwell.pos"),
       posFile: "dwell|dwell.pos",
       settings: { ...settings, leds: 1, maxSpeed: 0, posSmooth: 0 },

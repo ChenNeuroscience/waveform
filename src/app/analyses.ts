@@ -2,8 +2,8 @@
  * analysis and, while dragging one tile onto another, the target's analysis.
  *
  * Nothing is cached here. Whenever an input might have changed, the worker is asked again
- * for just the parts shown, and answers from its cache (core/src/cache.rs) when it can.
- * Each part carries its cache key, and a part whose key is unchanged keeps its held values
+ * for just the parts shown; its compute graph (core/src/compute.rs) only recomputes what
+ * changed. Each part carries its key, and a part whose key is unchanged keeps its held values
  * (`reuseParts`), so an unchanged plot isn't redrawn. */
 import { useEffect, useState } from "react";
 import { request } from "../worker/client";

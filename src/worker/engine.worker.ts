@@ -4,7 +4,7 @@
 import { demoFiles, recordingSource } from "./demo";
 import { parseHeader, textHeader, readCut } from "../files";
 import type { AnalysisData, AnalysisPart, Header, HistoryEntry, ViewMessage } from "../types";
-import { analysis, positionHeader, trajectory, type CacheInputs } from "./position";
+import { analysis, positionHeader, trajectory, type ComputeInputs } from "./position";
 import { openStore, put, get } from "./history";
 import { streamFile, copyU8, copyU16, copyU32, withU16, withF32, type Core } from "./wasm";
 import { Superseded } from "./protocol";
@@ -306,8 +306,8 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
       const session = sessions.get(`${recording.assetKey}|${recording.cutKey || "unsorted"}`);
       const live = m.path && session?.key === active?.key ? activeAsset : undefined;
       // A recording that isn't loaded names its cells by cut and revision, so their analyses
-      // can be found in the cache without reading its spikes.
-      const inputs: CacheInputs = {
+      // can be found among values already computed without reading its spikes.
+      const inputs: ComputeInputs = {
         ...recording,
         settings: m.settings,
         recording: recording.assetKey,

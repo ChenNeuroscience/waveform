@@ -11,6 +11,7 @@ macro_rules! getter{($ptr:ident,$len:ident,[$($field:ident).+],$typ:ty)=>{
 };}
 mod analysis;
 mod cache;
+mod compute;
 mod dsp;
 mod pca;
 mod position;

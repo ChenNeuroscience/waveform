@@ -122,7 +122,7 @@ export interface ViewData {
   waveStarts: Uint32Array;
   /** Two u32 halves per cell of a hash of its resident slot set. */
   waveHashes: Uint32Array;
-  /** Two u32 halves per cell of a hash of its full spike set (analysis cache key). */
+  /** Two u32 halves per cell of a hash of its full spike set (part of analysis keys). */
   cellHashes: Uint32Array;
   headers: Record<string, Header>;
   undo: HistoryEntry[];
@@ -137,7 +137,7 @@ export type ViewMessage = Omit<ViewData, "features" | "times"> &
   Partial<Pick<ViewData, "features" | "times">>;
 /** The animal's path, shared by every cell; sent once per position settings. */
 export interface Trajectory {
-  /** The worker cache's key for it: equal keys mean an identical path. */
+  /** Its key in the worker's compute graph: equal keys mean an identical path. */
   key: string;
   /** The calibration used, and whether it's only a guess because no file or edit gave one. */
   ppm: number;
@@ -146,10 +146,10 @@ export interface Trajectory {
   arenaWidth: number;
   arenaHeight: number;
 }
-/** Cache key for a cell's spike set: count plus a 64-bit membership hash. */
+/** A cell's spike set: count plus a 64-bit membership hash. */
 export const membershipKey = (data: ViewData, cell: number) =>
   `${data.counts[cell]}:${data.cellHashes[cell * 2]}:${data.cellHashes[cell * 2 + 1]}`;
-/** The parts of a cell's analysis, each from its own handler in the worker's Rust cache
+/** The parts of a cell's analysis, each from its own handler in the worker's compute graph
  * (core/src/analysis.rs), and asked for only where they're shown. */
 export const ANALYSIS_PARTS = [
   "stats",
@@ -166,7 +166,7 @@ export type AnalysisPart = (typeof ANALYSIS_PARTS)[number];
 export interface AnalysisData {
   /** The membership key the worker analysed (see membershipKey). */
   membership?: string;
-  /** Each part's cache key: an equal key means identical values. */
+  /** Each part's key in the compute graph: an equal key means identical values. */
   keys: Partial<Record<AnalysisPart, string>>;
   cell: number;
   arenaWidth: number;
@@ -237,7 +237,7 @@ function editedNumber(trial: Trial | undefined, edits: HeaderEdits, key: string)
   const value = Number(text);
   return text !== undefined && text.trim() !== "" && Number.isFinite(value) ? value : undefined;
 }
-/** A trial's position, as the worker needs it and cache keys read it (see cache.ts). */
+/** A trial's position, as the worker's compute graph takes it (see core/src/compute.rs). */
 export const positionSource = (trial: Trial | undefined, edits: HeaderEdits) => ({
   pos: trial?.pos,
   posFile: trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : undefined,

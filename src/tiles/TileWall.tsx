@@ -155,8 +155,8 @@ export function TileWall({
   const [height, setHeight] = useState(800);
   const [width, setWidth] = useState(800);
 
-  // The visible tiles' analyses, by cell: references to what is on screen, not a cache
-  // (the worker caches them). The version re-renders when they change.
+  // The visible tiles' analyses, by cell: references to what is on screen, kept only while
+  // shown. The version re-renders when they change.
   const held = useRef(new Map<number, AnalysisData>());
   const [analysisVersion, setAnalysisVersion] = useState(0);
 
@@ -235,7 +235,7 @@ export function TileWall({
       })?.toDataURL(),
   });
   // Asks for every cell's analysis afresh (unbatched, so the visible tiles' requests
-  // aren't superseded; the worker answers from its cache), so a copy made just after a
+  // aren't superseded; unchanged values aren't recomputed), so a copy made just after a
   // setting changes can't use a tile's older one. Draws each plot off-screen at its tile size.
   const capture = async (cells: number[]): Promise<CellCapture[]> => {
     const renderer = shown.waveforms ? gpu.current : null;
@@ -320,7 +320,7 @@ export function TileWall({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll only when the selection, cut or column count changes, not as cells are added
   }, [selected, data.session, columns]);
   // Whenever anything an analysis reads might have changed, asks again for every visible
-  // cell; the worker answers unchanged ones from its cache, and those keep their objects.
+  // cell; unchanged values aren't recomputed, and keep their objects.
   useEffect(() => {
     let current = true;
     const batch = crypto.randomUUID();

@@ -1,10 +1,9 @@
 //! The handlers that compute positions and cell analyses. Each is a plain function of the
-//! inputs: it gets what it needs by calling other handlers (`cx.call::<H>()`), which the
-//! cache answers when it can (cache.rs), and does its own work with the pure functions in
-//! position.rs. Each also says what its value doesn't depend on (its key's ignores) and how
+//! inputs: it gets what it needs by calling other handlers (`cx.call::<H>()`, memoised by
+//! compute.rs), and does its own work with the pure functions in position.rs. Each also says what its value doesn't depend on (its key's ignores) and how
 //! many to keep. A value may carry by-products of its work (a rate map's peak) for other
 //! handlers to take from it, rather than computing them again.
-use crate::cache::{
+use crate::compute::{
     answer, f32s, supply, Answer, Buffer, Context, Handler, Leaf::*, Missing, Node, Part, Route, L,
 };
 use crate::position::{direction_bins, refractory, speed_bins, temporal_ac, Position};
@@ -33,7 +32,7 @@ pub(crate) static ROUTES: &[Route] = &[
     ("temporalAc", answer::<TemporalAc>),
 ];
 
-/// A position file as read. Only JavaScript can read it (`cache_put_raw`).
+/// A position file as read. Only JavaScript can read it (`compute_supply_position`).
 pub(crate) struct RawPosition;
 impl Handler for RawPosition {
     type Value = Position;
@@ -45,7 +44,7 @@ impl Handler for RawPosition {
 }
 /// Takes a read, unprocessed position for the current inputs.
 #[no_mangle]
-pub unsafe extern "C" fn cache_put_raw(p: *mut Position) {
+pub unsafe extern "C" fn compute_supply_position(p: *mut Position) {
     supply::<RawPosition>(*Box::from_raw(p));
 }
 
@@ -338,11 +337,11 @@ impl Handler for TemporalAc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::{Cache, NUMBERS};
+    use crate::compute::{Session, NUMBERS};
     use crate::position::tests::recording;
     use crate::Engine;
 
-    fn set(c: &mut Cache, values: &[(crate::cache::Leaf, f64)]) {
+    fn set(c: &mut Session, values: &[(crate::compute::Leaf, f64)]) {
         for &(leaf, value) in values {
             let j = NUMBERS.iter().position(|(l, _)| *l == leaf).unwrap();
             c.inputs.numbers[j] = value;
@@ -354,8 +353,8 @@ mod tests {
                 .zip(b)
                 .all(|(x, y)| x == y || (x.is_nan() && y.is_nan()))
     }
-    fn cache() -> Cache {
-        let mut c = Cache::default();
+    fn session() -> Session {
+        let mut c = Session::default();
         c.inputs.pos_file = "trial|a.pos".into();
         c.inputs.recording = "t1".into();
         set(
@@ -391,17 +390,17 @@ mod tests {
         e.labels = (0..30).map(|i| 1 + (i % 2) as u16).collect();
         (recording(&rows, 100., 50.), e)
     }
-    fn supply_raw(c: &mut Cache, raw: Position) {
+    fn supply_raw(c: &mut Session, raw: Position) {
         let key = Context::new(c, None, 0, 0., 0.)
             .key::<RawPosition>()
             .unwrap();
-        c.put(key, raw, RAW_POSITIONS);
+        c.cache.put(key, raw, RAW_POSITIONS);
     }
 
     #[test]
     fn handlers_give_what_computing_everything_together_gives() {
         let (raw, mut e) = data();
-        let mut c = cache();
+        let mut c = session();
         supply_raw(&mut c, raw.variant(1, 0., 0., 0.));
         let processed = raw.variant(1, 0., 0., 20.);
         for cell in [1, 2] {
@@ -453,12 +452,12 @@ mod tests {
     }
 
     #[test]
-    fn handlers_say_what_they_miss_and_reuse_what_is_cached() {
+    fn handlers_say_what_they_miss_and_reuse_what_they_computed() {
         let (raw, mut e) = data();
-        let mut c = cache();
+        let mut c = session();
         // Named by cut, so a cell can be found without its spikes once computed.
         c.inputs.cell_prefix = "cut|0".into();
-        fn ask<H: Handler>(c: &mut Cache, e: Option<&mut Engine>) -> Result<u64, Missing> {
+        fn ask<H: Handler>(c: &mut Session, e: Option<&mut Engine>) -> Result<u64, Missing> {
             let mut cx = Context::new(c, e, 1, 1000., 1.);
             cx.call::<H>()?;
             Ok(cx.key::<H>()?.digest())
@@ -469,7 +468,7 @@ mod tests {
         let first = ask::<Ratemap>(&mut c, Some(&mut e)).unwrap();
         assert_eq!(ask::<Ratemap>(&mut c, None), Ok(first));
         // Colours never change the key. A bin width does, and that rate map is made from the
-        // cached spike samples, so it still needs no engine; the speed dwell is unchanged.
+        // spike samples already computed, so it still needs no engine; the speed dwell is unchanged.
         let dwell = ask::<SpeedDwell>(&mut c, None).unwrap();
         set(&mut c, &[(MaxRate, 9.)]);
         assert_eq!(ask::<Ratemap>(&mut c, None), Ok(first));

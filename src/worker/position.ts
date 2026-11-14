@@ -1,5 +1,5 @@
 // Browser I/O and ABI bridge. Positions and analyses are computed by handlers in Rust
-// (core/src/analysis.rs) behind its cache (core/src/cache.rs); this writes their inputs,
+// (core/src/analysis.rs), a compute graph (core/src/compute.rs); this writes their inputs,
 // supplies files they say they need, and copies their answers out.
 import { parseHeader } from "../files";
 import { streamFile, copyF32, type Core } from "./wasm";
@@ -56,9 +56,9 @@ export async function readPosition(file: File, w: Core, editedPpm?: number): Pro
     throw e;
   }
 }
-/** The numeric cache inputs, in the order Rust reads them (checked by a test against
- * `cache_input_name`). */
-export const CACHE_NUMBERS = [
+/** The numeric inputs, in the order Rust reads them (checked by a test against
+ * `compute_input_name`). */
+export const COMPUTE_INPUTS = [
   "leds",
   "maxSpeed",
   "posSmooth",
@@ -76,8 +76,8 @@ export const CACHE_NUMBERS = [
   "ppm",
   "sync",
 ] as const;
-/** What the Rust cache keys on, besides the cell (which Rust works out from the engine). */
-export interface CacheInputs extends PositionRequest {
+/** The compute graph's inputs, besides the cell (which Rust works out from the engine). */
+export interface ComputeInputs extends PositionRequest {
   /** The recording asset. */
   recording?: string;
   /** Names cells by cut and revision rather than membership hash, for recordings whose
@@ -89,16 +89,16 @@ function setText(w: Core, field: number, text: string) {
   const p = w.alloc_bytes(Math.max(1, bytes.length));
   try {
     new Uint8Array(w.memory.buffer, p, bytes.length).set(bytes);
-    w.cache_set_text(field, p, bytes.length);
+    w.compute_set_text(field, p, bytes.length);
   } finally {
     w.free_bytes(p, Math.max(1, bytes.length));
   }
 }
-function writeInputs(w: Core, i: CacheInputs) {
+function writeInputs(w: Core, i: ComputeInputs) {
   // Pointer first: the call can grow memory, detaching an earlier `memory.buffer`.
-  const at = w.cache_numbers();
-  const numbers = new Float64Array(w.memory.buffer, at, CACHE_NUMBERS.length);
-  CACHE_NUMBERS.forEach((name, j) => {
+  const at = w.compute_inputs();
+  const numbers = new Float64Array(w.memory.buffer, at, COMPUTE_INPUTS.length);
+  COMPUTE_INPUTS.forEach((name, j) => {
     numbers[j] =
       name === "ppm" ? (i.ppm ?? NaN) : name === "sync" ? (i.sync ?? 0) : i.settings[name];
   });
@@ -106,9 +106,9 @@ function writeInputs(w: Core, i: CacheInputs) {
   setText(w, 1, i.recording ?? "");
   setText(w, 2, i.cellPrefix ?? "");
 }
-/** The handlers the Rust cache answers, in the order it lists them (checked by a test
- * against `cache_handler_name`). */
-export const CACHE_HANDLERS = [
+/** The handlers JavaScript can ask for, in the order Rust lists them (checked by a test
+ * against `compute_handler_name`). */
+export const HANDLERS = [
   "path",
   "positionInfo",
   "cellStats",
@@ -120,9 +120,9 @@ export const CACHE_HANDLERS = [
   "speedDwell",
   "temporalAc",
 ] as const;
-export type CacheHandler = (typeof CACHE_HANDLERS)[number];
+export type HandlerName = (typeof HANDLERS)[number];
 /** A cell asked about: its number, its recording's clock, and its engine, or 0 to only look
- * in the cache. */
+ * among values already computed. */
 export interface CellRequest {
   engine: number;
   cell: number;
@@ -150,20 +150,20 @@ function readAnswer(w: Core): Answer {
   return { key: hi.toString(16).padStart(8, "0") + lo.toString(16).padStart(8, "0"), buffers };
 }
 /**
- * Asks the Rust cache's `handler` for `inputs` (and `cell`, for a cell's analyses). Reads
- * the position file into the cache if it says it needs it. Undefined if it needs the
+ * Asks the compute graph's `handler` for `inputs` (and `cell`, for a cell's analyses).
+ * Reads the position file and hands it over if the graph says it needs it. Undefined if it needs the
  * recording's spikes and `cell` has no engine.
  */
 export async function ask(
   w: Core,
-  inputs: CacheInputs,
-  handler: CacheHandler,
+  inputs: ComputeInputs,
+  handler: HandlerName,
   cell: CellRequest = { engine: 0, cell: 0, tb: 0, duration: 0 },
 ): Promise<Answer | undefined> {
-  const id = CACHE_HANDLERS.indexOf(handler);
+  const id = HANDLERS.indexOf(handler);
   for (let read = false; ; read = true) {
     writeInputs(w, inputs);
-    const status = w.cache_request(id, cell.engine, cell.cell, cell.tb, cell.duration);
+    const status = w.compute_request(id, cell.engine, cell.cell, cell.tb, cell.duration);
     if (status === 0) {
       return readAnswer(w);
     }
@@ -176,12 +176,12 @@ export async function ask(
     // Requests are handled one at a time, so the inputs are still these when it's stored.
     const handle = await readPosition(inputs.pos, w, inputs.ppm);
     writeInputs(w, inputs);
-    w.cache_put_raw(handle);
+    w.compute_supply_position(handle);
   }
 }
 
 /** The trajectory for `inputs`, or null without a position. */
-export async function trajectory(w: Core, inputs: CacheInputs): Promise<Trajectory | null> {
+export async function trajectory(w: Core, inputs: ComputeInputs): Promise<Trajectory | null> {
   if (!inputs.pos) {
     return null;
   }
@@ -199,7 +199,7 @@ export async function trajectory(w: Core, inputs: CacheInputs): Promise<Trajecto
 }
 
 /** Which handler gives each part of a cell's analysis. */
-const PART_HANDLERS: Record<AnalysisPart, CacheHandler> = {
+const PART_HANDLERS: Record<AnalysisPart, HandlerName> = {
   stats: "cellStats",
   spatial: "ratemap",
   sc: "spatialAc",
@@ -219,12 +219,12 @@ const POSITIONAL = new Set<AnalysisPart>([
   "spikes",
 ]);
 /**
- * The `parts` of a cell's analysis, from the Rust cache or computed there. Undefined if a
+ * The `parts` of a cell's analysis, from the compute graph. Undefined if a
  * part needs the recording's spikes and `cell` has no engine.
  */
 export async function analysis(
   w: Core,
-  inputs: CacheInputs,
+  inputs: ComputeInputs,
   cell: CellRequest,
   parts: readonly AnalysisPart[],
 ): Promise<AnalysisData | undefined> {

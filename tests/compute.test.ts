@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  CACHE_HANDLERS,
-  CACHE_NUMBERS,
+  HANDLERS,
+  COMPUTE_INPUTS,
   analysis,
   trajectory,
-  type CacheInputs,
+  type ComputeInputs,
 } from "../src/worker/position";
 import { defaultSettings, reuseParts, type AnalysisPart } from "../src/types";
 import { corePromise, seedEngine } from "./wasm";
@@ -31,30 +31,30 @@ async function names(count: number, name: (i: number) => number, len: (i: number
   });
 }
 
-describe("the worker's Rust cache", () => {
+describe("the worker's compute graph", () => {
   it("lists its inputs and handlers in the order this side uses them", async () => {
     const w = await corePromise;
-    expect(await names(w.cache_input_count(), w.cache_input_name, w.cache_input_name_len)).toEqual([
-      ...CACHE_NUMBERS,
-    ]);
     expect(
-      await names(w.cache_handler_count(), w.cache_handler_name, w.cache_handler_name_len),
-    ).toEqual([...CACHE_HANDLERS]);
+      await names(w.compute_input_count(), w.compute_input_name, w.compute_input_name_len),
+    ).toEqual([...COMPUTE_INPUTS]);
+    expect(
+      await names(w.compute_handler_count(), w.compute_handler_name, w.compute_handler_name_len),
+    ).toEqual([...HANDLERS]);
   });
 
   it("keys each part on everything beneath it, except what its handler ignores", async () => {
     const w = await corePromise;
     const e = seedEngine(w, [0, 20, 40, 60], [1, 1, 1, 1]);
-    const inputs: CacheInputs = {
+    const inputs: ComputeInputs = {
       pos: pos(),
-      posFile: "cache-test|trial.pos",
+      posFile: "compute-test|trial.pos",
       settings: { ...defaultSettings, posSmooth: 0, maxSpeed: 0 },
-      recording: "cache-test|t1",
+      recording: "compute-test|t1",
       // Named by cut, so lookups without the engine (which membership hashes need) can hit.
       cellPrefix: "cut|0",
     };
     const parts: AnalysisPart[] = ["stats", "spatial", "speed", "speedDwell", "spikes"];
-    const at = (i: CacheInputs, engine = 0) =>
+    const at = (i: ComputeInputs, engine = 0) =>
       analysis(w, i, { engine, cell: 1, tb: 1000, duration: 1 }, parts);
     try {
       // Only computed once there is an engine; then found without one.
@@ -103,9 +103,9 @@ describe("the worker's Rust cache", () => {
   it("finds a recording's analyses by cut and revision without its spikes", async () => {
     const w = await corePromise;
     const e = seedEngine(w, [0, 20], [2, 2]);
-    const inputs: CacheInputs = {
+    const inputs: ComputeInputs = {
       settings: defaultSettings,
-      recording: "cache-test|t2",
+      recording: "compute-test|t2",
       cellPrefix: "cut-a|0",
     };
     const cell = (engine: number) => ({ engine, cell: 2, tb: 1000, duration: 1 });
