@@ -1,23 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
-import { destination, paintSources, ready, source } from "./controls";
+import { destination, paintSources, readClipboard as clipboard, ready, source } from "./controls";
 
-async function clipboard(page: Page) {
-  return page.evaluate(async () => {
-    try {
-      const [item] = await navigator.clipboard.read();
-      return {
-        html: await (await item.getType("text/html")).text(),
-        text: await (await item.getType("text/plain")).text(),
-      };
-    } catch (error) {
-      // Selection changes can replace the clipboard between reading its two types.
-      if (error instanceof DOMException && error.name === "InvalidStateError") {
-        return { html: "", text: "" };
-      }
-      throw error;
-    }
-  });
-}
 async function copyMode(page: Page, cell: number) {
   await page.locator(`.cell-tile[data-cell="${cell}"]`).hover();
   await page.keyboard.down("ControlOrMeta");
