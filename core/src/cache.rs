@@ -1,14 +1,20 @@
-//! The worker's cache of derived data, for the whole session (as long as the page is open).
+//! The worker's cache of derived data, for the whole session (as long as the page is open),
+//! and the machinery that puts it in front of the handlers that compute it.
 //!
-//! Every value is keyed by a node of the dependency tree below, and by default its key
-//! covers every input beneath that node: a new trial, file, edit or setting is a new key,
-//! so nothing is ever invalidated by hand. The code that computes and stores a value (see
-//! analysis.rs) can narrow its key only by explicitly ignoring part of the tree that it
-//! knows the value doesn't depend on, and sets how many values its node keeps.
+//! Every value is computed by a `Handler` (see analysis.rs): a plain function of the inputs
+//! that gets what it needs by calling other handlers through `Context::call`. That call is
+//! the cache: it looks the value up by key and only runs the handler on a miss. So without
+//! the cache the handlers would still be correct, just slower; handlers never see keys or
+//! the store.
 //!
-//! JavaScript writes the current inputs (`cache_numbers`, `cache_set_text`), then asks
-//! analysis.rs for a position or a cell's analyses. Values live here; JavaScript only
-//! copies them out.
+//! A value's key is its handler's node of the dependency tree below, and by default covers
+//! every input beneath that node: a new trial, file, edit or setting is a new key, so
+//! nothing is invalidated by hand. A handler can narrow its key only by explicitly ignoring
+//! inputs it doesn't depend on, and sets how many of its values to keep.
+//!
+//! JavaScript writes the current inputs (`cache_numbers`, `cache_set_text`) and asks for a
+//! handler by name (`cache_request`). The answer is a table of named buffers to copy out, or
+//! what is missing for JavaScript to supply (a recording's spikes, or a position file).
 use std::{
     any::Any,
     cell::RefCell,
@@ -75,12 +81,16 @@ pub(crate) enum Node {
     Position,
     /// The trajectory plot's path.
     Path,
+    /// A processed position's arena size and calibration.
+    PositionInfo,
     /// A cell's spikes.
     Spikes,
     /// A cell's spike count, refractory violations and rate.
     CellStats,
     /// The position sample of each of a cell's spikes.
     SpikeSamples,
+    /// Where each of a cell's spikes was, for the path plot.
+    SpikePositions,
     SettingsRatemap,
     SpatialOccupancy,
     Ratemap,
@@ -111,9 +121,11 @@ fn children(node: Node) -> &'static [Part] {
         SettingsPosition => &[L(Leds), L(MaxSpeed), L(PosSmooth)],
         Position => &[N(PosRaw), N(SettingsPosition), L(Sync)],
         Path => &[N(Position)],
+        PositionInfo => &[N(Position)],
         Spikes => &[L(Recording), L(Cell)],
         CellStats => &[N(Spikes)],
         SpikeSamples => &[N(Position), N(Spikes)],
+        SpikePositions => &[N(SpikeSamples)],
         SettingsRatemap => &[L(BinCm), L(Smooth), L(MaxRate), L(RateMapSteps)],
         SpatialOccupancy => &[N(Position), N(SettingsRatemap)],
         Ratemap => &[N(SpikeSamples), N(SpatialOccupancy)],
@@ -273,27 +285,233 @@ impl Cache {
         }
         value
     }
-    /// The value for `key`, or `make`'s, stored with `limit`.
-    pub(crate) fn get_or<T: 'static>(
-        &mut self,
-        key: Key,
-        limit: usize,
-        make: impl FnOnce(&mut Self) -> Option<T>,
-    ) -> Option<Rc<T>> {
-        if let Some(value) = self.get(&key) {
-            return Some(value);
+}
+
+/// What a handler needs that only JavaScript can supply.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Missing {
+    /// The recording's spikes, as an engine.
+    Engine,
+    /// The position file, read (`cache_put_raw`).
+    Position,
+}
+
+/// Computes one node's value from the inputs, calling other handlers for what it needs.
+pub(crate) trait Handler: 'static {
+    type Value: 'static;
+    const NODE: Node;
+    /// Inputs beneath `NODE` the value doesn't depend on, so its key leaves them out.
+    const IGNORE: &'static [Part] = &[];
+    /// How many values of this node to keep.
+    const LIMIT: usize;
+    fn compute(cx: &mut Context) -> Result<Self::Value, Missing>;
+}
+
+/// A request in progress: the inputs, the cell asked about, and its spikes if loaded.
+pub(crate) struct Context<'a> {
+    cache: &'a mut Cache,
+    engine: Option<&'a mut crate::Engine>,
+    spikes: Option<String>,
+    pub(crate) cell: u16,
+    /// The recording's timebase (ticks per second) and duration (s).
+    pub(crate) tb: f64,
+    pub(crate) duration: f64,
+}
+impl<'a> Context<'a> {
+    pub(crate) fn new(
+        cache: &'a mut Cache,
+        engine: Option<&'a mut crate::Engine>,
+        cell: u16,
+        tb: f64,
+        duration: f64,
+    ) -> Self {
+        Self {
+            cache,
+            engine,
+            spikes: None,
+            cell,
+            tb,
+            duration,
         }
-        let value = make(self)?;
-        Some(self.put(key, value, limit))
     }
+    /// `H`'s value: from the cache, or computed by `H` and stored.
+    pub(crate) fn call<H: Handler>(&mut self) -> Result<Rc<H::Value>, Missing> {
+        let key = self.key::<H>()?;
+        if let Some(value) = self.cache.get(&key) {
+            return Ok(value);
+        }
+        let value = H::compute(self)?;
+        Ok(self.cache.put(key, value, H::LIMIT))
+    }
+    /// `H`'s key for the current inputs.
+    pub(crate) fn key<H: Handler>(&mut self) -> Result<Key, Missing> {
+        let mut parts = vec![];
+        beneath(N(H::NODE), &mut parts);
+        let mut ignored = vec![];
+        for &part in H::IGNORE {
+            beneath(part, &mut ignored);
+        }
+        let cell = if parts.contains(&L(Cell)) && !ignored.contains(&L(Cell)) {
+            self.spikes()?
+        } else {
+            String::new()
+        };
+        Ok(self.cache.inputs.key(H::NODE, &cell, H::IGNORE))
+    }
+    /// The cell's spike set: named by cut and revision if the inputs give one, else its
+    /// membership hash, which needs the engine.
+    fn spikes(&mut self) -> Result<String, Missing> {
+        if self.spikes.is_none() {
+            let prefix = &self.cache.inputs.cell_prefix;
+            self.spikes = Some(if !prefix.is_empty() {
+                format!("{prefix}:{}", self.cell)
+            } else {
+                let e = self.engine.as_deref_mut().ok_or(Missing::Engine)?;
+                let count = e.counts[self.cell as usize];
+                let hashes = e.cell_hashes();
+                let i = self.cell as usize * 2;
+                format!("{count}:{}:{}", hashes[i], hashes[i + 1])
+            });
+        }
+        Ok(self.spikes.clone().unwrap())
+    }
+    pub(crate) fn number(&self, leaf: Leaf) -> f64 {
+        self.cache.inputs.number(leaf)
+    }
+    /// The recording's spike times and the cell's spike indices.
+    pub(crate) fn spike_times(&mut self) -> Result<(&[u32], &[u32]), Missing> {
+        let e = self.engine.as_deref_mut().ok_or(Missing::Engine)?;
+        e.ensure_groups();
+        Ok((&e.times, &e.groups[self.cell as usize]))
+    }
+}
+
+/// One buffer of an answer: floats borrowed from the answered value, or numbers made for it.
+pub(crate) enum Buffer {
+    F32(*const f32, usize),
+    F64(Vec<f64>),
+}
+pub(crate) fn f32s(values: &[f32]) -> Buffer {
+    Buffer::F32(values.as_ptr(), values.len())
+}
+/// A value JavaScript can ask for, as named buffers.
+pub(crate) trait Answer {
+    fn buffers(&self) -> Vec<(&'static str, Buffer)>;
+}
+/// A handler JavaScript can ask for by name.
+pub(crate) type Route = (&'static str, fn(&mut Context) -> Result<Answered, Missing>);
+/// The last answer: its key's digest, its buffers, and the value they borrow from.
+#[derive(Default)]
+pub(crate) struct Answered {
+    digest: [u32; 2],
+    buffers: Vec<(&'static str, Buffer)>,
+    _value: Option<Rc<dyn Any>>,
+}
+/// Answers with `H`'s value.
+pub(crate) fn answer<H: Handler>(cx: &mut Context) -> Result<Answered, Missing>
+where
+    H::Value: Answer,
+{
+    let value = cx.call::<H>()?;
+    let digest = cx.key::<H>()?.digest();
+    Ok(Answered {
+        digest: [digest as u32, (digest >> 32) as u32],
+        buffers: value.buffers(),
+        _value: Some(value),
+    })
 }
 
 thread_local! {
     static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
+    static ANSWER: RefCell<Answered> = RefCell::new(Answered::default());
+}
+/// Stores a value JavaScript supplied for `H` (one `H` can't compute) under the current inputs.
+pub(crate) fn supply<H: Handler>(value: H::Value) {
+    with(|c| {
+        let mut cx = Context::new(c, None, 0, 0., 0.);
+        if let Ok(key) = cx.key::<H>() {
+            c.put(key, value, H::LIMIT);
+        }
+    })
 }
 /// The session's cache.
 pub(crate) fn with<T>(f: impl FnOnce(&mut Cache) -> T) -> T {
     CACHE.with(|c| f(&mut c.borrow_mut()))
+}
+fn answered<T>(f: impl FnOnce(&Answered) -> T) -> T {
+    ANSWER.with(|a| f(&a.borrow()))
+}
+
+/// The handlers JavaScript can ask for, in this order (see `cache_handler_name`).
+#[no_mangle]
+pub extern "C" fn cache_handler_count() -> usize {
+    crate::analysis::ROUTES.len()
+}
+#[no_mangle]
+pub extern "C" fn cache_handler_name(i: usize) -> *const u8 {
+    crate::analysis::ROUTES[i].0.as_ptr()
+}
+#[no_mangle]
+pub extern "C" fn cache_handler_name_len(i: usize) -> usize {
+    crate::analysis::ROUTES[i].0.len()
+}
+/// Asks handler `handler` for the current inputs and cell `cell` of engine `e` (null if
+/// the recording isn't loaded). 0: answered (see `answer_*`); 1: the engine is needed;
+/// 2: the position file is needed.
+#[no_mangle]
+pub unsafe extern "C" fn cache_request(
+    handler: usize,
+    e: *mut crate::Engine,
+    cell: u16,
+    tb: f64,
+    duration: f64,
+) -> u32 {
+    let route = crate::analysis::ROUTES[handler].1;
+    let result = with(|c| route(&mut Context::new(c, e.as_mut(), cell, tb, duration)));
+    match result {
+        Ok(answer) => {
+            ANSWER.with(|a| *a.borrow_mut() = answer);
+            0
+        }
+        Err(Missing::Engine) => 1,
+        Err(Missing::Position) => 2,
+    }
+}
+/// The last answer's key digest, as two u32 halves.
+#[no_mangle]
+pub extern "C" fn answer_digest() -> *const u32 {
+    ANSWER.with(|a| a.borrow().digest.as_ptr())
+}
+#[no_mangle]
+pub extern "C" fn answer_count() -> usize {
+    answered(|a| a.buffers.len())
+}
+#[no_mangle]
+pub extern "C" fn answer_name(i: usize) -> *const u8 {
+    answered(|a| a.buffers[i].0.as_ptr())
+}
+#[no_mangle]
+pub extern "C" fn answer_name_len(i: usize) -> usize {
+    answered(|a| a.buffers[i].0.len())
+}
+/// 0 for f32, 1 for f64.
+#[no_mangle]
+pub extern "C" fn answer_kind(i: usize) -> u32 {
+    answered(|a| matches!(a.buffers[i].1, Buffer::F64(_)) as u32)
+}
+#[no_mangle]
+pub extern "C" fn answer_data(i: usize) -> usize {
+    answered(|a| match &a.buffers[i].1 {
+        Buffer::F32(p, _) => *p as usize,
+        Buffer::F64(v) => v.as_ptr() as usize,
+    })
+}
+#[no_mangle]
+pub extern "C" fn answer_len(i: usize) -> usize {
+    answered(|a| match &a.buffers[i].1 {
+        Buffer::F32(_, n) => *n,
+        Buffer::F64(v) => v.len(),
+    })
 }
 
 /// Where JavaScript writes the numeric inputs, in `NUMBERS` order.

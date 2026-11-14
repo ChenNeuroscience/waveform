@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { parseHeader, organiseFiles } from "../src/files";
 import { corePromise, decodeCut as readCut, seedEngine } from "./wasm";
-import { analyse, parsePosition, trajectory } from "../src/worker/position";
+import { analysis, trajectory, type CacheInputs } from "../src/worker/position";
+import { ANALYSIS_PARTS } from "../src/types";
 import { defaultSettings } from "../src/types";
 import { fitGrid, projectionFrame, waveX, waveY, wavePoint } from "../src/plots/plot-geometry";
 describe("LTX import", () => {
@@ -151,18 +152,23 @@ describe("analysis", () => {
       binCm: 1,
       dirBin: 90,
     };
-    const p = await parsePosition(new File([header, raw], "test.pos"), opts, w);
+    const inputs: CacheInputs = {
+      pos: new File([header, raw], "test.pos"),
+      posFile: "clock|test.pos",
+      settings: opts,
+      recording: "clock",
+    };
     const e = seedEngine(w, [960, 2880, 4800], [1, 1, 1]);
     try {
-      const a = analyse(w, e, 1, 96000, 0.08, p, opts);
-      expect([...trajectory(w, p).path]).toEqual(
+      const cell = { engine: e, cell: 1, tb: 96000, duration: 0.08 };
+      const a = (await analysis(w, inputs, cell, ANALYSIS_PARTS))!;
+      expect([...(await trajectory(w, inputs))!.path]).toEqual(
         [0.2, 0.1, 0.3, 0.1, 0.4, 0.1, 0.5, 0.1].map(Math.fround),
       );
       expect([...a.spikes]).toEqual([0.2, 0.1, 0.3, 0.1, 0.4, 0.1].map(Math.fround));
       expect(a.direction[3]).toBeGreaterThan(0);
       expect(a.spatial[12]).toBeCloseTo(50);
     } finally {
-      w.position_free(p);
       w.engine_free(e);
     }
   });
@@ -170,55 +176,58 @@ describe("analysis", () => {
     const w = await corePromise;
     const e = seedEngine(w, [0, 5, 15, 25], [1, 1, 1, 1]);
     try {
-      const run = (acWindow: number, acBinMs: number) =>
-        analyse(w, e, 1, 1000, 1, undefined, { ...defaultSettings, acWindow, acBinMs });
-      expect([...run(20, 5).ac]).toEqual([0, 1, 2, 1]);
-      expect([...run(18, 7).ac]).toEqual([1, 2, 1]);
-      expect([...run(20, 50).ac]).toEqual([4]);
+      const run = async (acWindow: number, acBinMs: number) =>
+        (await analysis(
+          w,
+          { settings: { ...defaultSettings, acWindow, acBinMs }, recording: "ac-widths" },
+          { engine: e, cell: 1, tb: 1000, duration: 1 },
+          ["ac"],
+        ))!.ac;
+      expect([...(await run(20, 5))]).toEqual([0, 1, 2, 1]);
+      expect([...(await run(18, 7))]).toEqual([1, 2, 1]);
+      expect([...(await run(20, 50))]).toEqual([4]);
     } finally {
       w.engine_free(e);
     }
   });
   it("normalises spikes by dwell time and excludes self from autocorrelation in Rust", async () => {
-    const w = await corePromise,
-      e = seedEngine(w, [100, 1100, 2100], [1, 1, 1]),
-      pos = w.position_new(4, 100, 1, 0, 0, 10, 10),
-      raw = new Uint8Array(80),
-      d = new DataView(raw.buffer);
+    const w = await corePromise;
+    const e = seedEngine(w, [100, 1100, 2100], [1, 1, 1]);
+    // 1 Hz: two samples at (1, 1), then two at (8, 8), in a 10 by 10 window.
+    const header =
+      "pos_format t,x1,y1,x2,y2,numpix1,numpix2\nnum_pos_samples 4\npixels_per_metre 100\nsample_rate 1 hz\nwindow_min_x 0\nwindow_min_y 0\nwindow_max_x 10\nwindow_max_y 10\r\ndata_start";
+    const raw = new Uint8Array(80);
+    const d = new DataView(raw.buffer);
     for (let i = 0; i < 4; i++) {
       d.setUint32(i * 20, i);
       d.setUint16(i * 20 + 4, i < 2 ? 1 : 8);
       d.setUint16(i * 20 + 6, i < 2 ? 1 : 8);
+      d.setUint16(i * 20 + 8, 1023);
+      d.setUint16(i * 20 + 10, 1023);
       d.setUint16(i * 20 + 12, 12);
     }
-    const p = w.alloc_bytes(raw.length);
-    new Uint8Array(w.memory.buffer, p, raw.length).set(raw);
-    w.position_push(pos, p, raw.length);
-    w.free_bytes(p, raw.length);
-    w.position_finish(pos, 1, 0, 0, 0);
-    const result = analyse(w, e, 1, 1000, 3, pos, { ...defaultSettings, binCm: 5, smooth: 0 });
-    expect(result.spatial[0]).toBe(1);
-    expect(result.spatial[3]).toBe(0.5);
-    expect(result.ac.reduce((a, b) => a + b, 0)).toBe(0);
-    expect(result.rate).toBe(1);
-    expect(result.spatialAc).toBeUndefined();
-    const withSc = analyse(
-      w,
-      e,
-      1,
-      1000,
-      3,
-      pos,
-      { ...defaultSettings, binCm: 5, smooth: 0, scMinOverlap: 2 },
-      true,
-    );
-    expect(withSc.spatialAc).toHaveLength(9);
-    expect(withSc.spatialAc![4]).toBeCloseTo(1);
-    expect(Number.isNaN(withSc.spatialAc![0])).toBe(true);
-    analyse(w, e, 1, 1000, 3, undefined, defaultSettings);
-    expect(w.analysis_sc_len()).toBe(0);
-    w.position_free(pos);
-    w.engine_free(e);
+    const inputs = (settings: typeof defaultSettings): CacheInputs => ({
+      pos: new File([header, raw], "dwell.pos"),
+      posFile: "dwell|dwell.pos",
+      settings: { ...settings, leds: 1, maxSpeed: 0, posSmooth: 0 },
+      recording: "dwell",
+    });
+    const cell = { engine: e, cell: 1, tb: 1000, duration: 3 };
+    try {
+      const settings = { ...defaultSettings, binCm: 5, smooth: 0, scMinOverlap: 2 };
+      const result = (await analysis(w, inputs(settings), cell, ["stats", "spatial", "ac"]))!;
+      expect(result.spatial[0]).toBe(1);
+      expect(result.spatial[3]).toBe(0.5);
+      expect(result.ac.reduce((a, b) => a + b, 0)).toBe(0);
+      expect(result.rate).toBe(1);
+      expect(result.spatialAc).toBeUndefined();
+      const withSc = (await analysis(w, inputs(settings), cell, ["spatial", "sc"]))!;
+      expect(withSc.spatialAc).toHaveLength(9);
+      expect(withSc.spatialAc![4]).toBeCloseTo(1);
+      expect(Number.isNaN(withSc.spatialAc![0])).toBe(true);
+    } finally {
+      w.engine_free(e);
+    }
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePosition, trajectory } from "../src/worker/position";
+import { trajectory } from "../src/worker/position";
 import { defaultSettings, fileId, positionSource, SYNC_HEADER } from "../src/types";
 import {
   editHeader,
@@ -27,15 +27,17 @@ function pos(ppm: string, samples: ([number, number] | null)[]) {
   return new File([header, raw], "trial.pos");
 }
 
+let calibrations = 0;
 async function calibration(file: File, edited?: number) {
   const w = await corePromise;
-  const position = await parsePosition(file, defaultSettings, w, edited);
-  try {
-    const { ppm, ppmEstimated, arenaWidth } = trajectory(w, position);
-    return { ppm, ppmEstimated, arenaWidth };
-  } finally {
-    w.position_free(position);
-  }
+  // Each its own position file, as the cache is shared for the session.
+  const { ppm, ppmEstimated, arenaWidth } = (await trajectory(w, {
+    pos: file,
+    posFile: `calibration|${++calibrations}`,
+    ppm: edited,
+    settings: defaultSettings,
+  }))!;
+  return { ppm, ppmEstimated, arenaWidth };
 }
 
 describe("position calibration", () => {

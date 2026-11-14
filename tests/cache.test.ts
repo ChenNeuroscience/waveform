@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  CACHE_HANDLERS,
   CACHE_NUMBERS,
-  cachedAnalysis,
-  cachedTrajectory,
-  setCacheInputs,
+  analysis,
+  trajectory,
   type CacheInputs,
 } from "../src/worker/position";
-import { defaultSettings } from "../src/types";
+import { defaultSettings, reuseParts, type AnalysisPart } from "../src/types";
 import { corePromise, seedEngine } from "./wasm";
 
 /** A 50 Hz .pos whose first LED moves one pixel right each sample. */
@@ -23,19 +23,26 @@ function pos(samples = 4) {
   }
   return new File([header, raw], "trial.pos");
 }
+async function names(count: number, name: (i: number) => number, len: (i: number) => number) {
+  const w = await corePromise;
+  return Array.from({ length: count }, (_, i) => {
+    const [at, n] = [name(i), len(i)];
+    return new TextDecoder().decode(new Uint8Array(w.memory.buffer, at, n));
+  });
+}
 
 describe("the worker's Rust cache", () => {
-  it("reads its numeric inputs in the order this side writes them", async () => {
+  it("lists its inputs and handlers in the order this side uses them", async () => {
     const w = await corePromise;
-    const names = Array.from({ length: w.cache_input_count() }, (_, i) =>
-      new TextDecoder().decode(
-        new Uint8Array(w.memory.buffer, w.cache_input_name(i), w.cache_input_name_len(i)),
-      ),
-    );
-    expect(names).toEqual([...CACHE_NUMBERS]);
+    expect(await names(w.cache_input_count(), w.cache_input_name, w.cache_input_name_len)).toEqual([
+      ...CACHE_NUMBERS,
+    ]);
+    expect(
+      await names(w.cache_handler_count(), w.cache_handler_name, w.cache_handler_name_len),
+    ).toEqual([...CACHE_HANDLERS]);
   });
 
-  it("keys analyses on everything beneath them, except what they ignore", async () => {
+  it("keys each part on everything beneath it, except what its handler ignores", async () => {
     const w = await corePromise;
     const e = seedEngine(w, [0, 20, 40, 60], [1, 1, 1, 1]);
     const inputs: CacheInputs = {
@@ -46,42 +53,48 @@ describe("the worker's Rust cache", () => {
       // Named by cut, so lookups without the engine (which membership hashes need) can hit.
       cellPrefix: "cut|0",
     };
-    const at = async (i: CacheInputs, engine = 0) => {
-      await setCacheInputs(w, i);
-      return cachedAnalysis(w, engine, 1, 1000, 1);
-    };
+    const parts: AnalysisPart[] = ["stats", "spatial", "speed", "speedDwell", "spikes"];
+    const at = (i: CacheInputs, engine = 0) =>
+      analysis(w, i, { engine, cell: 1, tb: 1000, duration: 1 }, parts);
     try {
       // Only computed once there is an engine; then found without one.
       expect(await at(inputs)).toBeUndefined();
       const first = (await at(inputs, e))!;
       expect(first.count).toBe(4);
-      expect((await at(inputs))!.key).toBe(first.key);
-      const path = cachedTrajectory(w)!;
+      expect((await at(inputs))!.keys).toEqual(first.keys);
+      const path = (await trajectory(w, inputs))!;
 
-      // The colour settings are only for drawing, so they don't change the key.
+      // The colour settings are only for drawing, so they change no key.
       const coloured = { ...inputs, settings: { ...inputs.settings, maxRate: 9, rateMapSteps: 3 } };
-      expect((await at(coloured))!.key).toBe(first.key);
+      expect((await at(coloured))!.keys).toEqual(first.keys);
 
-      // The sync offset moves spikes along the path, not the path or its dwell.
+      // The sync offset moves spikes along the path: not the path, its dwell or the stats.
       const synced = { ...inputs, sync: -20 };
       expect(await at(synced)).toBeUndefined();
       const moved = (await at(synced, e))!;
-      expect(moved.key).not.toBe(first.key);
-      expect(moved.speedDwellKey).toBe(first.speedDwellKey);
-      expect(cachedTrajectory(w)!.key).toBe(path.key);
+      expect(moved.keys.spatial).not.toBe(first.keys.spatial);
+      expect(moved.keys.spikes).not.toBe(first.keys.spikes);
+      expect(moved.keys.speedDwell).toBe(first.keys.speedDwell);
+      expect(moved.keys.stats).toBe(first.keys.stats);
+      expect((await trajectory(w, synced))!.key).toBe(path.key);
       expect([...moved.spikes]).not.toEqual([...first.spikes]);
       // An edit of 0 is no edit.
-      expect((await at({ ...inputs, sync: 0 }))!.key).toBe(first.key);
+      expect((await at({ ...inputs, sync: 0 }))!.keys).toEqual(first.keys);
 
-      // Another trial's identical file is a different position.
-      expect(await at({ ...inputs, posFile: "other|trial.pos" })).toBeUndefined();
-      // Bins change the analysis, but it is made from the cached spike samples, so it needs
-      // no engine; a bin of the speed histogram changes its dwell too.
+      // A new bin width is made from the cached spike samples, so needs no engine; only
+      // the rate map changes.
       const binned = (await at({ ...inputs, settings: { ...inputs.settings, binCm: 2 } }))!;
-      expect(binned.key).not.toBe(first.key);
-      expect(binned.speedDwellKey).toBe(first.speedDwellKey);
-      const speed = (await at({ ...inputs, settings: { ...inputs.settings, speedBin: 2 } }, e))!;
-      expect(speed.speedDwellKey).not.toBe(first.speedDwellKey);
+      expect(binned.keys.spatial).not.toBe(first.keys.spatial);
+      expect({ ...binned.keys, spatial: "" }).toEqual({ ...first.keys, spatial: "" });
+      // Another trial's identical file is a different position.
+      const other = { ...inputs, posFile: "other|trial.pos" };
+      expect(await at(other)).toBeUndefined();
+
+      // Held parts with unchanged keys keep their arrays, so their plots needn't redraw.
+      const kept = reuseParts(first, binned);
+      expect(kept.speed).toBe(first.speed);
+      expect(kept.spatial).toBe(binned.spatial);
+      expect(reuseParts(first, (await at(inputs))!)).toBe(first);
     } finally {
       w.engine_free(e);
     }
@@ -95,13 +108,13 @@ describe("the worker's Rust cache", () => {
       recording: "cache-test|t2",
       cellPrefix: "cut-a|0",
     };
+    const cell = (engine: number) => ({ engine, cell: 2, tb: 1000, duration: 1 });
     try {
-      await setCacheInputs(w, inputs);
-      expect(cachedAnalysis(w, 0, 2, 1000, 1)).toBeUndefined();
-      const computed = cachedAnalysis(w, e, 2, 1000, 1)!;
-      expect(cachedAnalysis(w, 0, 2, 1000, 1)!.key).toBe(computed.key);
-      await setCacheInputs(w, { ...inputs, cellPrefix: "cut-a|1" });
-      expect(cachedAnalysis(w, 0, 2, 1000, 1)).toBeUndefined();
+      expect(await analysis(w, inputs, cell(0), ["stats", "ac"])).toBeUndefined();
+      const computed = (await analysis(w, inputs, cell(e), ["stats", "ac"]))!;
+      expect((await analysis(w, inputs, cell(0), ["stats", "ac"]))!.keys).toEqual(computed.keys);
+      const nextRevision = { ...inputs, cellPrefix: "cut-a|1" };
+      expect(await analysis(w, nextRevision, cell(0), ["stats", "ac"])).toBeUndefined();
     } finally {
       w.engine_free(e);
     }

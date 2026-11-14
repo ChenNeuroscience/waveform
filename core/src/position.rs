@@ -1,4 +1,5 @@
 //! Position decoding/post-processing and numeric cell analysis, entirely in Wasm.
+#[cfg(test)]
 use crate::Engine;
 use std::{cell::OnceCell, slice, sync::Arc};
 #[derive(Default, Clone)]
@@ -335,7 +336,8 @@ fn smooth(a: &mut [f32], k: usize) {
         *v = ((sum[hi] - sum[lo]) / (hi - lo) as f64) as f32;
     }
 }
-/// Every analysis of a cell, computed together without the cache (see `analyse`).
+/// Every analysis of a cell, computed together (see `analyse`).
+#[cfg(test)]
 #[derive(Default)]
 pub(crate) struct Analysis {
     /// Cell, map width and height, peak, refractory %, rate, arena width and height, spikes.
@@ -398,6 +400,13 @@ impl Position {
     }
     pub(crate) fn arena(&self) -> [f32; 2] {
         [self.width, self.height]
+    }
+    pub(crate) fn ppm(&self) -> f32 {
+        self.ppm
+    }
+    /// Whether `ppm` is only a guess, with no calibration from the file or an edit.
+    pub(crate) fn ppm_estimated(&self) -> bool {
+        self.estimated
     }
     /// Sample `i`'s spatial bin in a `w` by `h` grid; it must be in the arena.
     fn spatial_bin(&self, i: usize, w: usize, h: usize) -> usize {
@@ -615,7 +624,9 @@ pub(crate) fn refractory(times: &[u32], ids: &[u32], tb: f64) -> f64 {
         0.
     }
 }
-/// Every analysis of a cell at once, without the cache (see analysis.rs for the cached ones).
+/// Every analysis of a cell at once, in one function: the reference that the handlers in
+/// analysis.rs, which compute each separately through the cache, are tested against.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn analyse(
     e: &mut Engine,
@@ -704,41 +715,8 @@ pub unsafe extern "C" fn position_set_ppm(p: *mut Position, ppm: f32, estimated:
     (*p).set_ppm(ppm, estimated != 0);
 }
 #[no_mangle]
-pub unsafe extern "C" fn position_ppm(p: *const Position) -> f32 {
-    (*p).ppm
-}
-#[no_mangle]
-pub unsafe extern "C" fn position_ppm_estimated(p: *const Position) -> u32 {
-    (*p).estimated as u32
-}
-#[no_mangle]
 pub unsafe extern "C" fn position_used_extent(p: *const Position) -> f32 {
     (*p).used_extent()
-}
-#[no_mangle]
-pub unsafe extern "C" fn position_finish(
-    p: *mut Position,
-    leds: u32,
-    max_speed: f32,
-    smoothing: f64,
-    sync_ms: f64,
-) {
-    (*p).process(leds, max_speed, smoothing, sync_ms);
-}
-#[no_mangle]
-pub unsafe extern "C" fn position_variant(
-    p: *const Position,
-    leds: u32,
-    max_speed: f32,
-    smoothing: f64,
-    sync_ms: f64,
-) -> *mut Position {
-    Box::into_raw(Box::new((*p).variant(leds, max_speed, smoothing, sync_ms)))
-}
-#[no_mangle]
-pub unsafe extern "C" fn position_size(p: *const Position, out: *mut f32) {
-    let out = slice::from_raw_parts_mut(out, 2);
-    out.copy_from_slice(&[(*p).width, (*p).height]);
 }
 #[no_mangle]
 pub unsafe extern "C" fn position_free(p: *mut Position) {

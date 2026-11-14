@@ -15,6 +15,8 @@ import {
   type ViewData,
   type AnalysisData,
   membershipKey,
+  reuseParts,
+  type AnalysisPart,
   type Settings,
   type PlotMode,
   type SplitPoint,
@@ -202,6 +204,15 @@ export function TileWall({
   const wavesReady = wavesDone === waveKey;
   // Cancels in-flight tile gestures whenever the cut or anything analyses read changes.
   const scope = `${data.session}|${data.revision}|${JSON.stringify([position.posFile, position.ppm, position.sync, settings, shown.sc])}`;
+  // The parts tiles show: the rate map and directional map always, for the stats line's
+  // peaks, and the others only when their plots are on.
+  const parts: AnalysisPart[] = [
+    "spatial",
+    "direction",
+    ...(shown.sc ? (["sc"] as const) : []),
+    ...(shown.speed ? (["speed"] as const) : []),
+    ...(shown.ac ? (["ac"] as const) : []),
+  ];
   /** A cell's held analysis, if it was made from the cell's current spikes. */
   const analysisFor = (cell: number) => {
     const a = held.current.get(cell);
@@ -236,8 +247,7 @@ export function TileWall({
           cell,
           ...position,
           settings,
-          summary: true,
-          spatialAc: shown.sc,
+          parts,
         }),
       ),
     );
@@ -322,8 +332,7 @@ export function TileWall({
           cell,
           ...position,
           settings,
-          summary: true,
-          spatialAc: shown.sc,
+          parts,
           batch,
         }),
       ),
@@ -337,10 +346,7 @@ export function TileWall({
         const next = new Map<number, AnalysisData>();
         for (const result of results) {
           const previous = held.current.get(result.cell);
-          next.set(
-            result.cell,
-            previous && result.key && previous.key === result.key ? previous : result,
-          );
+          next.set(result.cell, reuseParts(previous ?? null, result));
         }
         held.current = next;
         setAnalysisVersion((v) => v + 1);
@@ -349,8 +355,8 @@ export function TileWall({
     return () => {
       current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- visible follows signature; position follows trial and headerEdits
-  }, [signature, data, trial, headerEdits, settings, shown.sc]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- visible follows signature; position follows trial and headerEdits; parts follow the shown plots
+  }, [signature, data, trial, headerEdits, settings, shown.sc, shown.speed, shown.ac]);
   useEffect(() => {
     if (!shown.waveforms || !waveCanvas.current) {
       return;

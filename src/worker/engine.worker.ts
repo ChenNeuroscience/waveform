@@ -3,14 +3,8 @@
 // every loop over spike, label, waveform and position records.
 import { demoFiles, recordingSource } from "./demo";
 import { parseHeader, textHeader, readCut } from "../files";
-import type { Header, HistoryEntry, ViewMessage, AnalysisData } from "../types";
-import {
-  cachedAnalysis,
-  cachedTrajectory,
-  positionHeader,
-  setCacheInputs,
-  type CacheInputs,
-} from "./position";
+import type { AnalysisData, AnalysisPart, Header, HistoryEntry, ViewMessage } from "../types";
+import { analysis, positionHeader, trajectory, type CacheInputs } from "./position";
 import { openStore, put, get } from "./history";
 import { streamFile, copyU8, copyU16, copyU32, withU16, withF32, type Core } from "./wasm";
 import { Superseded } from "./protocol";
@@ -319,15 +313,18 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         recording: recording.assetKey,
         cellPrefix: live ? "" : `${recording.cutKey || "unsorted"}|${recording.revision ?? 0}`,
       };
-      await setCacheInputs(w, inputs);
-      // Path copies fall back on cell 0 for the position's speed dwell.
+      // Tile charts omit per-spike overlays; path copies keep selected dots and need the
+      // speed dwell, falling back on cell 0 for it.
+      const parts: AnalysisPart[] = m.path
+        ? ["stats", "spikes", "speedDwell"]
+        : ["stats", "spatial", "direction", "speed", "ac", ...(m.spatialAc ? ["sc" as const] : [])];
       const wanted = [...new Set(m.path ? [...m.cells, 0] : m.cells)];
       const found = new Map<number, AnalysisData>();
-      const look = (engine: number, timebase: number, duration: number) => {
+      const look = async (engine: number, tb: number, duration: number) => {
         for (const cell of wanted) {
           const result = found.has(cell)
             ? undefined
-            : cachedAnalysis(w, engine, cell, timebase, duration, m.spatialAc);
+            : await analysis(w, inputs, { engine, cell, tb, duration }, parts);
           if (result) {
             found.set(cell, result);
           }
@@ -340,9 +337,9 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         const timebase = parseFloat(live.header.timebase);
         header = live.header;
         duration = parseFloat(header.duration) || (times(live)[live.n - 1] || 0) / timebase;
-        look(live.e, timebase, duration);
+        await look(live.e, timebase, duration);
       } else {
-        look(0, 0, 0);
+        await look(0, 0, 0);
         header = parseHeader(new Uint8Array(await source.slice(0, 65536).arrayBuffer())).header;
         duration = parseFloat(header.duration);
         if (found.size < wanted.length || !(duration > 0)) {
@@ -368,8 +365,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
             const spikeTimes = new Uint32Array(w.memory.buffer, w.engine_times(a.e), a.n);
             header = a.header;
             duration = parseFloat(a.header.duration) || (spikeTimes[a.n - 1] || 0) / timebase;
-            await setCacheInputs(w, inputs);
-            look(a.e, timebase, duration);
+            await look(a.e, timebase, duration);
           } finally {
             w.engine_free(a.e);
           }
@@ -381,23 +377,15 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
       const cells = m.cells.map((cell) => {
         const data = found.get(cell);
         const spikes = data?.count ?? 0;
-        // Tile charts omit per-spike overlays; path copies retain selected dots.
-        return {
-          cell,
-          spikes,
-          data: spikes ? (m.path ? data! : { ...data!, spikes: new Float32Array() }) : null,
-        };
+        return { cell, spikes, data: spikes ? data! : null };
       });
       const overview = m.path ? cells.find((c) => c.data)?.data || found.get(0) : undefined;
-      if (overview) {
-        await setCacheInputs(w, inputs);
-      }
       results.push({
         trialId: recording.trialId,
         cells,
         position: overview
           ? {
-              trajectory: cachedTrajectory(w),
+              trajectory: await trajectory(w, inputs),
               overview: { ...overview, spikes: new Float32Array() },
               header: {
                 ...header,
@@ -715,26 +703,24 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     return { waves: await waveBatch(a, m.first, m.count) };
   }
   if (m.type === "trajectory") {
-    await setCacheInputs(w, m);
-    return cachedTrajectory(w);
+    return trajectory(w, m);
   }
   if (m.type === "analysis") {
-    await setCacheInputs(w, { ...m, recording: a.key });
     // The membership the worker analysed, so the client can tell if its cut moved on.
-    const hashes = new Uint32Array(w.memory.buffer, w.engine_cell_hashes(e), 2048);
+    // Pointer first: rebuilding hashes after an edit can grow memory.
+    const hashesAt = w.engine_cell_hashes(e);
+    const hashes = new Uint32Array(w.memory.buffer, hashesAt, 2048);
     const membership = `${counts(a)[m.cell]}:${hashes[m.cell * 2]}:${hashes[m.cell * 2 + 1]}`;
     const timebase = parseFloat(a.header.timebase);
-    const result = cachedAnalysis(
-      w,
-      e,
-      m.cell,
-      timebase,
-      parseFloat(a.header.duration) || (times(a)[a.n - 1] || 0) / timebase,
-      m.spatialAc,
-    )!;
+    const cell = {
+      engine: e,
+      cell: m.cell,
+      tb: timebase,
+      duration: parseFloat(a.header.duration) || (times(a)[a.n - 1] || 0) / timebase,
+    };
+    const result = (await analysis(w, { ...m, recording: a.key }, cell, m.parts))!;
     evict(0);
-    const answer = { ...result, cell: m.cell, membership };
-    return m.summary ? { ...answer, spikes: new Float32Array() } : answer;
+    return { ...result, membership };
   }
   if (m.type === "export") {
     return exportLabels(w, e, a.n, m.trial, m.format);

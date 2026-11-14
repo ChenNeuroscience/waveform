@@ -2,14 +2,15 @@
  * analysis and, while dragging one tile onto another, the target's analysis.
  *
  * Nothing is cached here. Whenever an input might have changed, the worker is asked again
- * and answers from its cache (core/src/cache.rs) when it can. Each answer carries the
- * cache's key, and an answer with the key already held keeps the held object, so an
- * unchanged plot isn't redrawn. */
+ * for just the parts shown, and answers from its cache (core/src/cache.rs) when it can.
+ * Each part carries its cache key, and a part whose key is unchanged keeps its held values
+ * (`reuseParts`), so an unchanged plot isn't redrawn. */
 import { useEffect, useState } from "react";
 import { request } from "../worker/client";
 import { Superseded } from "../worker/protocol";
 import {
   positionSource,
+  reuseParts,
   type AnalysisData,
   type HeaderEdits,
   type Settings,
@@ -19,9 +20,8 @@ import {
 } from "../types";
 import type { DragComparison } from "../tiles/tile-gestures";
 
-/** `next`, unless `held` has the same cache key (and so the same values). */
-const fresh = <T extends { key?: string }>(held: T | null, next: T) =>
-  held && next.key && held.key === next.key ? held : next;
+/** The displayed cell's parts: its spikes on the path and the speed dwell beside it. */
+const DISPLAYED = ["spikes", "speedDwell"] as const;
 
 export function useAnalyses({
   data,
@@ -67,7 +67,8 @@ export function useAnalyses({
             t
               ? {
                   posFile,
-                  value: held?.posFile === posFile ? fresh(held.value, t) : t,
+                  value:
+                    held?.posFile === posFile ? (held.value.key === t.key ? held.value : t) : t,
                 }
               : null,
           );
@@ -93,18 +94,16 @@ export function useAnalyses({
           cell: displayCell,
           ...positionSource(trial, headerEdits),
           settings,
+          parts: DISPLAYED,
         })
           .then((a) => {
             if (live) {
-              setAnalysis((held) => (held?.cell === a.cell ? fresh(held, a) : a));
+              setAnalysis((held) => reuseParts(held, a));
               // Every cell carries the same position-only dwell histogram. Keep its
               // array across cell, cut and tetrode changes so it isn't redrawn.
+              const key = a.keys.speedDwell;
               setSpeedDwell((held) =>
-                !a.speedDwellKey
-                  ? null
-                  : held?.key === a.speedDwellKey
-                    ? held
-                    : { key: a.speedDwellKey, values: a.speedDwell },
+                !key ? null : held?.key === key ? held : { key, values: a.speedDwell },
               );
             }
           })
@@ -136,12 +135,13 @@ export function useAnalyses({
           cell: target,
           ...positionSource(trial, headerEdits),
           settings,
+          parts: ["spikes"],
         })
           .then((a) => {
             if (live) {
               setComparison((held) => ({
                 target,
-                data: held?.target === target ? fresh(held.data, a) : a,
+                data: held?.target === target ? reuseParts(held.data, a) : a,
               }));
             }
           })

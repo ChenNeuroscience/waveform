@@ -3,6 +3,7 @@
  * field fails to compile rather than at runtime. */
 import type {
   AnalysisData,
+  AnalysisPart,
   Header,
   Settings,
   Trajectory,
@@ -137,7 +138,12 @@ export interface Requests {
   trajectory: [PositionRequest, Trajectory | null];
   analysis: [
     Partial<Session> &
-      PositionRequest & { cell: number; summary?: boolean; batch?: string; spatialAc?: boolean },
+      PositionRequest & {
+        cell: number;
+        /** What to compute: only what will be shown. */
+        parts: readonly AnalysisPart[];
+        batch?: string;
+      },
     AnalysisData,
   ];
 }

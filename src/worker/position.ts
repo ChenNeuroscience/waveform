@@ -1,8 +1,9 @@
-// Browser I/O and ABI bridge. Numeric position/analysis code, and the cache of what it
-// derives, are in Rust (core/src/position.rs and core/src/cache.rs).
+// Browser I/O and ABI bridge. Positions and analyses are computed by handlers in Rust
+// (core/src/analysis.rs) behind its cache (core/src/cache.rs); this writes their inputs,
+// supplies files they say they need, and copies their answers out.
 import { parseHeader } from "../files";
 import { streamFile, copyF32, type Core } from "./wasm";
-import type { Header, Settings, AnalysisData, Trajectory } from "../types";
+import type { AnalysisData, AnalysisPart, Header, Trajectory } from "../types";
 import type { PositionRequest } from "./protocol";
 
 /** Reads a position file's header. */
@@ -55,19 +56,6 @@ export async function readPosition(file: File, w: Core, editedPpm?: number): Pro
     throw e;
   }
 }
-/** Reads and processes a position into one handle, outside the cache, for one-off use. */
-export async function parsePosition(
-  file: File,
-  s: Settings,
-  w: Core,
-  editedPpm?: number,
-  sync = 0,
-): Promise<number> {
-  const handle = await readPosition(file, w, editedPpm);
-  w.position_finish(handle, s.leds, s.maxSpeed, s.posSmooth, sync);
-  return handle;
-}
-
 /** The numeric cache inputs, in the order Rust reads them (checked by a test against
  * `cache_input_name`). */
 export const CACHE_NUMBERS = [
@@ -107,7 +95,9 @@ function setText(w: Core, field: number, text: string) {
   }
 }
 function writeInputs(w: Core, i: CacheInputs) {
-  const numbers = new Float64Array(w.memory.buffer, w.cache_numbers(), CACHE_NUMBERS.length);
+  // Pointer first: the call can grow memory, detaching an earlier `memory.buffer`.
+  const at = w.cache_numbers();
+  const numbers = new Float64Array(w.memory.buffer, at, CACHE_NUMBERS.length);
   CACHE_NUMBERS.forEach((name, j) => {
     numbers[j] =
       name === "ppm" ? (i.ppm ?? NaN) : name === "sync" ? (i.sync ?? 0) : i.settings[name];
@@ -116,134 +106,175 @@ function writeInputs(w: Core, i: CacheInputs) {
   setText(w, 1, i.recording ?? "");
   setText(w, 2, i.cellPrefix ?? "");
 }
+/** The handlers the Rust cache answers, in the order it lists them (checked by a test
+ * against `cache_handler_name`). */
+export const CACHE_HANDLERS = [
+  "path",
+  "positionInfo",
+  "cellStats",
+  "spikePositions",
+  "ratemap",
+  "spatialAc",
+  "direction",
+  "speed",
+  "speedDwell",
+  "temporalAc",
+] as const;
+export type CacheHandler = (typeof CACHE_HANDLERS)[number];
+/** A cell asked about: its number, its recording's clock, and its engine, or 0 to only look
+ * in the cache. */
+export interface CellRequest {
+  engine: number;
+  cell: number;
+  tb: number;
+  duration: number;
+}
+/** A handler's answer: its key's digest and its named buffers. */
+export interface Answer {
+  key: string;
+  buffers: Record<string, Float32Array | Float64Array>;
+}
+function readAnswer(w: Core): Answer {
+  // Pointers before views: a call can grow memory, detaching an earlier `memory.buffer`.
+  const digest = w.answer_digest();
+  const [lo, hi] = new Uint32Array(w.memory.buffer, digest, 2);
+  const buffers: Answer["buffers"] = {};
+  for (let i = 0; i < w.answer_count(); i++) {
+    const [at, length] = [w.answer_name(i), w.answer_name_len(i)];
+    const name = new TextDecoder().decode(new Uint8Array(w.memory.buffer, at, length));
+    const [data, n] = [w.answer_data(i), w.answer_len(i)];
+    buffers[name] = w.answer_kind(i)
+      ? new Float64Array(w.memory.buffer, data, n).slice()
+      : copyF32(w, data, n);
+  }
+  return { key: hi.toString(16).padStart(8, "0") + lo.toString(16).padStart(8, "0"), buffers };
+}
 /**
- * Makes `i` the cache's current inputs, first reading the position file into the cache if
- * it hasn't been. Requests are handled one at a time, so they stay current until the next
- * call.
+ * Asks the Rust cache's `handler` for `inputs` (and `cell`, for a cell's analyses). Reads
+ * the position file into the cache if it says it needs it. Undefined if it needs the
+ * recording's spikes and `cell` has no engine.
  */
-export async function setCacheInputs(w: Core, i: CacheInputs) {
-  writeInputs(w, i);
-  if (i.pos && !w.cache_has_raw()) {
-    const handle = await readPosition(i.pos, w, i.ppm);
-    writeInputs(w, i);
+export async function ask(
+  w: Core,
+  inputs: CacheInputs,
+  handler: CacheHandler,
+  cell: CellRequest = { engine: 0, cell: 0, tb: 0, duration: 0 },
+): Promise<Answer | undefined> {
+  const id = CACHE_HANDLERS.indexOf(handler);
+  for (let read = false; ; read = true) {
+    writeInputs(w, inputs);
+    const status = w.cache_request(id, cell.engine, cell.cell, cell.tb, cell.duration);
+    if (status === 0) {
+      return readAnswer(w);
+    }
+    if (status === 1) {
+      return undefined;
+    }
+    if (read || !inputs.pos) {
+      throw new Error("The position isn't available.");
+    }
+    // Requests are handled one at a time, so the inputs are still these when it's stored.
+    const handle = await readPosition(inputs.pos, w, inputs.ppm);
+    writeInputs(w, inputs);
     w.cache_put_raw(handle);
   }
 }
-/** Digests of the last answer's keys, as hex ("" for none). */
-function keys(w: Core) {
-  const [a, b, c, d, e, f] = new Uint32Array(w.memory.buffer, w.cache_keys(), 6);
-  const hex = (lo: number, hi: number) =>
-    lo || hi ? hi.toString(16).padStart(8, "0") + lo.toString(16).padStart(8, "0") : "";
-  return { analysis: hex(a, b), path: hex(c, d), speedDwell: hex(e, f) };
-}
 
-/** A processed position's size and calibration, with the path last put in the output. */
-function trajectoryOf(w: Core, handle: number): Trajectory {
-  const size = w.alloc_bytes(8);
-  try {
-    w.position_size(handle, size);
-    const [arenaWidth, arenaHeight] = new Float32Array(w.memory.buffer, size, 2);
-    return {
-      key: "",
-      ppm: w.position_ppm(handle),
-      ppmEstimated: !!w.position_ppm_estimated(handle),
-      path: copyF32(w, w.output_path(), w.output_path_len()),
-      arenaWidth,
-      arenaHeight,
-    };
-  } finally {
-    w.free_bytes(size, 8);
-  }
-}
-/** The trajectory of a processed position handle, without the cache. */
-export function trajectory(w: Core, handle: number): Trajectory {
-  w.position_path(handle);
-  return trajectoryOf(w, handle);
-}
-/** The current inputs' trajectory, or null without a position. Call `setCacheInputs` first. */
-export function cachedTrajectory(w: Core): Trajectory | null {
-  if (!w.cache_path()) {
+/** The trajectory for `inputs`, or null without a position. */
+export async function trajectory(w: Core, inputs: CacheInputs): Promise<Trajectory | null> {
+  if (!inputs.pos) {
     return null;
   }
-  // The path is cached apart from the position, so storing it can't evict this.
-  const handle = w.cache_position();
-  return { ...trajectoryOf(w, handle), key: keys(w).path };
-}
-
-/** Copies the analysis Rust last computed or fetched. */
-function output(w: Core): AnalysisData {
-  const meta = new Float64Array(w.memory.buffer, w.analysis_meta(), 9).slice();
-  const array = (name: "spatial" | "spikes" | "direction" | "speed" | "speed_dwell" | "ac") =>
-    copyF32(w, w[`analysis_${name}`](), w[`analysis_${name}_len`]());
-  const sc = w.analysis_sc_len();
+  const path = (await ask(w, inputs, "path"))!;
+  const [arenaWidth, arenaHeight, ppm, estimated] = (await ask(w, inputs, "positionInfo"))!.buffers
+    .info;
   return {
-    cell: meta[0],
-    arenaWidth: meta[6],
-    arenaHeight: meta[7],
-    count: meta[8],
-    width: meta[1],
-    height: meta[2],
-    peak: meta[3],
-    refractory: meta[4],
-    rate: meta[5],
-    spatial: array("spatial"),
-    spikes: array("spikes"),
-    direction: array("direction"),
-    speed: array("speed"),
-    speedDwell: array("speed_dwell"),
-    ac: array("ac"),
-    spatialAc: sc ? copyF32(w, w.analysis_sc(), sc) : undefined,
+    key: path.key,
+    path: path.buffers.values as Float32Array,
+    arenaWidth,
+    arenaHeight,
+    ppm,
+    ppmEstimated: !!estimated,
   };
 }
+
+/** Which handler gives each part of a cell's analysis. */
+const PART_HANDLERS: Record<AnalysisPart, CacheHandler> = {
+  stats: "cellStats",
+  spatial: "ratemap",
+  sc: "spatialAc",
+  direction: "direction",
+  speed: "speed",
+  speedDwell: "speedDwell",
+  ac: "temporalAc",
+  spikes: "spikePositions",
+};
+/** Parts that need a position; without one they're left empty. */
+const POSITIONAL = new Set<AnalysisPart>([
+  "spatial",
+  "sc",
+  "direction",
+  "speed",
+  "speedDwell",
+  "spikes",
+]);
 /**
- * A cell's analyses for the current inputs, with the spatial autocorrelogram if asked (see `setCacheInputs`), from the cache or computed
- * with `engine` and cached. With no engine it only looks: undefined if it isn't cached.
+ * The `parts` of a cell's analysis, from the Rust cache or computed there. Undefined if a
+ * part needs the recording's spikes and `cell` has no engine.
  */
-export function cachedAnalysis(
+export async function analysis(
   w: Core,
-  engine: number,
-  cell: number,
-  tb: number,
-  duration: number,
-  spatialAc = false,
-): AnalysisData | undefined {
-  if (!w.cache_analysis(engine, cell, tb, duration, Number(spatialAc))) {
-    if (engine) {
-      throw new Error("The position isn't available for analysis.");
+  inputs: CacheInputs,
+  cell: CellRequest,
+  parts: readonly AnalysisPart[],
+): Promise<AnalysisData | undefined> {
+  const empty = new Float32Array();
+  const result: AnalysisData = {
+    keys: {},
+    cell: cell.cell,
+    arenaWidth: 0,
+    arenaHeight: 0,
+    count: 0,
+    refractory: 0,
+    rate: 0,
+    spatial: empty,
+    width: 0,
+    height: 0,
+    peak: 0,
+    direction: empty,
+    speed: empty,
+    speedDwell: empty,
+    ac: empty,
+    spikes: empty,
+  };
+  const hasPos = !!inputs.pos;
+  if (hasPos) {
+    [result.arenaWidth, result.arenaHeight] = (await ask(w, inputs, "positionInfo"))!.buffers.info;
+  }
+  for (const part of new Set(parts)) {
+    if (POSITIONAL.has(part) && !hasPos) {
+      continue;
     }
-    return undefined;
+    const answer = await ask(w, inputs, PART_HANDLERS[part], cell);
+    if (!answer) {
+      return undefined;
+    }
+    result.keys[part] = answer.key;
+    const { values, stats, shape } = answer.buffers;
+    switch (part) {
+      case "stats":
+        [result.count, result.refractory, result.rate] = stats;
+        break;
+      case "spatial":
+        result.spatial = values as Float32Array;
+        [result.width, result.height, result.peak] = shape;
+        break;
+      case "sc":
+        result.spatialAc = values as Float32Array;
+        break;
+      default:
+        result[part] = values as Float32Array;
+    }
   }
-  const { analysis, speedDwell } = keys(w);
-  return { ...output(w), key: analysis, speedDwellKey: speedDwell };
-}
-/** A cell's analysis computed directly, outside the cache, for one-off use and tests. */
-export function analyse(
-  w: Core,
-  engine: number,
-  cell: number,
-  tb: number,
-  duration: number,
-  position: number | undefined,
-  s: Settings,
-  spatialAc = false,
-): AnalysisData {
-  w.engine_analyse(
-    engine,
-    position || 0,
-    cell,
-    tb,
-    duration,
-    s.binCm,
-    s.smooth,
-    s.acWindow,
-    s.acBinMs,
-    s.dirBin,
-    s.dirSmooth,
-    s.speedBin,
-    s.speedMax,
-  );
-  if (spatialAc) {
-    w.analysis_add_sc(s.scMinOverlap);
-  }
-  return output(w);
+  return result;
 }

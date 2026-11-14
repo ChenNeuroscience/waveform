@@ -149,31 +149,78 @@ export interface Trajectory {
 /** Cache key for a cell's spike set: count plus a 64-bit membership hash. */
 export const membershipKey = (data: ViewData, cell: number) =>
   `${data.counts[cell]}:${data.cellHashes[cell * 2]}:${data.cellHashes[cell * 2 + 1]}`;
+/** The parts of a cell's analysis, each from its own handler in the worker's Rust cache
+ * (core/src/analysis.rs), and asked for only where they're shown. */
+export const ANALYSIS_PARTS = [
+  "stats",
+  "spatial",
+  "sc",
+  "direction",
+  "speed",
+  "speedDwell",
+  "ac",
+  "spikes",
+] as const;
+export type AnalysisPart = (typeof ANALYSIS_PARTS)[number];
+/** A cell's analysis. Parts that weren't asked for are empty, with no key. */
 export interface AnalysisData {
   /** The membership key the worker analysed (see membershipKey). */
   membership?: string;
-  /** The worker cache's key for it: equal keys mean identical results. */
-  key?: string;
-  /** Likewise for `speedDwell`, which depends on the position alone. */
-  speedDwellKey?: string;
-  /** The cell's spike count. */
-  count: number;
+  /** Each part's cache key: an equal key means identical values. */
+  keys: Partial<Record<AnalysisPart, string>>;
+  cell: number;
   arenaWidth: number;
   arenaHeight: number;
-  cell: number;
+  /** stats */
+  count: number;
+  refractory: number;
+  rate: number;
+  /** spatial */
   spatial: Float32Array;
   width: number;
   height: number;
   peak: number;
-  spikes: Float32Array;
+  /** Full linear spatial autocorrelation, (2*width-1) by (2*height-1), if asked for. */
+  spatialAc?: Float32Array;
   direction: Float32Array;
   speed: Float32Array;
   speedDwell: Float32Array;
   ac: Float32Array;
-  /** Full linear spatial autocorrelation, (2*width-1) by (2*height-1), if requested. */
-  spatialAc?: Float32Array;
-  refractory: number;
-  rate: number;
+  /** Normalised (x, y) of each spike on the path. */
+  spikes: Float32Array;
+}
+/** The fields each part fills. */
+const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
+  stats: ["count", "refractory", "rate"],
+  spatial: ["spatial", "width", "height", "peak"],
+  sc: ["spatialAc"],
+  direction: ["direction"],
+  speed: ["speed"],
+  speedDwell: ["speedDwell"],
+  ac: ["ac"],
+  spikes: ["spikes"],
+};
+/**
+ * `next`, keeping `held`'s values for every part whose key is unchanged, so plots of those
+ * parts see the same arrays and needn't redraw. `held` itself if nothing changed.
+ */
+export function reuseParts(held: AnalysisData | null, next: AnalysisData): AnalysisData {
+  if (!held || held.cell !== next.cell) {
+    return next;
+  }
+  const merged: Record<string, unknown> = { ...next };
+  let changed = held.membership !== next.membership;
+  for (const part of ANALYSIS_PARTS) {
+    const key = next.keys[part];
+    if (key && key === held.keys[part]) {
+      for (const field of PART_FIELDS[part]) {
+        merged[field] = held[field];
+      }
+    } else if (key || held.keys[part]) {
+      changed = true;
+    }
+  }
+  return changed ? (merged as unknown as AnalysisData) : held;
 }
 export const fileId = (f: File) => `${f.webkitRelativePath || f.name}:${f.size}:${f.lastModified}`;
 /** Header values changed in the browser, by `fileId`. They are never written to the files,

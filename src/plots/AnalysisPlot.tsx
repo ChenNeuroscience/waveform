@@ -149,6 +149,20 @@ export function drawAnalysis(
 export function AnalysisPlot(props: AnalysisDrawing) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const { data, mode, maxRate, rateMapSteps, compact, speedAlignment, positionSpeed } = props;
+  // Redrawn when this plot's own values change, not the rest of the cell's analysis: parts
+  // whose cache keys are unchanged keep their arrays (see reuseParts).
+  const values =
+    mode === "spatial"
+      ? data.spatial
+      : mode === "sc"
+        ? data.spatialAc
+        : mode === "direction"
+          ? data.direction
+          : mode === "ac"
+            ? data.ac
+            : positionSpeed
+              ? data.speedDwell
+              : data.speed;
   useEffect(() => {
     const c = canvas.current!;
     const drawing = { data, mode, maxRate, rateMapSteps, compact, speedAlignment, positionSpeed };
@@ -157,7 +171,19 @@ export function AnalysisPlot(props: AnalysisDrawing) {
     const ro = new ResizeObserver(draw);
     ro.observe(c);
     return () => ro.disconnect();
-  }, [data, mode, maxRate, rateMapSteps, compact, speedAlignment, positionSpeed]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- values (with the map's shape) stand for data
+  }, [
+    values,
+    data.width,
+    data.height,
+    data.peak,
+    mode,
+    maxRate,
+    rateMapSteps,
+    compact,
+    speedAlignment,
+    positionSpeed,
+  ]);
   return (
     <canvas
       ref={canvas}
