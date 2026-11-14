@@ -127,9 +127,13 @@ pub(crate) enum Node {
     SpikeSamples,
     /// Where each of a cell's spikes was, for the path plot.
     SpikePositions,
+    /// When each of those spikes was, for drift colouring.
+    SpikeDrift,
     SettingsRatemap,
     SpatialOccupancy,
     Ratemap,
+    /// The mean spike time in each bin of the rate map, for drift colouring.
+    SpatialDrift,
     SettingsSpatialAc,
     SpatialAc,
     SettingsDirection,
@@ -169,10 +173,11 @@ fn children(node: Node) -> &'static [Part] {
         Spikes => &[L(Recording), L(Cell)],
         CellStats => &[N(Spikes)],
         SpikeSamples => &[N(Position), N(Spikes)],
-        SpikePositions => &[N(SpikeSamples)],
+        SpikePositions | SpikeDrift => &[N(SpikeSamples)],
         SettingsRatemap => &[L(BinCm), L(Smooth), L(MaxRate), L(RateMapSteps)],
         SpatialOccupancy => &[N(Position), N(SettingsRatemap)],
         Ratemap => &[N(SpikeSamples), N(SpatialOccupancy)],
+        SpatialDrift => &[N(Ratemap)],
         SettingsSpatialAc => &[L(ScMinOverlap)],
         SpatialAc => &[N(Ratemap), N(SettingsSpatialAc)],
         SettingsDirection => &[L(DirBin), L(DirSmooth)],

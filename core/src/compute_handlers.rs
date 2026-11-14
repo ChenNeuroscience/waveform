@@ -8,7 +8,7 @@ use crate::compute::{
     Leaf::*, Missing, Node, Part, Request, Route, L,
 };
 use crate::pca::PcaBuilder;
-use crate::position::{direction_bins, refractory, speed_bins, temporal_ac, Position};
+use crate::position::{direction_bins, refractory, speed_bins, temporal_ac, Position, Samples};
 use crate::processing::{apply_patch, CellWaves as Waves, CutParser, Scan};
 use crate::spatial_ac::autocorrelation;
 use crate::waves::WaveOrder as Order;
@@ -52,6 +52,8 @@ pub(crate) static ROUTES: &[Route] = &[
     ("speed", answer::<Speed>),
     ("speedDwell", answer::<SpeedDwell>),
     ("temporalAc", answer::<TemporalAc>),
+    ("spatialDrift", answer::<SpatialDrift>),
+    ("spikeDrift", answer::<SpikeDrift>),
 ];
 
 /// A recording's spike times and amplitudes. Only JavaScript can read its file
@@ -488,10 +490,10 @@ impl Answer for Stats {
 /// The position sample of each of a cell's spikes in the arena.
 pub(crate) struct SpikeSamples;
 impl Handler for SpikeSamples {
-    type Value = Vec<u32>;
+    type Value = Samples;
     const NODE: Node = Node::SpikeSamples;
     const LIMIT: usize = PER_CELL;
-    fn compute(cx: &mut Request) -> Result<Vec<u32>, Missing> {
+    fn compute(cx: &mut Request) -> Result<Samples, Missing> {
         let p = cx.call::<ProcessedPosition>()?;
         let times = cx.call::<CellSpikes>()?;
         Ok(p.spike_samples(&times, cx.tb()))
@@ -507,9 +509,33 @@ impl Handler for SpikePositions {
     fn compute(cx: &mut Request) -> Result<Values, Missing> {
         let samples = cx.call::<SpikeSamples>()?;
         Ok(Values(
-            cx.call::<ProcessedPosition>()?.spike_positions(&samples),
+            cx.call::<ProcessedPosition>()?
+                .spike_positions(&samples.samples),
         ))
     }
+}
+
+/// When each spike on the path was, from 0 (the recording's start) to 1 (its last spike).
+pub(crate) struct SpikeDrift;
+impl Handler for SpikeDrift {
+    type Value = Values;
+    const NODE: Node = Node::SpikeDrift;
+    const LIMIT: usize = 16;
+    fn compute(cx: &mut Request) -> Result<Values, Missing> {
+        let samples = cx.call::<SpikeSamples>()?;
+        let last = last_spike(cx)?;
+        Ok(Values(
+            samples
+                .times
+                .iter()
+                .map(|&t| t as f32 / last.max(1) as f32)
+                .collect(),
+        ))
+    }
+}
+/// The recording's last spike time, which drift colours scale to.
+fn last_spike(cx: &mut Request) -> Result<u32, Missing> {
+    Ok(cx.call::<Population>()?.times.last().copied().unwrap_or(0))
 }
 
 /// A spatial grid of values.
@@ -552,8 +578,13 @@ impl Handler for Ratemap {
         let occupancy = cx.call::<SpatialOccupancy>()?;
         let p = cx.call::<ProcessedPosition>()?;
         let (w, h) = (occupancy.w, occupancy.h);
-        let (values, peak) =
-            p.rate_map(&samples, &occupancy.values, w, h, cx.input(Smooth) as usize);
+        let (values, peak) = p.rate_map(
+            &samples.samples,
+            &occupancy.values,
+            w,
+            h,
+            cx.input(Smooth) as usize,
+        );
         Ok(Rates {
             grid: Grid { w, h, values },
             peak,
@@ -570,6 +601,30 @@ impl Answer for Rates {
                 Buffer::F64(vec![g.w as f64, g.h as f64, self.peak as f64]),
             ),
         ]
+    }
+}
+/// The mean spike time in each bin of a cell's rate map, from 0 (the recording's start) to 1
+/// (its last spike), smoothed like the map; NaN where there are no spikes.
+pub(crate) struct SpatialDrift;
+impl Handler for SpatialDrift {
+    type Value = Values;
+    const NODE: Node = Node::SpatialDrift;
+    const IGNORE: &'static [Part] = &COLOURS;
+    const LIMIT: usize = PER_CELL;
+    fn compute(cx: &mut Request) -> Result<Values, Missing> {
+        let samples = cx.call::<SpikeSamples>()?;
+        let occupancy = cx.call::<SpatialOccupancy>()?;
+        let last = last_spike(cx)?;
+        let p = cx.call::<ProcessedPosition>()?;
+        let smoothing = cx.input(Smooth) as usize;
+        Ok(Values(p.drift_map(
+            &samples,
+            &occupancy.values,
+            last,
+            occupancy.w,
+            occupancy.h,
+            smoothing,
+        )))
     }
 }
 /// The spatial autocorrelogram of a cell's rate map, with the map's shape, so it can be shown
@@ -629,7 +684,7 @@ impl Handler for Direction {
         let p = cx.call::<ProcessedPosition>()?;
         let nd = occupancy.len();
         Ok(Values(p.direction_map(
-            &samples,
+            &samples.samples,
             &occupancy,
             nd,
             cx.input(DirSmooth) as usize,
@@ -662,7 +717,7 @@ impl Handler for Speed {
         let dwell = cx.call::<SpeedDwell>()?;
         let p = cx.call::<ProcessedPosition>()?;
         let (bin, max, _) = speed_bins(cx.input(SpeedBin) as f32, cx.input(SpeedMax) as f32);
-        Ok(Values(p.speed_map(&samples, &dwell.0, bin, max)))
+        Ok(Values(p.speed_map(&samples.samples, &dwell.0, bin, max)))
     }
 }
 
@@ -810,6 +865,21 @@ mod tests {
                 assert!(same(a, b), "cell {cell} {name}: {a:?} != {b:?}");
             }
             assert!(!spikes.0.is_empty(), "cell {cell} has spikes on the path");
+            // Drift: a time for each dot, in order, and for each bin with spikes.
+            let drift = cx.call::<SpikeDrift>().unwrap();
+            assert_eq!(drift.0.len() * 2, spikes.0.len());
+            assert!(drift.0.windows(2).all(|t| t[0] <= t[1]));
+            assert!(drift.0.iter().all(|t| (0. ..=1.).contains(t)));
+            let map = cx.call::<SpatialDrift>().unwrap();
+            assert_eq!(map.0.len(), rates.grid.values.len());
+            for (t, rate) in map.0.iter().zip(&rates.grid.values) {
+                assert_eq!(
+                    t.is_finite(),
+                    rate.is_finite() && *rate > 0.,
+                    "{t} at {rate} Hz"
+                );
+                assert!(!t.is_finite() || (0. ..=1.).contains(t));
+            }
         }
     }
 

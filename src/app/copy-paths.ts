@@ -17,7 +17,7 @@ export interface PathSource {
 export function pathLayers(result: CopyTrialAnalysis | undefined, cells: number[]): SpikeLayer[] {
   return cells.flatMap((cell) => {
     const data = result?.cells.find((c) => c.cell === cell)?.data;
-    return data ? [{ cell, spikes: data.spikes, color: color(cell) }] : [];
+    return data ? [{ cell, spikes: data.spikes, color: color(cell), times: data.spikeDrift }] : [];
   });
 }
 

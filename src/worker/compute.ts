@@ -153,6 +153,8 @@ export const HANDLERS = [
   "speed",
   "speedDwell",
   "temporalAc",
+  "spatialDrift",
+  "spikeDrift",
 ] as const;
 export type HandlerName = (typeof HANDLERS)[number];
 type Buffer = Float32Array | Float64Array | Uint8Array | Uint16Array | Uint32Array;
@@ -349,6 +351,8 @@ const PART_HANDLERS: Record<AnalysisPart, HandlerName> = {
   speedDwell: "speedDwell",
   ac: "temporalAc",
   spikes: "spikePositions",
+  spatialDrift: "spatialDrift",
+  spikeDrift: "spikeDrift",
 };
 /** Parts that need a position; without one they're left empty. */
 const POSITIONAL = new Set<AnalysisPart>([
@@ -358,6 +362,8 @@ const POSITIONAL = new Set<AnalysisPart>([
   "speed",
   "speedDwell",
   "spikes",
+  "spatialDrift",
+  "spikeDrift",
 ]);
 /**
  * The `parts` of a cell's analysis, from the compute graph.

@@ -1,3 +1,4 @@
+import { driftColour } from "./AnalysisPlot";
 import { useEffect, useRef } from "react";
 import { fitGrid } from "./plot-geometry";
 import { type Trajectory } from "../types";
@@ -6,6 +7,8 @@ export interface SpikeLayer {
   cell: number;
   spikes: Float32Array;
   color: string;
+  /** For drift colouring: each spike's time, from 0 (the recording's start) to 1. */
+  times?: Float32Array;
 }
 function pathBox(w: number, h: number, trajectory: Trajectory) {
   return { ...fitGrid(w, h, trajectory.arenaWidth, trajectory.arenaHeight), y: 0 };
@@ -47,6 +50,9 @@ export function drawSpikeLayers(
   for (const layer of layers) {
     ctx.fillStyle = layer.color;
     for (let i = 0; i < layer.spikes.length; i += 2) {
+      if (layer.times) {
+        ctx.fillStyle = driftColour(layer.times[i / 2]);
+      }
       ctx.fillRect(
         Math.round(box.x + layer.spikes[i] * box.width) - 1,
         Math.round(box.y + layer.spikes[i + 1] * box.height) - 1,

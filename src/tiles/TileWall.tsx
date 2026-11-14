@@ -207,6 +207,7 @@ export function TileWall({
   // Only the parts of the plots that are on (the stats line shows only their peaks).
   const parts: AnalysisPart[] = [
     ...(shown.spatial ? (["spatial"] as const) : []),
+    ...(shown.spatial && settings.renderMode === "drift" ? (["spatialDrift"] as const) : []),
     ...(shown.direction ? (["direction"] as const) : []),
     ...(shown.sc ? (["sc"] as const) : []),
     ...(shown.speed ? (["speed"] as const) : []),
@@ -602,6 +603,7 @@ export function TileWall({
                           mode="spatial"
                           maxRate={settings.maxRate}
                           rateMapSteps={settings.rateMapSteps}
+                          drift={settings.renderMode === "drift"}
                           compact
                         />
                       ) : (

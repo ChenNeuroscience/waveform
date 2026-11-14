@@ -60,7 +60,12 @@ export function PositionPane({
     () =>
       [primary, secondary]
         .filter((a): a is AnalysisData => !!a)
-        .map((a) => ({ cell: a.cell, spikes: a.spikes, color: color(a.cell) })),
+        .map((a) => ({
+          cell: a.cell,
+          spikes: a.spikes,
+          color: color(a.cell),
+          times: a.spikeDrift,
+        })),
     [primary, secondary],
   );
   const pathLayers = copyLayers ?? hoverLayers;
