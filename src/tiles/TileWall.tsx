@@ -95,6 +95,7 @@ function analysisSettingsKey(s: Settings) {
     s.dirSmooth,
     s.speedBin,
     s.speedMax,
+    s.syncMs,
   ].join("|");
 }
 

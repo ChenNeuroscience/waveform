@@ -238,7 +238,9 @@ async function waveformColumn(a: Asset, channel: number, sample: number, id: num
   );
 }
 const positionKey = (m: PositionRequest) =>
-  m.pos ? `${m.posKey}|${m.settings.leds}|${m.settings.maxSpeed}|${m.settings.posSmooth}` : "";
+  m.pos
+    ? `${m.posKey}|${m.settings.leds}|${m.settings.maxSpeed}|${m.settings.posSmooth}|${m.settings.syncMs}`
+    : "";
 /** The processed position for a request, parsed once per file and LED/speed settings. */
 async function positionFor(m: PositionRequest, w: Core) {
   const pk = positionKey(m);

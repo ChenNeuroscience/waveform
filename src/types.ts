@@ -36,6 +36,8 @@ export interface Settings {
   leds: number;
   maxSpeed: number;
   posSmooth: number;
+  /** Shift applied to position times (ms); spike times are the reference. */
+  syncMs: number;
   dirBin: number;
   dirSmooth: number;
   speedBin: number;
@@ -54,6 +56,7 @@ export const defaultSettings: Settings = {
   leds: 2,
   maxSpeed: 4,
   posSmooth: 0.3,
+  syncMs: 0,
   dirBin: 6,
   dirSmooth: 1,
   speedBin: 4,

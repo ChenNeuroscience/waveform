@@ -41,6 +41,7 @@ export function useAnalyses({
   const [speedDwell, setSpeedDwell] = useState<{ key: string; values: Float32Array } | null>(null);
   const [comparison, setComparison] = useState<{ key: string; data: AnalysisData } | null>(null);
   const posKey = positionKey(trial, headerEdits);
+  // The sync offset is left out: it moves the path relative to spikes, not the path absolutely.
   const trajectoryKey =
     data && trial?.pos
       ? `${posKey}|${settings.leds}|${settings.maxSpeed}|${settings.posSmooth}`
@@ -126,6 +127,7 @@ export function useAnalyses({
     settings.dirSmooth,
     settings.speedBin,
     settings.speedMax,
+    settings.syncMs,
     busy,
   ]);
 
@@ -138,6 +140,7 @@ export function useAnalyses({
     settings.leds,
     settings.maxSpeed,
     settings.posSmooth,
+    settings.syncMs,
     dragComparison?.target,
   ].join("|");
   useEffect(() => {

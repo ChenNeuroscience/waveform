@@ -12,6 +12,7 @@ const limits: Record<Exclude<keyof Settings, "renderMode">, [number, number]> = 
   leds: [1, 2],
   maxSpeed: [0, 10],
   posSmooth: [0, 2],
+  syncMs: [-1000, 1000],
   dirBin: [2, 30],
   dirSmooth: [0, 10],
   speedBin: [1, 10],
@@ -46,7 +47,7 @@ export function decodeSettings(text: string): Settings {
   fields.delete("waveform-settings");
   if (
     Object.keys(defaultSettings).some(
-      (key) => !["acBinMs", "dirSmooth"].includes(key) && !fields.has(key),
+      (key) => !["acBinMs", "dirSmooth", "syncMs"].includes(key) && !fields.has(key),
     )
   ) {
     throw new Error("Paste a complete Waveform settings mapping.");

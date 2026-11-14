@@ -195,7 +195,7 @@ describe("analysis", () => {
     new Uint8Array(w.memory.buffer, p, raw.length).set(raw);
     w.position_push(pos, p, raw.length);
     w.free_bytes(p, raw.length);
-    w.position_finish(pos, 1, 0, 0);
+    w.position_finish(pos, 1, 0, 0, 0);
     const result = analyse(
       w,
       e,

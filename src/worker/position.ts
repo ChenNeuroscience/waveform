@@ -19,7 +19,7 @@ export async function parsePosition(
 ): Promise<Position> {
   if (base) {
     return {
-      handle: w.position_variant(base.handle, s.leds, s.maxSpeed, s.posSmooth),
+      handle: w.position_variant(base.handle, s.leds, s.maxSpeed, s.posSmooth, s.syncMs),
       identity,
       header: base.header,
       ppm: base.ppm,
@@ -62,7 +62,7 @@ export async function parsePosition(
       ? w.position_used_extent(handle) || Math.max(maxX - minX, maxY - minY)
       : stated;
     w.position_set_ppm(handle, ppm);
-    w.position_finish(handle, s.leds, s.maxSpeed, s.posSmooth);
+    w.position_finish(handle, s.leds, s.maxSpeed, s.posSmooth, s.syncMs);
     return { handle, identity, header: h, ppm, ppmEstimated };
   } catch (e) {
     w.position_free(handle);

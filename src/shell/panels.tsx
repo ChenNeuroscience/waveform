@@ -205,7 +205,7 @@ export function SettingsPanel({
             step={0.25}
             unit="m/s"
             zeroLabel="Off"
-            zeroHint="Position jumps are not filtered."
+            hint={(v) => v === 0 && "Position jumps are not filtered."}
             onChange={(v) => update("maxSpeed", v)}
           />
           <Slider
@@ -216,8 +216,23 @@ export function SettingsPanel({
             step={0.1}
             unit="s"
             zeroLabel="Off"
-            zeroHint="Position coordinates are not smoothed."
+            hint={(v) => v === 0 && "Position coordinates are not smoothed."}
             onChange={(v) => update("posSmooth", v)}
+          />
+          <Slider
+            label="Position sync offset"
+            value={settings.syncMs}
+            min={-1000}
+            max={1000}
+            step={20}
+            unit="ms"
+            zeroLabel="Off"
+            hint={(v) =>
+              v === 0
+                ? "Position times are used as recorded."
+                : `${fmt(Math.abs(v))} ms ${v > 0 ? "added to" : "subtracted from"} position times.`
+            }
+            onChange={(v) => update("syncMs", v)}
           />
         </>
       ),
@@ -259,7 +274,7 @@ export function SettingsPanel({
             step={1}
             unit="bins"
             zeroLabel="Off"
-            zeroHint="Spatial smoothing is off."
+            hint={(v) => v === 0 && "Spatial smoothing is off."}
             onChange={(v) => update("smooth", v)}
           />
           <Slider
@@ -270,7 +285,7 @@ export function SettingsPanel({
             step={1}
             unit="Hz"
             zeroLabel="Auto"
-            zeroHint="Uses each cell's peak rate."
+            hint={(v) => v === 0 && "Uses each cell's peak rate."}
             onChange={(v) => update("maxRate", v)}
           />
           <Slider
@@ -323,7 +338,7 @@ export function SettingsPanel({
             step={1}
             unit="bins"
             zeroLabel="Off"
-            zeroHint="Directional smoothing is off."
+            hint={(v) => v === 0 && "Directional smoothing is off."}
             onChange={(v) => update("dirSmooth", v)}
           />
         </>
@@ -491,7 +506,7 @@ function Slider({
   step,
   unit = "",
   zeroLabel,
-  zeroHint,
+  hint,
   onChange,
 }: {
   label: string;
@@ -501,7 +516,8 @@ function Slider({
   step: number;
   unit?: string;
   zeroLabel?: "Off" | "Auto";
-  zeroHint?: string;
+  /** A note under the slider for the current value; falsy shows none. */
+  hint?: (n: number) => string | false | undefined;
   onChange: (n: number) => void;
 }) {
   const id = useId();
@@ -511,6 +527,7 @@ function Slider({
   };
   const state = value === 0 ? zeroLabel : undefined;
   const current = state || format(value);
+  const note = hint?.(value);
   return (
     <label className="slider-field" htmlFor={id} data-state={state?.toLowerCase()}>
       <span className="slider-heading">
@@ -523,7 +540,7 @@ function Slider({
         id={id}
         aria-label={label}
         aria-valuetext={current}
-        aria-describedby={state && zeroHint ? `${id}-hint` : undefined}
+        aria-describedby={note ? `${id}-hint` : undefined}
         type="range"
         value={value}
         min={min}
@@ -535,9 +552,9 @@ function Slider({
         <span>{min === 0 && zeroLabel ? zeroLabel : format(min)}</span>
         <span>{format(max)}</span>
       </span>
-      {state && zeroHint && (
+      {note && (
         <small className="slider-hint" id={`${id}-hint`}>
-          {zeroHint}
+          {note}
         </small>
       )}
     </label>

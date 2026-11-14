@@ -94,6 +94,8 @@ pub(crate) struct Position {
     min_x: f32,
     min_y: f32,
     bearing: f32,
+    /// Shift applied to position times, in seconds: sample i is at i / rate + sync.
+    sync: f64,
 }
 impl Position {
     fn new(n: usize, ppm: f32, rate: f64, min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> Self {
@@ -115,6 +117,7 @@ impl Position {
             min_x,
             min_y,
             bearing: 0.,
+            sync: 0.,
             derived: Default::default(),
         }
     }
@@ -166,8 +169,14 @@ impl Position {
             r.pixels.push([word(12), word(14)]);
         }
     }
-    fn process(&mut self, leds: u32, max_speed: f32, smoothing: f64) {
+    fn process(&mut self, leds: u32, max_speed: f32, smoothing: f64, sync_ms: f64) {
         self.derived = Default::default();
+        // Spike times are the reference; sync moves the position track against them.
+        self.sync = if sync_ms.is_finite() {
+            sync_ms.clamp(-10000., 10000.) / 1000.
+        } else {
+            0.
+        };
         let n = self.raw.spots.len();
         let (mut x1, mut y1, mut x2, mut y2) = (
             Vec::with_capacity(n),
@@ -291,7 +300,7 @@ impl Position {
         }
         std::cell::Ref::map(self.derived.borrow(), |d| d.path.as_ref().unwrap())
     }
-    fn variant(&self, leds: u32, max_speed: f32, smoothing: f64) -> Self {
+    fn variant(&self, leds: u32, max_speed: f32, smoothing: f64, sync_ms: f64) -> Self {
         let mut p = Self {
             raw: self.raw.clone(),
             x: vec![],
@@ -306,9 +315,10 @@ impl Position {
             min_x: self.min_x,
             min_y: self.min_y,
             bearing: self.bearing,
+            sync: 0.,
             derived: Default::default(),
         };
-        p.process(leds, max_speed, smoothing);
+        p.process(leds, max_speed, smoothing, sync_ms);
         p
     }
 }
@@ -498,8 +508,15 @@ fn analyse(
             p.derived.borrow_mut().occupancy = Some((key, maps.clone()));
             maps
         });
+        // Spike times are the reference clock; the position track was moved by
+        // `p.sync`, so a spike at time t takes the sample recorded at t - sync.
+        let shift = p.sync * tb;
         for &id in ids {
-            let cursor = (e.times[id as usize] as f64 * p.rate / tb).floor() as usize;
+            let at = (e.times[id as usize] as f64 - shift) * p.rate / tb;
+            if at < 0. {
+                continue;
+            }
+            let cursor = at.floor() as usize;
             if cursor >= p.x.len() {
                 continue;
             }
@@ -611,8 +628,9 @@ pub unsafe extern "C" fn position_finish(
     leds: u32,
     max_speed: f32,
     smoothing: f64,
+    sync_ms: f64,
 ) {
-    (*p).process(leds, max_speed, smoothing);
+    (*p).process(leds, max_speed, smoothing, sync_ms);
 }
 #[no_mangle]
 pub unsafe extern "C" fn position_variant(
@@ -620,8 +638,9 @@ pub unsafe extern "C" fn position_variant(
     leds: u32,
     max_speed: f32,
     smoothing: f64,
+    sync_ms: f64,
 ) -> *mut Position {
-    Box::into_raw(Box::new((*p).variant(leds, max_speed, smoothing)))
+    Box::into_raw(Box::new((*p).variant(leds, max_speed, smoothing, sync_ms)))
 }
 /// The trajectory (normalised x, y pairs), computed once per processed position.
 #[no_mangle]
@@ -757,7 +776,7 @@ mod tests {
         // A real half-turn exchanges positions, but not LED spot sizes.
         rows[7] = [30, 20, 20, 20, 30, 10];
         let mut p = recording(&rows, 100., 50.);
-        p.process(2, 0., 0.);
+        p.process(2, 0., 0., 0.);
         assert!((p.dir[7].abs() - std::f32::consts::PI).abs() < 1e-6);
         assert!(p.x.iter().all(|&x| x == 25.));
     }
@@ -775,12 +794,12 @@ mod tests {
                 })
                 .collect();
             let mut p = recording(&rows, 100., 50.);
-            p.process(2, 0., 0.);
+            p.process(2, 0., 0., 0.);
             assert!(p.dir.iter().all(|&d| d.abs() < 1e-6));
             assert!(p.x.iter().all(|&x| x == 25.));
-            let single = p.variant(1, 0., 0.);
+            let single = p.variant(1, 0., 0., 0.);
             assert_eq!(single.x[8], 30.);
-            let dual = single.variant(2, 0., 0.);
+            let dual = single.variant(2, 0., 0., 0.);
             assert!(dual.dir.iter().all(|&d| d.abs() < 1e-6));
             assert!(Arc::ptr_eq(&p.raw, &dual.raw));
             assert!(dual.raw.pixel_stats.get().is_some());
@@ -793,7 +812,7 @@ mod tests {
         // The summed-distance criterion alone would incorrectly swap these.
         rows[19] = [49, 80, 32, 80, 10, 30];
         let mut p = recording(&rows, 400., 50.);
-        p.process(2, 0., 0.);
+        p.process(2, 0., 0., 0.);
         assert!((p.dir[19].abs() - std::f32::consts::PI).abs() < 1e-6);
     }
     #[test]
@@ -825,7 +844,7 @@ mod tests {
             100.,
             1.,
         );
-        p.process(2, 0., 0.);
+        p.process(2, 0., 0., 0.);
         let mut e = Engine::new(1);
         e.times = vec![0];
         e.labels = vec![1];
@@ -900,7 +919,7 @@ mod tests {
     fn nominal_sampling_controls_dwell_speed_and_spike_assignment() {
         let rows: Vec<_> = (20..24).map(|x| [x, 20, 1023, 1023, 12, 0]).collect();
         let mut p = recording(&rows, 100., 50.);
-        p.process(1, 0., 0.);
+        p.process(1, 0., 0., 0.);
         for i in 0..4 {
             assert_eq!(p.dwell(i), Some(0.02));
         }
@@ -933,6 +952,43 @@ mod tests {
         assert!((a.meta[3] - 100.).abs() < 1e-3);
     }
     #[test]
+    fn sync_offset_moves_the_position_track_under_fixed_spikes() {
+        let rows: Vec<_> = (20..24).map(|x| [x, 20, 1023, 1023, 12, 0]).collect();
+        let mut p = recording(&rows, 100., 50.);
+        let mut e = Engine::new(4);
+        e.times = vec![0, 20, 40, 60];
+        e.labels = vec![1; 4];
+        let mut xs = |sync: f64| -> Vec<u32> {
+            p.process(1, 0., 0., sync);
+            analyse(
+                &mut e,
+                Some(&p),
+                1,
+                1000.,
+                1.,
+                1.,
+                0,
+                100.,
+                1.,
+                6.,
+                1,
+                4.,
+                100.,
+            )
+            .spikes
+            .chunks_exact(2)
+            .map(|xy| (xy[0] * 100.).round() as u32)
+            .collect()
+        };
+        assert_eq!(xs(0.), vec![20, 21, 22, 23]);
+        // Position moved 20 ms earlier: each spike meets the next sample; the last
+        // spike falls after the track ends.
+        assert_eq!(xs(-20.), vec![21, 22, 23]);
+        // Position moved 40 ms later: spikes before the track starts are dropped.
+        assert_eq!(xs(40.), vec![20, 21]);
+        assert_eq!(xs(f64::NAN), vec![20, 21, 22, 23]);
+    }
+    #[test]
     fn jump_filter_uses_elapsed_sample_count() {
         let mut p = recording(
             &[
@@ -943,7 +999,7 @@ mod tests {
             100.,
             50.,
         );
-        p.process(1, 4., 0.);
+        p.process(1, 4., 0., 0.);
         assert_eq!(p.x, vec![20., 20., 20.]);
         let mut p = recording(
             &[
@@ -954,13 +1010,13 @@ mod tests {
             100.,
             50.,
         );
-        p.process(1, 4., 0.);
+        p.process(1, 4., 0., 0.);
         assert_eq!(p.x, vec![20., 25., 30.]);
     }
     #[test]
     fn smoothing_retains_the_original_unvisited_bin_mask() {
         let mut p = recording(&vec![[5, 5, 1023, 1023, 12, 0]; 100], 100., 50.);
-        p.process(1, 0., 0.);
+        p.process(1, 0., 0., 0.);
         let mut e = Engine::new(10);
         e.times = (0..10).map(|i| i * 100).collect();
         e.labels = vec![1; 10];
@@ -987,7 +1043,7 @@ mod tests {
     #[test]
     fn every_visited_bin_is_valid_even_with_submillisecond_dwell() {
         let mut p = recording(&[[5, 5, 1023, 1023, 12, 0]], 100., 2000.);
-        p.process(1, 0., 0.);
+        p.process(1, 0., 0., 0.);
         let mut e = Engine::new(1);
         e.times = vec![0];
         e.labels = vec![1];
@@ -1025,6 +1081,7 @@ mod tests {
             min_x: 0.,
             min_y: 0.,
             bearing: 0.,
+            sync: 0.,
             derived: Default::default(),
         };
         let mut e = Engine::new(3);
