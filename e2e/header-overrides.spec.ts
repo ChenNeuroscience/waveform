@@ -61,4 +61,19 @@ test("an uncalibrated position is guessed at, and its header can be edited and r
   await page.getByRole("button", { name: "Reset position headers" }).click();
   await expect(row).toContainText("estimated, file says NaN");
   await expect(warning).toBeVisible();
+
+  // The sync offset applies as it's stepped, without Enter; Escape puts it back.
+  const sync = page.locator(".headers-list > div", { hasText: "sync_offset_ms" }).first();
+  await expect(sync).toContainText("editable, but not a real header in the file");
+  await page.getByRole("button", { name: "Change sync_offset_ms" }).click();
+  const offset = page.getByLabel("New sync_offset_ms");
+  await offset.press("ArrowUp");
+  await offset.press("ArrowUp");
+  await expect(offset).toHaveValue("40");
+  // Applied already: the file now has an edit to reset.
+  const reset = page.getByRole("button", { name: "Reset position headers" });
+  await expect(reset).toBeVisible();
+  await offset.press("Escape");
+  await expect(sync).toContainText("editable, but not a real header in the file");
+  await expect(reset).toHaveCount(0);
 });

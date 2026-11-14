@@ -15,6 +15,7 @@ import { usePreference } from "../preferences";
 import { decodeSettings, encodeSettings } from "../app/settings-clipboard";
 import type { HeaderEdits, HistoryEntry, Settings } from "../types";
 import {
+  clearHeader,
   editHeader,
   headerRows,
   headerRule,
@@ -560,7 +561,9 @@ function Shortcut({ keys, text }: { keys: string; text: string }) {
     </div>
   );
 }
-/** A header that can be changed: its value, where that came from, and the box to change it. */
+/** A header that can be changed: its value, where that came from, and the box to change it.
+ * Valid values apply as they're typed or stepped, like the Settings sliders; Escape puts back
+ * what it was before editing began. */
 function EditableHeader({
   section,
   name,
@@ -572,14 +575,17 @@ function EditableHeader({
   name: string;
   value: string;
   note: string;
-  onChange: (value: string) => void;
+  /** A new value, or undefined to remove the edit. */
+  onChange: (value: string | undefined) => void;
 }) {
   const [text, setText] = useState<string | null>(null);
+  // What to put back on Escape: the edit there was, or none.
+  const [before, setBefore] = useState<string | undefined>();
   const valid = (t: string) => validHeader(section, name, t);
-  const finish = () => {
-    if (text !== null && valid(text)) {
-      onChange(text.trim());
-      setText(null);
+  const type = (next: string) => {
+    setText(next);
+    if (valid(next)) {
+      onChange(next.trim());
     }
   };
   if (text === null) {
@@ -590,7 +596,10 @@ function EditableHeader({
         <button
           title={`Change ${name}, in this browser only`}
           aria-label={`Change ${name}`}
-          onClick={() => setText(valid(value) ? value : "")}
+          onClick={() => {
+            setBefore(note.startsWith("edited") ? value : undefined);
+            setText(valid(value) ? value : "");
+          }}
         >
           <Pencil size={11} />
         </button>
@@ -605,19 +614,23 @@ function EditableHeader({
         aria-invalid={!valid(text)}
         inputMode="decimal"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => type(e.target.value)}
         onKeyDown={(e) => {
           e.stopPropagation();
           if (e.key === "Enter") {
-            finish();
+            // Kept open over an invalid value, so its rule stays in view.
+            if (valid(text)) {
+              setText(null);
+            }
           } else if (e.key === "Escape") {
+            onChange(before);
             setText(null);
           } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
             e.preventDefault();
-            setText(stepHeader(section, name, text, e.key === "ArrowUp" ? 1 : -1));
+            type(stepHeader(section, name, text, e.key === "ArrowUp" ? 1 : -1));
           }
         }}
-        onBlur={() => (valid(text) ? finish() : setText(null))}
+        onBlur={() => setText(null)}
       />
       {!valid(text) && <em>{headerRule(section, name)}</em>}
     </dd>
@@ -666,7 +679,11 @@ export function HeadersPanel({ c }: { c: PanelContext }) {
                         value={r.value}
                         note={r.note}
                         onChange={(value) =>
-                          c.setHeaderEdits((all) => editHeader(all, id, r.key, value))
+                          c.setHeaderEdits((all) =>
+                            value === undefined
+                              ? clearHeader(all, id, r.key)
+                              : editHeader(all, id, r.key, value),
+                          )
                         }
                       />
                     ) : (
