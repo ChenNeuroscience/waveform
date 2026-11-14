@@ -1,5 +1,11 @@
 // IndexedDB adapter only. Patch generation and application are Rust operations.
-export async function openStore(): Promise<IDBDatabase> {
+let store: Promise<IDBDatabase> | undefined;
+/** The worker's store (patches by id), opened once. */
+export function openStore(): Promise<IDBDatabase> {
+  store ??= open();
+  return store;
+}
+async function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const r = indexedDB.open("waveform-v2", 1);
     r.onupgradeneeded = () => r.result.createObjectStore("data");

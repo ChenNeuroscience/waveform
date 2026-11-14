@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseHeader, organiseFiles } from "../src/files";
-import { corePromise, decodeCut as readCut, seedEngine } from "./wasm";
-import { analysis, trajectory, type ComputeInputs } from "../src/worker/position";
+import { corePromise, decodeCut as readCut, seedRecording } from "./wasm";
+import { analysis, ask, command, trajectory, type ComputeInputs } from "../src/worker/compute";
 import { ANALYSIS_PARTS } from "../src/types";
 import { defaultSettings } from "../src/types";
 import { fitGrid, projectionFrame, waveX, waveY, wavePoint } from "../src/plots/plot-geometry";
@@ -97,31 +97,25 @@ describe("LTX import", () => {
     ).rejects.toThrow("tetrode");
   });
 });
-describe("undo delta integrity", () => {
-  it("restores sparse and dense Rust patches byte-for-byte", async () => {
+describe("undo through the edit history", () => {
+  it("keeps each edit's labels under its history, and the earlier ones under theirs", async () => {
     const w = await corePromise;
     for (const n of [1, 3, 10000]) {
-      const before = Uint16Array.from({ length: n }, (_, i) => i % 101),
-        after = before.slice(),
-        e = w.engine_new(n);
-      new Uint16Array(w.memory.buffer, w.engine_labels(e), n).set(before);
-      w.engine_edit_begin(e);
-      for (let i = 0; i < n; i += n > 3 ? 100 : 1) after[i] = 99;
-      new Uint16Array(w.memory.buffer, w.engine_labels(e), n).set(after);
-      w.engine_edit_finish(e);
-      const bytes = new Uint8Array(
-          w.memory.buffer,
-          w.engine_patch(e),
-          w.engine_patch_len(e),
-        ).slice(),
-        p = w.alloc_bytes(bytes.length);
-      new Uint8Array(w.memory.buffer, p, bytes.length).set(bytes);
-      expect(w.engine_patch_apply(e, p, bytes.length, 0)).toBe(0);
-      expect(new Uint16Array(w.memory.buffer, w.engine_labels(e), n).slice()).toEqual(before);
-      expect(w.engine_patch_apply(e, p, bytes.length, 1)).toBe(0);
-      expect(new Uint16Array(w.memory.buffer, w.engine_labels(e), n).slice()).toEqual(after);
-      w.free_bytes(p, bytes.length);
-      w.engine_free(e);
+      const before = Array.from({ length: n }, (_, i) => i % 101);
+      const recording = await seedRecording(Array(n).fill(0), before);
+      const at = async (history: string[]) =>
+        (await ask(w, { settings: defaultSettings, recording: { ...recording, history } }, "view"))
+          .buffers.labels as Uint16Array;
+      expect([...(await at([]))]).toEqual(before);
+      const { changed } = await command(
+        w,
+        { settings: defaultSettings, recording, patch: "edit" },
+        () => w.command_relabel(n > 3 ? 1 : 0, 99, 0),
+      );
+      expect(changed).toBe(before.filter((c) => c === (n > 3 ? 1 : 0)).length);
+      const after = before.map((c) => (c === (n > 3 ? 1 : 0) ? 99 : c));
+      expect([...(await at(["edit"]))]).toEqual(after);
+      expect([...(await at([]))]).toEqual(before);
     }
   });
 });
@@ -156,43 +150,37 @@ describe("analysis", () => {
       pos: new File([header, raw], "test.pos"),
       posFile: "clock|test.pos",
       settings: opts,
-      recording: "clock",
+      recording: await seedRecording([960, 2880, 4800], [1, 1, 1], {
+        timebase: 96000,
+        duration: 0.08,
+      }),
     };
-    const e = seedEngine(w, [960, 2880, 4800], [1, 1, 1]);
-    try {
-      const cell = { engine: e, cell: 1, tb: 96000, duration: 0.08 };
-      const a = (await analysis(w, inputs, cell, ANALYSIS_PARTS))!;
+    {
+      const a = await analysis(w, inputs, 1, ANALYSIS_PARTS);
       expect([...(await trajectory(w, inputs))!.path]).toEqual(
         [0.2, 0.1, 0.3, 0.1, 0.4, 0.1, 0.5, 0.1].map(Math.fround),
       );
       expect([...a.spikes]).toEqual([0.2, 0.1, 0.3, 0.1, 0.4, 0.1].map(Math.fround));
       expect(a.direction[3]).toBeGreaterThan(0);
       expect(a.spatial[12]).toBeCloseTo(50);
-    } finally {
-      w.engine_free(e);
     }
   });
   it("passes temporal bin widths to Rust independently of the lag window", async () => {
     const w = await corePromise;
-    const e = seedEngine(w, [0, 5, 15, 25], [1, 1, 1, 1]);
-    try {
-      const run = async (acWindow: number, acBinMs: number) =>
-        (await analysis(
-          w,
-          { settings: { ...defaultSettings, acWindow, acBinMs }, recording: "ac-widths" },
-          { engine: e, cell: 1, tb: 1000, duration: 1 },
-          ["ac"],
-        ))!.ac;
-      expect([...(await run(20, 5))]).toEqual([0, 1, 2, 1]);
-      expect([...(await run(18, 7))]).toEqual([1, 2, 1]);
-      expect([...(await run(20, 50))]).toEqual([4]);
-    } finally {
-      w.engine_free(e);
-    }
+    const recording = await seedRecording([0, 5, 15, 25], [1, 1, 1, 1], { duration: 1 });
+    const run = async (acWindow: number, acBinMs: number) =>
+      (
+        await analysis(w, { settings: { ...defaultSettings, acWindow, acBinMs }, recording }, 1, [
+          "ac",
+        ])
+      ).ac;
+    expect([...(await run(20, 5))]).toEqual([0, 1, 2, 1]);
+    expect([...(await run(18, 7))]).toEqual([1, 2, 1]);
+    expect([...(await run(20, 50))]).toEqual([4]);
   });
   it("normalises spikes by dwell time and excludes self from autocorrelation in Rust", async () => {
     const w = await corePromise;
-    const e = seedEngine(w, [100, 1100, 2100], [1, 1, 1]);
+    const recording = await seedRecording([100, 1100, 2100], [1, 1, 1], { duration: 3 });
     // 1 Hz: two samples at (1, 1), then two at (8, 8), in a 10 by 10 window.
     const header =
       "pos_format t,x1,y1,x2,y2,numpix1,numpix2\nnum_pos_samples 4\npixels_per_metre 100\nsample_rate 1 hz\nwindow_min_x 0\nwindow_min_y 0\nwindow_max_x 10\nwindow_max_y 10\r\ndata_start";
@@ -210,23 +198,21 @@ describe("analysis", () => {
       pos: new File([header, raw], "dwell.pos"),
       posFile: "dwell|dwell.pos",
       settings: { ...settings, leds: 1, maxSpeed: 0, posSmooth: 0 },
-      recording: "dwell",
+      recording,
     });
-    const cell = { engine: e, cell: 1, tb: 1000, duration: 3 };
-    try {
+    const cell = 1;
+    {
       const settings = { ...defaultSettings, binCm: 5, smooth: 0, scMinOverlap: 2 };
-      const result = (await analysis(w, inputs(settings), cell, ["stats", "spatial", "ac"]))!;
+      const result = await analysis(w, inputs(settings), cell, ["stats", "spatial", "ac"]);
       expect(result.spatial[0]).toBe(1);
       expect(result.spatial[3]).toBe(0.5);
       expect(result.ac.reduce((a, b) => a + b, 0)).toBe(0);
       expect(result.rate).toBe(1);
       expect(result.spatialAc).toBeUndefined();
-      const withSc = (await analysis(w, inputs(settings), cell, ["spatial", "sc"]))!;
+      const withSc = await analysis(w, inputs(settings), cell, ["spatial", "sc"]);
       expect(withSc.spatialAc).toHaveLength(9);
       expect(withSc.spatialAc![4]).toBeCloseTo(1);
       expect(Number.isNaN(withSc.spatialAc![0])).toBe(true);
-    } finally {
-      w.engine_free(e);
     }
   });
 });

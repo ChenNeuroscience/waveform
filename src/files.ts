@@ -168,12 +168,13 @@ export async function organiseFiles(
   return { trials, ignored };
 }
 /** Browser I/O bridge: label tokenisation and validation happen inside Rust. */
+/** Parses a cut (or .clu) file for `n` spikes into a new parser handle, for the compute
+ * graph to take (`compute_supply_cut`). */
 export async function readCut(
   file: File,
   n: number,
   wasm: import("./worker/wasm").Core,
-  engine: number,
-): Promise<void> {
+): Promise<number> {
   const clu = /\.clu\.\d+$/i.test(file.name);
   let start = 0;
   if (!clu) {
@@ -196,22 +197,25 @@ export async function readCut(
   };
   const chunk = 1 << 20;
   const p = wasm.alloc_bytes(chunk);
-  wasm.engine_cut_begin(engine, clu ? 1 : 0);
+  const parser = wasm.cut_new(n, clu ? 1 : 0);
   try {
     for (let first = start; first < file.size; first += chunk) {
       const bytes = new Uint8Array(await file.slice(first, first + chunk).arrayBuffer());
       new Uint8Array(wasm.memory.buffer, p, bytes.length).set(bytes);
-      const status = wasm.engine_cut_feed(engine, p, bytes.length);
+      const status = wasm.cut_feed(parser, p, bytes.length);
       if (status) {
         throw new Error(`${file.name}: ${errors[status]}`);
       }
     }
-    const status = wasm.engine_cut_finish(engine);
+    const status = wasm.cut_finish(parser);
     if (status) {
       throw new Error(`${file.name}: ${errors[status]}`);
     }
+    return parser;
+  } catch (error) {
+    wasm.cut_free(parser);
+    throw error;
   } finally {
-    wasm.engine_cut_abort(engine);
     wasm.free_bytes(p, chunk);
   }
 }

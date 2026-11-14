@@ -3,11 +3,12 @@ import {
   HANDLERS,
   COMPUTE_INPUTS,
   analysis,
+  command,
   trajectory,
   type ComputeInputs,
-} from "../src/worker/position";
+} from "../src/worker/compute";
 import { defaultSettings, reuseParts, type AnalysisPart } from "../src/types";
-import { corePromise, seedEngine } from "./wasm";
+import { corePromise, seedRecording } from "./wasm";
 
 /** A 50 Hz .pos whose first LED moves one pixel right each sample. */
 function pos(samples = 4) {
@@ -44,79 +45,68 @@ describe("the worker's compute graph", () => {
 
   it("keys each part on everything beneath it, except what its handler ignores", async () => {
     const w = await corePromise;
-    const e = seedEngine(w, [0, 20, 40, 60], [1, 1, 1, 1]);
     const inputs: ComputeInputs = {
       pos: pos(),
       posFile: "compute-test|trial.pos",
       settings: { ...defaultSettings, posSmooth: 0, maxSpeed: 0 },
-      recording: "compute-test|t1",
-      // Named by cut, so lookups without the engine (which membership hashes need) can hit.
-      cellPrefix: "cut|0",
+      recording: await seedRecording([0, 20, 40, 60], [1, 1, 1, 1], { duration: 1 }),
     };
     const parts: AnalysisPart[] = ["stats", "spatial", "speed", "speedDwell", "spikes"];
-    const at = (i: ComputeInputs, engine = 0) =>
-      analysis(w, i, { engine, cell: 1, tb: 1000, duration: 1 }, parts);
-    try {
-      // Only computed once there is an engine; then found without one.
-      expect(await at(inputs)).toBeUndefined();
-      const first = (await at(inputs, e))!;
-      expect(first.count).toBe(4);
-      expect((await at(inputs))!.keys).toEqual(first.keys);
-      const path = (await trajectory(w, inputs))!;
+    const at = (i: ComputeInputs) => analysis(w, i, 1, parts);
+    const first = await at(inputs);
+    expect(first.count).toBe(4);
+    expect((await at(inputs)).keys).toEqual(first.keys);
+    const path = (await trajectory(w, inputs))!;
 
-      // The colour settings are only for drawing, so they change no key.
-      const coloured = { ...inputs, settings: { ...inputs.settings, maxRate: 9, rateMapSteps: 3 } };
-      expect((await at(coloured))!.keys).toEqual(first.keys);
+    // The colour settings are only for drawing, so they change no key.
+    const coloured = { ...inputs, settings: { ...inputs.settings, maxRate: 9, rateMapSteps: 3 } };
+    expect((await at(coloured)).keys).toEqual(first.keys);
 
-      // The sync offset moves spikes along the path: not the path, its dwell or the stats.
-      const synced = { ...inputs, sync: -20 };
-      expect(await at(synced)).toBeUndefined();
-      const moved = (await at(synced, e))!;
-      expect(moved.keys.spatial).not.toBe(first.keys.spatial);
-      expect(moved.keys.spikes).not.toBe(first.keys.spikes);
-      expect(moved.keys.speedDwell).toBe(first.keys.speedDwell);
-      expect(moved.keys.stats).toBe(first.keys.stats);
-      expect((await trajectory(w, synced))!.key).toBe(path.key);
-      expect([...moved.spikes]).not.toEqual([...first.spikes]);
-      // An edit of 0 is no edit.
-      expect((await at({ ...inputs, sync: 0 }))!.keys).toEqual(first.keys);
+    // The sync offset moves spikes along the path: not the path, its dwell or the stats.
+    const synced = { ...inputs, sync: -20 };
+    const moved = await at(synced);
+    expect(moved.keys.spatial).not.toBe(first.keys.spatial);
+    expect(moved.keys.spikes).not.toBe(first.keys.spikes);
+    expect(moved.keys.speedDwell).toBe(first.keys.speedDwell);
+    expect(moved.keys.stats).toBe(first.keys.stats);
+    expect((await trajectory(w, synced))!.key).toBe(path.key);
+    expect([...moved.spikes]).not.toEqual([...first.spikes]);
+    // An edit of 0 is no edit.
+    expect((await at({ ...inputs, sync: 0 })).keys).toEqual(first.keys);
 
-      // A new bin width is made from the cached spike samples, so needs no engine; only
-      // the rate map changes.
-      const binned = (await at({ ...inputs, settings: { ...inputs.settings, binCm: 2 } }))!;
-      expect(binned.keys.spatial).not.toBe(first.keys.spatial);
-      expect({ ...binned.keys, spatial: "" }).toEqual({ ...first.keys, spatial: "" });
-      // Another trial's identical file is a different position.
-      const other = { ...inputs, posFile: "other|trial.pos" };
-      expect(await at(other)).toBeUndefined();
+    // A new bin width changes only the rate map.
+    const binned = await at({ ...inputs, settings: { ...inputs.settings, binCm: 2 } });
+    expect(binned.keys.spatial).not.toBe(first.keys.spatial);
+    expect({ ...binned.keys, spatial: "" }).toEqual({ ...first.keys, spatial: "" });
+    // Another trial's identical file is a different position, though its stats aren't.
+    const other = await at({ ...inputs, posFile: "other|trial.pos" });
+    expect(other.keys.spatial).not.toBe(first.keys.spatial);
+    expect(other.keys.stats).toBe(first.keys.stats);
 
-      // Held parts with unchanged keys keep their arrays, so their plots needn't redraw.
-      const kept = reuseParts(first, binned);
-      expect(kept.speed).toBe(first.speed);
-      expect(kept.spatial).toBe(binned.spatial);
-      expect(reuseParts(first, (await at(inputs))!)).toBe(first);
-    } finally {
-      w.engine_free(e);
-    }
+    // Held parts with unchanged keys keep their arrays, so their plots needn't redraw.
+    const kept = reuseParts(first, binned);
+    expect(kept.speed).toBe(first.speed);
+    expect(kept.spatial).toBe(binned.spatial);
+    expect(reuseParts(first, await at(inputs))).toBe(first);
   });
 
-  it("finds a recording's analyses by cut and revision without its spikes", async () => {
+  it("keys a cell's analyses by its spikes, so edits elsewhere leave them", async () => {
     const w = await corePromise;
-    const e = seedEngine(w, [0, 20], [2, 2]);
-    const inputs: ComputeInputs = {
-      settings: defaultSettings,
-      recording: "compute-test|t2",
-      cellPrefix: "cut-a|0",
-    };
-    const cell = (engine: number) => ({ engine, cell: 2, tb: 1000, duration: 1 });
-    try {
-      expect(await analysis(w, inputs, cell(0), ["stats", "ac"])).toBeUndefined();
-      const computed = (await analysis(w, inputs, cell(e), ["stats", "ac"]))!;
-      expect((await analysis(w, inputs, cell(0), ["stats", "ac"]))!.keys).toEqual(computed.keys);
-      const nextRevision = { ...inputs, cellPrefix: "cut-a|1" };
-      expect(await analysis(w, nextRevision, cell(0), ["stats", "ac"])).toBeUndefined();
-    } finally {
-      w.engine_free(e);
-    }
+    const recording = await seedRecording([0, 20, 40, 60], [1, 1, 2, 3], { duration: 1 });
+    const inputs: ComputeInputs = { settings: defaultSettings, recording };
+    const keys = async (history: string[], cell: number) =>
+      (
+        await analysis(w, { ...inputs, recording: { ...recording, history } }, cell, [
+          "stats",
+          "ac",
+        ])
+      ).keys;
+    const [one, two] = [await keys([], 1), await keys([], 2)];
+    await command(w, { ...inputs, patch: "merge" }, () => w.command_relabel(3, 2, 0));
+    expect(await keys(["merge"], 1)).toEqual(one);
+    expect(await keys(["merge"], 2)).not.toEqual(two);
+    // Swapping two cells' numbers keeps each set of spikes' analyses.
+    await command(w, { ...inputs, patch: "swap" }, () => w.command_relabel(1, 2, 1));
+    expect(await keys(["swap"], 2)).toEqual(one);
   });
 });

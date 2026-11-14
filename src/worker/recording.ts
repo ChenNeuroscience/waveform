@@ -1,25 +1,17 @@
-import { parseHeader, readCut } from "../files";
+import { parseHeader } from "../files";
 import type { Header } from "../types";
 import { Superseded } from "./protocol";
 import { streamFile, type Core } from "./wasm";
 
-/** Stream a recording's population into an engine; raw waveforms are never retained. */
-export async function readRecording(
-  wasm: Core,
-  file: File,
-  cut?: File,
-  options: {
-    current?: () => boolean;
-    progress?: (fraction: number, spikes: number) => void;
-  } = {},
-): Promise<{ e: number; n: number; header: Header; offset: number; file: File; ms: number }> {
-  const start = performance.now();
-  const check = () => {
-    if (options.current && !options.current()) {
-      throw new Superseded("Superseded recording read.");
-    }
-  };
-  check();
+/** A tetrode file's header, where its spikes start, and how many there are. */
+export interface RecordingHeader {
+  header: Header;
+  offset: number;
+  n: number;
+}
+
+/** Reads and checks a tetrode file's header. */
+export async function readHeader(file: File): Promise<RecordingHeader> {
   const head = new Uint8Array(await file.slice(0, 65536).arrayBuffer());
   const { header, offset } = parseHeader(head);
   let n = parseInt(header.num_spikes);
@@ -46,12 +38,28 @@ export async function readRecording(
   ) {
     throw new Error("Invalid/truncated tetrode or unsupported spike count.");
   }
-  check();
-  const e = wasm.engine_new(n);
-  try {
-    if (cut) {
-      await readCut(cut, n, wasm, e);
+  return { header, offset, n };
+}
+
+/** Streams a recording's spikes into a new population handle, for the compute graph to take
+ * (`compute_supply_population`). Raw waveforms are never kept. */
+export async function readPopulation(
+  wasm: Core,
+  file: File,
+  { offset, n }: RecordingHeader,
+  options: {
+    current?: () => boolean;
+    progress?: (fraction: number, spikes: number) => void;
+  } = {},
+): Promise<number> {
+  const check = () => {
+    if (options.current && !options.current()) {
+      throw new Superseded("Superseded recording read.");
     }
+  };
+  check();
+  const population = wasm.population_new(n);
+  try {
     await streamFile(
       wasm,
       file,
@@ -60,15 +68,14 @@ export async function readRecording(
       32768 * 216,
       (p, bytes) => {
         check();
-        wasm.engine_push(e, p, bytes);
+        wasm.population_push(population, p, bytes);
       },
       (fraction) => options.progress?.(fraction, n),
     );
     check();
-    wasm.engine_recount(e);
-    return { e, n, header, offset, file, ms: performance.now() - start };
+    return population;
   } catch (error) {
-    wasm.engine_free(e);
+    wasm.population_free(population);
     throw error;
   }
 }

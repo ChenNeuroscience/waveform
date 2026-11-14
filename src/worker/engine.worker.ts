@@ -1,46 +1,66 @@
 /// <reference lib="webworker" />
-// Owns browser handles and asynchronous scheduling. Rust owns population data and
-// every loop over spike, label, waveform and position records.
+// Owns browser handles and asynchronous scheduling. Everything computed (spikes, labels,
+// waveform order, PCA, positions and analyses) comes from Rust's compute graph
+// (core/src/compute.rs) through compute.ts, which reads the files it says it needs. What is
+// kept here is which recordings and cuts exist and each cut's edit history, as patch ids.
 import { demoFiles, recordingSource } from "./demo";
-import { parseHeader, textHeader, readCut } from "../files";
-import type { AnalysisData, AnalysisPart, Header, HistoryEntry, ViewMessage } from "../types";
-import { analysis, positionHeader, trajectory, type ComputeInputs } from "./position";
-import { openStore, put, get } from "./history";
-import { streamFile, copyU8, copyU16, copyU32, withU16, withF32, type Core } from "./wasm";
+import { parseHeader, textHeader } from "../files";
+import {
+  defaultSettings,
+  fileId,
+  type AnalysisData,
+  type AnalysisPart,
+  type Header,
+  type HistoryEntry,
+  type ViewMessage,
+} from "../types";
+import {
+  analysis,
+  ask,
+  command,
+  exportLabels,
+  positionHeader,
+  trajectory,
+  type ComputeInputs,
+  type RecordingSource,
+} from "./compute";
+import { openStore, put } from "./history";
+import { streamFile, copyU8, withU16, withF32, type Core } from "./wasm";
 import { Superseded } from "./protocol";
-import { readRecording } from "./recording";
-import { fitPca } from "./pca";
+import { readHeader, type RecordingHeader } from "./recording";
 import type { RequestType, WorkerMessage, WorkerResult } from "./protocol";
-interface Asset {
+
+/** A recording: its file (or synthetic stand-in) and header. Its spikes are read into the
+ * compute graph when first needed. */
+interface Recording extends RecordingHeader {
   key: string;
-  wasm: Core;
-  e: number;
-  n: number;
-  header: Header;
-  offset: number;
   file: File;
-  ms: number;
-  last: number;
-  pcaKey?: string;
+  /** From the header, or (once its spikes are read) its last spike. */
+  duration: number;
 }
+/** A recording with a cut: where its labels start, and the edits made since. */
 interface Session {
   key: string;
   asset: string;
+  cut?: File;
+  cutSource: string;
+  /** Applied edits, oldest first; each `id` names its patch. */
   undo: HistoryEntry[];
   redo: HistoryEntry[];
+  /** A split being previewed: a patch shown but not yet applied. */
+  preview?: { id: string; patch: Uint8Array; changed: number };
   dirty: boolean;
   revision: number;
   n: number;
   localCut?: { id: string; name: string };
 }
-const assets = new Map<string, Asset>();
+const recordings = new Map<string, Recording>();
 const sessions = new Map<string, Session>();
 let wasmPromise: Promise<Core>;
 let latestLoad = 0;
 let latestCopy = 0;
 let latestFeatures = 0;
 let active: Session | undefined;
-let activeAsset: Asset | undefined;
 const dbPromise = openStore();
 let latestAnalysisBatch = "";
 let splitState: { source: number; channel: number; sample: number; threshold: number } | undefined;
@@ -48,18 +68,32 @@ let currentHeaders: Record<string, Header> = {};
 // Amplitudes and timestamps never change for a recording, so they are sent only
 // when the recording changes; client.ts reattaches them to later views.
 let populationSent = "";
-const labels = (a: Asset) => new Uint16Array(a.wasm.memory.buffer, a.wasm.engine_labels(a.e), a.n);
-const times = (a: Asset) => new Uint32Array(a.wasm.memory.buffer, a.wasm.engine_times(a.e), a.n);
-const counts = (a: Asset) => new Uint32Array(a.wasm.memory.buffer, a.wasm.engine_counts(a.e), 1024);
-const resident = () =>
-  [...assets.values()].reduce((n, a) => n + a.wasm.engine_resident_bytes(a.e), 0);
 function progress(id: number, value: number, message: string) {
   self.postMessage({ id, progress: value, message });
 }
-async function saveActive() {
-  if (active && activeAsset) {
-    await put(await dbPromise, `labels:${active.key}`, labels(activeAsset).slice());
+async function recordingFor(w: Core, key: string, file: File): Promise<Recording> {
+  let r = recordings.get(key);
+  if (!r) {
+    const source = recordingSource(w, file);
+    const header = await readHeader(source);
+    r = { key, file: source, ...header, duration: parseFloat(header.header.duration) || 0 };
+    recordings.set(key, r);
   }
+  return r;
+}
+/** A session as the compute graph takes it: its recording and history, with a previewed
+ * split unless `preview` is false. */
+function source(s: Session, preview = true): RecordingSource {
+  const r = recordings.get(s.asset)!;
+  return {
+    ...r,
+    cut: s.cut,
+    cutSource: s.cutSource,
+    history: [...s.undo.map((e) => e.id), ...(preview && s.preview ? [s.preview.id] : [])],
+  };
+}
+function inputs(s: Session, extra: Partial<ComputeInputs> = {}): ComputeInputs {
+  return { settings: defaultSettings, recording: source(s), ...extra };
 }
 function forkSession(s: Session, descriptor: any): Session {
   if (!descriptor || typeof descriptor.id !== "string" || typeof descriptor.name !== "string") {
@@ -74,6 +108,7 @@ function forkSession(s: Session, descriptor: any): Session {
     key,
     undo: [...s.undo],
     redo: [...s.redo],
+    preview: undefined,
     localCut: { id: descriptor.id, name: descriptor.name },
   };
 }
@@ -84,106 +119,91 @@ function acceptSession(s: Session) {
     currentHeaders.cut = { file: s.localCut.name, source: "Modified cut" };
   }
 }
-function exportLabels(w: Core, e: number, n: number, trial: string, format: string): Blob {
-  const max = new Uint32Array(w.memory.buffer, w.engine_counts(e), 1024).findLastIndex(
-    (c) => c > 0,
-  );
-  const parts: BlobPart[] = [];
-  parts.push(
+/** Keeps an edit: its patch, then it in the session's history (forking a local cut first
+ * if asked). Nothing changes if the patch can't be stored. */
+async function record(
+  s: Session,
+  entry: HistoryEntry,
+  patch: Uint8Array,
+  newCut: unknown,
+): Promise<Session> {
+  try {
+    await put(await dbPromise, `patch:${entry.id}`, patch);
+  } catch (error) {
+    throw new Error(`Edit rolled back: undo storage is unavailable (${String(error)}).`);
+  }
+  s.preview = undefined;
+  s = forkSession(s, newCut);
+  s.undo.push(entry);
+  s.redo = [];
+  s.dirty = true;
+  s.revision++;
+  acceptSession(s);
+  return s;
+}
+async function exportBlob(w: Core, s: Session, trial: string, format: "cut" | "clu") {
+  const i = inputs(s, { recording: source(s, false) });
+  const counts = (await ask(w, i, "view")).buffers.counts as Uint32Array;
+  const max = counts.findLastIndex((c) => c > 0);
+  const head =
     format === "clu"
       ? `${max + 1}\n`
-      : `n_clusters: ${max + 1}\nn_channels: 4\nn_params: 0\ntimes_used_in_Vt: 0 0 0 0\n${Array.from({ length: max + 1 }, (_, i) => `cluster: ${i} center: 0 0 0 0 0 0 0 0\nmin: 0 0 0 0 0 0 0 0\nmax: 0 0 0 0 0 0 0 99\n`).join("")}\nExact_cut_for: ${trial} spikes: ${n}\n`,
-  );
-  for (let first = 0; first < n; first += 65536) {
-    w.engine_export_chunk(e, first, 65536, format === "clu" ? 1 : 0);
-    parts.push(copyU8(w, w.engine_output(e), w.engine_output_len(e)).buffer);
-  }
-  return new Blob(parts, { type: "application/octet-stream" });
-}
-function evict(required: number) {
-  for (const [key, a] of [...assets].sort((a, b) => a[1].last - b[1].last)) {
-    if (resident() + required <= 384 * 1024 * 1024) {
-      break;
-    }
-    if (active?.asset === key) {
-      continue;
-    }
-    assets.delete(key);
-    a.wasm.engine_free(a.e);
-  }
-}
-async function loadAsset(
-  file: File,
-  cut: File | undefined,
-  id: number,
-  key: string,
-): Promise<Asset> {
-  const cached = assets.get(key);
-  if (cached) {
-    cached.last = performance.now();
-    return cached;
-  }
-  evict(Math.ceil(file.size / 216) * 12 + 30000000);
-  const wasm = await wasmPromise;
-  const recording = await readRecording(wasm, file, cut, {
-    current: () => id === latestLoad,
-    progress: (fraction, n) =>
-      progress(
-        id,
-        fraction,
-        `Preparing ${Math.round(fraction * n).toLocaleString()} / ${n.toLocaleString()} spikes`,
-      ),
+      : `n_clusters: ${max + 1}\nn_channels: 4\nn_params: 0\ntimes_used_in_Vt: 0 0 0 0\n${Array.from({ length: max + 1 }, (_, i) => `cluster: ${i} center: 0 0 0 0 0 0 0 0\nmin: 0 0 0 0 0 0 0 0\nmax: 0 0 0 0 0 0 0 99\n`).join("")}\nExact_cut_for: ${trial} spikes: ${s.n}\n`;
+  return new Blob([head, ...(await exportLabels(w, i, format))], {
+    type: "application/octet-stream",
   });
-  const a: Asset = { ...recording, key, wasm, last: performance.now() };
-  assets.set(key, a);
-  return a;
 }
-function view(a: Asset, s: Session, cached: boolean): ViewMessage {
-  const w = a.wasm;
-  const e = a.e;
-  w.engine_build_wave_order(e);
-  const population =
-    populationSent === a.key
-      ? {}
-      : {
-          features: copyU8(w, w.engine_amps(e), a.n * 4),
-          times: copyU32(w, w.engine_times(e), a.n),
-        };
-  populationSent = a.key;
+async function view(
+  w: Core,
+  s: Session,
+  extra: Partial<ComputeInputs> = {},
+  cached = true,
+  loadMs = 0,
+): Promise<ViewMessage> {
+  const r = recordings.get(s.asset)!;
+  const i = inputs(s, extra);
+  const shown = (await ask(w, i, "view")).buffers;
+  let population = {};
+  if (populationSent !== r.key) {
+    const { features, times } = (await ask(w, i, "population")).buffers as Record<
+      string,
+      Uint8Array & Uint32Array
+    >;
+    r.duration ||= (times[r.n - 1] || 0) / parseFloat(r.header.timebase);
+    population = { features, times };
+  }
+  populationSent = r.key;
   return {
-    key: a.key,
+    key: r.key,
     session: s.key,
     revision: s.revision,
     localCut: s.localCut,
-    name: a.file.name,
-    n: a.n,
-    duration:
-      parseFloat(a.header.duration) || (times(a)[a.n - 1] || 0) / parseFloat(a.header.timebase),
-    timebase: parseFloat(a.header.timebase),
-    counts: counts(a).slice(),
+    name: r.file.name,
+    n: r.n,
+    duration: r.duration,
+    timebase: parseFloat(r.header.timebase),
+    counts: shown.counts as Uint32Array,
     ...population,
-    labels: copyU16(w, w.engine_labels(e), a.n),
-    waveSlots: w.engine_wave_slots(e),
-    waveOrder: copyU32(w, w.engine_wave_order(e), w.engine_wave_order_len(e)),
-    waveStarts: copyU32(w, w.engine_wave_starts(e), w.engine_wave_starts_len(e)),
-    cellHashes: copyU32(w, w.engine_cell_hashes(e), 2048),
-    waveHashes: copyU32(w, w.engine_wave_hashes(e), w.engine_wave_hashes_len(e)),
+    labels: shown.labels as Uint16Array,
+    waveSlots: w.wave_slots(r.n),
+    waveOrder: shown.waveOrder as Uint32Array,
+    waveStarts: shown.waveStarts as Uint32Array,
+    cellHashes: shown.cellHashes as Uint32Array,
+    waveHashes: shown.waveHashes as Uint32Array,
     headers: currentHeaders,
     undo: s.undo,
     redo: s.redo,
     dirty: s.dirty,
     cached,
-    residentBytes: resident(),
-    loadMs: a.ms,
+    residentBytes: w.compute_bytes(),
+    loadMs,
   };
 }
 /** One GPU batch of raw resident records. Unsampled batches are a single contiguous
  * Blob slice handed over untouched; sampled ones stream through Rust, which copies
  * only the resident records. */
-async function waveBatch(a: Asset, first: number, count: number) {
-  const w = a.wasm;
-  const e = a.e;
-  const slots = w.engine_wave_slots(e);
+async function waveBatch(w: Core, r: Recording, first: number, count: number) {
+  const slots = w.wave_slots(r.n);
   if (
     !Number.isInteger(first) ||
     !Number.isInteger(count) ||
@@ -194,46 +214,25 @@ async function waveBatch(a: Asset, first: number, count: number) {
     throw new Error("Invalid waveform batch.");
   }
   count = Math.min(count, slots - first);
-  const r0 = w.engine_wave_record(e, first);
-  const r1 = w.engine_wave_record(e, first + count - 1) + 1;
-  const start = a.offset + r0 * 216;
-  if (slots === a.n) {
-    const bytes = new Uint8Array(await a.file.slice(start, start + count * 216).arrayBuffer());
+  const r0 = w.wave_record(r.n, first);
+  const r1 = w.wave_record(r.n, first + count - 1) + 1;
+  const start = r.offset + r0 * 216;
+  if (slots === r.n) {
+    const bytes = new Uint8Array(await r.file.slice(start, start + count * 216).arrayBuffer());
     if (bytes.length !== count * 216) {
       throw new Error("Truncated file read.");
     }
     return bytes;
   }
-  w.engine_wave_begin(e, first, count);
-  await streamFile(w, a.file, start, (r1 - r0) * 216, 32768 * 216, (p, bytes, at) =>
-    w.engine_wave_feed(e, r0 + at / 216, p, bytes),
-  );
-  return copyU8(w, w.engine_wave_batch(e), w.engine_wave_batch_len(e));
-}
-async function waveformColumn(a: Asset, channel: number, sample: number, id: number) {
-  const w = a.wasm;
-  const e = a.e;
-  const cached = w.engine_gate_begin(e, channel, sample);
-  if (cached < 0) {
-    throw new Error("Invalid waveform gate.");
+  const batch = w.wave_batch_new(r.n, first, count);
+  try {
+    await streamFile(w, r.file, start, (r1 - r0) * 216, 32768 * 216, (p, bytes, at) =>
+      w.wave_batch_feed(batch, r0 + at / 216, p, bytes),
+    );
+    return copyU8(w, w.wave_batch_data(batch), w.wave_batch_len(batch));
+  } finally {
+    w.wave_batch_free(batch);
   }
-  if (cached) {
-    return;
-  }
-  await streamFile(
-    w,
-    a.file,
-    a.offset,
-    a.n * 216,
-    32768 * 216,
-    (p, bytes, first) => w.engine_gate_feed(e, first / 216, p, bytes),
-    (fraction) =>
-      progress(
-        id,
-        fraction,
-        `Preparing waveform gate ${Math.round(fraction * a.n).toLocaleString()} / ${a.n.toLocaleString()}`,
-      ),
-  );
 }
 async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
   if (
@@ -245,48 +244,36 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
   if (m.type === "demo") {
     return demoFiles(await wasmPromise, m.options, (n, message) => progress(m.id, n, message));
   }
+  const w = await wasmPromise;
   if (m.type === "features") {
     if (m.mode === "amplitudes") {
       return null;
     }
-    const a = activeAsset;
-    if (!a || a.key !== m.asset) {
+    const s = active;
+    const r = s && recordings.get(s.asset);
+    if (!s || !r || r.key !== m.asset) {
       throw new Superseded("Superseded feature calculation.");
     }
     const load = latestLoad;
-    const check = () => {
-      if (m.id !== latestFeatures || load !== latestLoad) {
-        throw new Superseded("Superseded feature calculation.");
-      }
-    };
-    check();
     if (!Number.isInteger(m.samples) || m.samples < 4 || m.samples > 20000) {
       throw new Error("PCA sample count must be between 4 and 20,000.");
     }
-    const samples = Math.min(a.n, m.samples);
-    const key = `${a.key}|pca:${samples}`;
-    const w = await wasmPromise;
-    if (a.pcaKey !== key) {
-      a.pcaKey = undefined;
-      w.engine_pca_clear(a.e);
-      evict(a.n * 16 + 20_000_000);
-      await fitPca(w, a, m.samples, check, (fraction, message) =>
-        progress(m.id, fraction, message),
-      );
-      a.pcaKey = key;
-    }
+    const samples = Math.min(r.n, m.samples);
+    const key = `${r.key}|pca:${samples}`;
+    const pca = await ask(
+      w,
+      inputs(s, {
+        settings: { ...defaultSettings, pcaSamples: samples },
+        current: () => m.id === latestFeatures && load === latestLoad,
+        progress: (fraction, message) => progress(m.id, fraction, message),
+      }),
+      "pca",
+    );
     return {
-      asset: a.key,
+      asset: r.key,
       key,
       samples,
-      values:
-        m.knownKey === key
-          ? undefined
-          : new Float32Array(
-              w.memory.buffer,
-              w.engine_pca_values(a.e),
-              w.engine_pca_values_len(a.e),
-            ).slice(),
+      values: m.knownKey === key ? undefined : (pca.buffers.values as Float32Array),
     };
   }
   if (m.type === "copy_analysis") {
@@ -296,88 +283,41 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     const load = latestLoad;
     const current = () => m.id === latestCopy && load === latestLoad;
     const results = [];
-    const w = await wasmPromise;
-    // Only one temporary population is resident at a time. This never builds a
-    // waveform order, sends a view, or changes the active engine/cut/headers.
     for (const recording of m.recordings) {
       if (!current()) {
         throw new Superseded("Superseded clipboard selection.");
       }
-      const session = sessions.get(`${recording.assetKey}|${recording.cutKey || "unsorted"}`);
-      const live = m.path && session?.key === active?.key ? activeAsset : undefined;
-      // A recording that isn't loaded names its cells by cut and revision, so their analyses
-      // can be found among values already computed without reading its spikes.
-      const inputs: ComputeInputs = {
+      // The cut as last left: its session's edits, if it has one.
+      const r = await recordingFor(w, recording.assetKey, recording.file);
+      const s = sessions.get(`${recording.assetKey}|${recording.cutKey || "unsorted"}`);
+      const copied: ComputeInputs = {
         ...recording,
         settings: m.settings,
-        recording: recording.assetKey,
-        cellPrefix: live ? "" : `${recording.cutKey || "unsorted"}|${recording.revision ?? 0}`,
+        recording: s
+          ? source(s, false)
+          : {
+              ...r,
+              cut: recording.cut,
+              cutSource: recording.cut ? fileId(recording.cut) : "unsorted",
+              history: [],
+            },
+        current,
       };
       // Tile charts omit per-spike overlays; path copies keep selected dots and need the
       // speed dwell, falling back on cell 0 for it.
       const parts: AnalysisPart[] = m.path
         ? ["stats", "spikes", "speedDwell"]
         : ["stats", "spatial", "direction", "speed", "ac", ...(m.spatialAc ? ["sc" as const] : [])];
-      const wanted = [...new Set(m.path ? [...m.cells, 0] : m.cells)];
       const found = new Map<number, AnalysisData>();
-      const look = async (engine: number, tb: number, duration: number) => {
-        for (const cell of wanted) {
-          const result = found.has(cell)
-            ? undefined
-            : await analysis(w, inputs, { engine, cell, tb, duration }, parts);
-          if (result) {
-            found.set(cell, result);
-          }
-        }
-      };
-      const source = recordingSource(w, recording.file);
-      let header: Header;
-      let duration: number;
-      if (live) {
-        const timebase = parseFloat(live.header.timebase);
-        header = live.header;
-        duration = parseFloat(header.duration) || (times(live)[live.n - 1] || 0) / timebase;
-        await look(live.e, timebase, duration);
-      } else {
-        await look(0, 0, 0);
-        header = parseHeader(new Uint8Array(await source.slice(0, 65536).arrayBuffer())).header;
-        duration = parseFloat(header.duration);
-        if (found.size < wanted.length || !(duration > 0)) {
-          const saved = session
-            ? await get<Uint16Array>(await dbPromise, `labels:${session.key}`)
-            : undefined;
-          if (session?.localCut && !saved) {
-            throw new Error("Modified cut state is unavailable.");
-          }
-          evict(Math.ceil(source.size / 216) * 12 + 30000000);
-          const a = await readRecording(w, source, saved ? undefined : recording.cut, {
-            current,
-          });
-          try {
-            if (saved) {
-              if (saved.length !== a.n) {
-                throw new Error("Saved cut does not match its recording.");
-              }
-              new Uint16Array(w.memory.buffer, w.engine_labels(a.e), a.n).set(saved);
-              w.engine_recount(a.e);
-            }
-            const timebase = parseFloat(a.header.timebase);
-            const spikeTimes = new Uint32Array(w.memory.buffer, w.engine_times(a.e), a.n);
-            header = a.header;
-            duration = parseFloat(a.header.duration) || (spikeTimes[a.n - 1] || 0) / timebase;
-            await look(a.e, timebase, duration);
-          } finally {
-            w.engine_free(a.e);
-          }
-        }
+      for (const cell of new Set(m.path ? [...m.cells, 0] : m.cells)) {
+        found.set(cell, await analysis(w, copied, cell, parts));
       }
       if (!current()) {
         throw new Superseded("Superseded clipboard selection.");
       }
       const cells = m.cells.map((cell) => {
-        const data = found.get(cell);
-        const spikes = data?.count ?? 0;
-        return { cell, spikes, data: spikes ? data! : null };
+        const data = found.get(cell)!;
+        return { cell, spikes: data.count, data: data.count ? data : null };
       });
       const overview = m.path ? cells.find((c) => c.data)?.data || found.get(0) : undefined;
       results.push({
@@ -385,14 +325,14 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         cells,
         position: overview
           ? {
-              trajectory: await trajectory(w, inputs),
+              trajectory: await trajectory(w, copied),
               overview: { ...overview, spikes: new Float32Array() },
               header: {
-                ...header,
+                ...r.header,
                 ...(recording.pos ? await positionHeader(recording.pos) : {}),
                 ...(recording.set ? textHeader(await recording.set.text()) : {}),
               },
-              duration,
+              duration: r.duration,
             }
           : undefined,
       });
@@ -400,52 +340,27 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     return results;
   }
   if (m.type === "load") {
-    await saveActive();
     const key = m.assetKey as string;
     const sessionKey = `${key}|${m.cut ? m.cutKey : "unsorted"}`;
-    const cached = assets.has(key);
-    const existing = sessions.get(sessionKey);
-    const a = await loadAsset(
-      recordingSource(await wasmPromise, m.file),
-      existing?.localCut ? undefined : m.cut,
-      m.id,
-      key,
-    );
+    const cached = recordings.has(key);
+    const start = performance.now();
+    const r = await recordingFor(w, key, m.file);
     let s = sessions.get(sessionKey);
     if (!s) {
       s = {
         key: sessionKey,
         asset: key,
+        cut: m.cut,
+        cutSource: m.cut ? fileId(m.cut) : "unsorted",
         undo: [],
         redo: [],
         dirty: false,
         revision: 0,
-        n: a.n,
+        n: r.n,
       };
       sessions.set(sessionKey, s);
-      if (cached) {
-        if (m.cut) {
-          await readCut(m.cut, a.n, a.wasm, a.e);
-        } else {
-          a.wasm.engine_unsorted(a.e);
-        }
-      }
-    } else {
-      const stored = await get<Uint16Array>(await dbPromise, `labels:${sessionKey}`);
-      if (stored) {
-        labels(a).set(stored);
-      } else if (s.localCut) {
-        throw new Error("Modified cut state is unavailable.");
-      } else if (m.cut) {
-        await readCut(m.cut, a.n, a.wasm, a.e);
-      } else {
-        a.wasm.engine_unsorted(a.e);
-      }
     }
-    a.wasm.engine_recount(a.e);
-    active = s;
-    activeAsset = a;
-    currentHeaders = { tetrode: a.header };
+    currentHeaders = { tetrode: r.header };
     if (s.localCut) {
       currentHeaders.cut = { file: s.localCut.name, source: "Modified cut" };
     } else if (m.cut) {
@@ -467,7 +382,18 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         new Uint8Array(await (m.pos as File).slice(0, 65536).arrayBuffer()),
       ).header;
     }
-    return view(a, s, cached);
+    const shown = await view(
+      w,
+      s,
+      {
+        current: () => m.id === latestLoad,
+        progress: (fraction, message) => progress(m.id, fraction, message),
+      },
+      cached,
+      performance.now() - start,
+    );
+    active = s;
+    return shown;
   }
   if (m.type === "export_cut") {
     const target = sessions.get(m.session);
@@ -477,30 +403,13 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     if (m.revision !== undefined && target.revision !== m.revision) {
       throw new Superseded("Superseded cut export.");
     }
-    if (active?.key === target.key && activeAsset) {
-      return exportLabels(activeAsset.wasm, activeAsset.e, activeAsset.n, m.trial, "cut");
-    }
-    const saved = await get<Uint16Array>(await dbPromise, `labels:${target.key}`);
-    if (!saved || saved.length !== target.n) {
-      throw new Error("Cut labels are unavailable.");
-    }
-    const w = await wasmPromise;
-    const e = w.engine_new_cut(target.n);
-    try {
-      new Uint16Array(w.memory.buffer, w.engine_labels(e), target.n).set(saved);
-      w.engine_recount(e);
-      return exportLabels(w, e, target.n, m.trial, "cut");
-    } finally {
-      w.engine_free(e);
-    }
+    return exportBlob(w, target, m.trial, "cut");
   }
-  if (!active || !activeAsset) {
+  if (!active) {
     throw new Error("Load a tetrode first.");
   }
-  const a = activeAsset;
-  const w = a.wasm;
-  const e = a.e;
   let s = active;
+  const r = recordings.get(s.asset)!;
   if ("session" in m && m.session && m.session !== s.key) {
     throw new Error("The active cut changed; retry the operation.");
   }
@@ -508,20 +417,10 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     try {
       if (m.phase === "preview") {
         if (!splitState) {
-          if (!Number.isInteger(m.source) || m.source < 0 || m.source >= 1023 || counts(a)[1023]) {
+          if (!Number.isInteger(m.source) || m.source < 0 || m.source >= 1023) {
             throw new Error("No room to insert another cell.");
           }
-          if (!s.localCut) {
-            await saveActive();
-          }
-          w.engine_edit_begin(e);
-          w.engine_split_cache_begin(e, m.source);
-          splitState = {
-            source: m.source,
-            channel: m.channel,
-            sample: m.sample,
-            threshold: m.threshold,
-          };
+          splitState = { ...m };
         }
         if (
           !Number.isInteger(m.channel) ||
@@ -533,13 +432,19 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
         ) {
           throw new Error("Invalid waveform split point.");
         }
-        if (!w.engine_split_cached(e)) {
-          await waveformColumn(a, m.channel, m.sample, m.id);
-          w.engine_split_cache_finish(e);
-        }
-        if (w.engine_split_gate(e, splitState.source, m.channel, m.sample, m.threshold) < 0) {
-          throw new Error("No room to insert another cell.");
-        }
+        // Each threshold is its own patch, shown but not applied until the split finishes.
+        const id = crypto.randomUUID();
+        const { source: cell } = splitState;
+        const { changed, patch } = await command(
+          w,
+          inputs(s, {
+            recording: source(s, false),
+            patch: id,
+            progress: (fraction, message) => progress(m.id, fraction, message),
+          }),
+          () => w.command_split(cell, m.channel, m.sample, m.threshold),
+        );
+        s.preview = changed ? { id, patch, changed } : undefined;
         splitState = {
           ...splitState,
           channel: m.channel,
@@ -547,80 +452,73 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
           threshold: m.threshold,
         };
       } else if (splitState) {
-        if (m.phase === "cancel") {
-          w.engine_edit_rollback(e);
-        } else {
-          const changed = w.engine_edit_finish(e);
-          if (changed) {
-            const entry = {
-              id: crypto.randomUUID(),
-              description: `Split cell ${splitState.source} at Ch ${splitState.channel + 1}, sample ${splitState.sample}, > ${splitState.threshold}`,
-              changed,
-            };
-            const patch = copyU8(w, w.engine_patch(e), w.engine_patch_len(e));
-            await put(await dbPromise, `patch:${entry.id}`, patch);
-            s = forkSession(s, m.newCut);
-            s.undo.push(entry);
-            s.redo = [];
-            s.dirty = true;
-            acceptSession(s);
-          }
+        if (m.phase === "finish" && s.preview) {
+          const { id, patch, changed } = s.preview;
+          const entry = {
+            id,
+            description: `Split cell ${splitState.source} at Ch ${splitState.channel + 1}, sample ${splitState.sample}, > ${splitState.threshold}`,
+            changed,
+          };
+          s = await record(s, entry, patch, m.newCut);
         }
-        w.engine_patch_clear(e);
+        s.preview = undefined;
         splitState = undefined;
       }
       s.revision++;
-      return view(a, s, true);
+      return view(w, s);
     } catch (error) {
-      w.engine_edit_rollback(e);
-      w.engine_patch_clear(e);
+      s.preview = undefined;
       splitState = undefined;
       s.revision++;
       throw error;
     }
   }
   if (m.type === "view") {
-    return view(a, s, true);
+    return view(w, s);
   }
   if (m.type === "edit") {
     if (!Number.isInteger(m.dest) || m.dest < 0 || m.dest >= 1024) {
       throw new Error("Destination cell must be 0–1023.");
     }
-    if (m.newCut) {
-      await saveActive();
-    }
-    w.engine_edit_begin(e);
-    let changed = 0;
-    try {
-      if (m.action === "polygon" || m.action === "paint") {
-        if (m.featureKey && m.featureKey !== a.pcaKey) {
-          throw new Superseded("PCA basis changed; redraw the selection.");
-        }
-        const offset = m.featureKey ? 5 : 0;
-        const projected = m.projection;
-        if (
-          projected &&
-          (projected.matrix.length !== 12 ||
-            projected.axes.length !== 3 ||
-            new Set(projected.axes).size !== 3 ||
-            !projected.axes.every((axis) => Number.isInteger(axis) && axis >= 0 && axis < 4) ||
-            !projected.matrix.every(Number.isFinite) ||
-            !Number.isInteger(projected.width) ||
-            projected.width < 1 ||
-            projected.width > 16384 ||
-            !Number.isInteger(projected.height) ||
-            projected.height < 1 ||
-            projected.height > 16384)
-        ) {
-          throw new Error("Invalid 3D view; redraw the selection.");
-        }
+    const id = crypto.randomUUID();
+    let settings = defaultSettings;
+    let run: () => number;
+    if (m.action === "polygon" || m.action === "paint") {
+      // PCA edits name the PCA they were drawn on (see the features request).
+      const pca = m.featureKey?.startsWith(`${r.key}|pca:`)
+        ? Number(m.featureKey.slice(r.key.length + 5))
+        : undefined;
+      if (m.featureKey && !(Number.isInteger(pca) && pca! >= 4)) {
+        throw new Superseded("PCA basis changed; redraw the selection.");
+      }
+      if (pca) {
+        settings = { ...defaultSettings, pcaSamples: pca };
+      }
+      const offset = m.featureKey ? 5 : 0;
+      const projected = m.projection;
+      if (
+        projected &&
+        (projected.matrix.length !== 12 ||
+          projected.axes.length !== 3 ||
+          new Set(projected.axes).size !== 3 ||
+          !projected.axes.every((axis) => Number.isInteger(axis) && axis >= 0 && axis < 4) ||
+          !projected.matrix.every(Number.isFinite) ||
+          !Number.isInteger(projected.width) ||
+          projected.width < 1 ||
+          projected.width > 16384 ||
+          !Number.isInteger(projected.height) ||
+          projected.height < 1 ||
+          projected.height > 16384)
+      ) {
+        throw new Error("Invalid 3D view; redraw the selection.");
+      }
+      run = () =>
         withU16(w, m.sources, (p, n) =>
           withF32(w, m.polygon, (q, count) =>
             projected
               ? withU16(w, projected.axes, (axes) =>
                   withF32(w, projected.matrix, (matrix) =>
-                    w.engine_projected_region(
-                      e,
+                    w.command_region(
                       p,
                       n,
                       m.dest,
@@ -636,94 +534,58 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
                   ),
                 )
               : m.action === "paint"
-                ? w.engine_brush(e, p, n, m.dest, m.ax + offset, m.ay + offset, q, count)
-                : w.engine_polygon(e, p, n, m.dest, m.ax + offset, m.ay + offset, q, count),
+                ? w.command_brush(p, n, m.dest, m.ax + offset, m.ay + offset, q, count)
+                : w.command_polygon(p, n, m.dest, m.ax + offset, m.ay + offset, q, count),
           ),
         );
-      } else {
-        w.engine_relabel(e, m.source, m.dest, m.action === "swap" ? 1 : 0);
-      }
-      changed = w.engine_edit_finish(e);
-      if (changed) {
-        const entry = {
-          id: crypto.randomUUID(),
-          description: m.description,
-          changed,
-        };
-        const patch = copyU8(w, w.engine_patch(e), w.engine_patch_len(e));
-        try {
-          await put(await dbPromise, `patch:${entry.id}`, patch);
-        } catch (error) {
-          throw new Error(`Edit rolled back: undo storage is unavailable (${String(error)}).`);
-        }
-        s = forkSession(s, m.newCut);
-        s.undo.push(entry);
-        s.redo = [];
-        s.dirty = true;
-        s.revision++;
-        acceptSession(s);
-      }
-    } catch (error) {
-      w.engine_edit_rollback(e);
-      throw error;
-    } finally {
-      w.engine_patch_clear(e);
+    } else {
+      const { source: from } = m;
+      run = () => w.command_relabel(from, m.dest, m.action === "swap" ? 1 : 0);
     }
-    return view(a, s, true);
+    const { changed, patch } = await command(w, inputs(s, { settings, patch: id }), run);
+    if (changed) {
+      s = await record(s, { id, description: m.description, changed }, patch, m.newCut);
+    }
+    return view(w, s);
   }
   if (m.type === "undo" || m.type === "redo") {
     const from = m.type === "undo" ? s.undo : s.redo;
     const to = m.type === "undo" ? s.redo : s.undo;
-    const entry = from.at(-1);
+    const entry = from.pop();
     if (entry) {
-      const patch = await get<Uint8Array>(await dbPromise, `patch:${entry.id}`);
-      if (!patch) {
-        throw new Error("Undo data is unavailable.");
-      }
-      const p = w.alloc_bytes(patch.byteLength);
-      try {
-        new Uint8Array(w.memory.buffer, p, patch.byteLength).set(patch);
-        if (w.engine_patch_apply(e, p, patch.byteLength, m.type === "redo" ? 1 : 0)) {
-          throw new Error("Invalid undo data.");
-        }
-      } finally {
-        w.free_bytes(p, patch.byteLength);
-      }
-      from.pop();
       to.push(entry);
-      s.dirty = true;
-      s.revision++;
+      try {
+        // The labels at the new point of the history, usually still kept.
+        const shown = await view(w, s);
+        s.dirty = true;
+        s.revision++;
+        return { ...shown, revision: s.revision, dirty: true };
+      } catch (error) {
+        to.pop();
+        from.push(entry);
+        throw error;
+      }
     }
-    return view(a, s, true);
+    return view(w, s);
   }
   if (m.type === "wave_batch") {
-    if (m.asset !== a.key) {
+    if (m.asset !== r.key) {
       throw new Superseded("Superseded waveform batch.");
     }
-    return { waves: await waveBatch(a, m.first, m.count) };
+    return { waves: await waveBatch(w, r, m.first, m.count) };
   }
   if (m.type === "trajectory") {
     return trajectory(w, m);
   }
   if (m.type === "analysis") {
-    // The membership the worker analysed, so the client can tell if its cut moved on.
-    // Pointer first: rebuilding hashes after an edit can grow memory.
-    const hashesAt = w.engine_cell_hashes(e);
-    const hashes = new Uint32Array(w.memory.buffer, hashesAt, 2048);
-    const membership = `${counts(a)[m.cell]}:${hashes[m.cell * 2]}:${hashes[m.cell * 2 + 1]}`;
-    const timebase = parseFloat(a.header.timebase);
-    const cell = {
-      engine: e,
-      cell: m.cell,
-      tb: timebase,
-      duration: parseFloat(a.header.duration) || (times(a)[a.n - 1] || 0) / timebase,
-    };
-    const result = (await analysis(w, { ...m, recording: a.key }, cell, m.parts))!;
-    evict(0);
-    return { ...result, membership };
+    const i = { ...m, recording: source(s) };
+    const result = await analysis(w, i, m.cell, m.parts);
+    // The membership analysed, so the page can tell if its cut moved on.
+    const [count, lo, hi] = (await ask(w, i, "membership", m.cell)).buffers.membership;
+    return { ...result, membership: `${count}:${lo}:${hi}` };
   }
   if (m.type === "export") {
-    return exportLabels(w, e, a.n, m.trial, m.format);
+    return exportBlob(w, s, m.trial, m.format);
   }
 
   // Unreachable while every request type is handled above (m is `never` here).

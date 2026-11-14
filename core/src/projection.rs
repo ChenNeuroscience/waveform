@@ -1,17 +1,16 @@
 //! Cuts through the current orthographic camera, over every spike at every depth.
-use super::{inside, Engine};
-use std::slice;
+use super::{inside, Edit};
 
-struct Region<'a> {
-    sources: &'a [u16],
-    dest: u16,
-    offset: usize,
-    axes: &'a [u16],
-    matrix: &'a [f32],
-    points: &'a [f32],
-    radius: f32,
-    width: usize,
-    height: usize,
+pub(crate) struct Region<'a> {
+    pub(crate) sources: &'a [u16],
+    pub(crate) dest: u16,
+    pub(crate) offset: usize,
+    pub(crate) axes: &'a [u16],
+    pub(crate) matrix: &'a [f32],
+    pub(crate) points: &'a [f32],
+    pub(crate) radius: f32,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
 }
 
 /** Rasterise connected brush capsules once; the population pass is O(spikes),
@@ -53,8 +52,8 @@ fn brush_mask(points: &[f32], width: usize, height: usize, radius: f32) -> (Vec<
     (mask, mw, mh)
 }
 
-impl Engine {
-    fn projected_region(&mut self, r: Region<'_>) -> usize {
+impl Edit<'_> {
+    pub(crate) fn projected_region(&mut self, r: Region<'_>) -> usize {
         if r.matrix.len() != 8
             || r.points.len() % 2 != 0
             || r.points.len() < if r.radius > 0. { 2 } else { 6 }
@@ -64,7 +63,7 @@ impl Engine {
             || r.width == 0
             || r.height == 0
             || !matches!(r.offset, 0 | 5)
-            || (r.offset == 5 && !self.pca.ready)
+            || (r.offset == 5 && self.pca.is_none())
             || r.axes.len() != 3
             || r.axes.iter().any(|&axis| axis > 3)
             || r.axes[0] == r.axes[1]
@@ -106,57 +105,27 @@ impl Engine {
                 changed += 1;
             }
         }
-        if changed > 0 {
-            self.recount();
-        }
         changed
     }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn engine_projected_region(
-    e: *mut Engine,
-    sources: *const u16,
-    ns: usize,
-    dest: u16,
-    offset: usize,
-    axes: *const u16,
-    matrix: *const f32,
-    points: *const f32,
-    n: usize,
-    radius: f32,
-    width: usize,
-    height: usize,
-) -> usize {
-    (*e).projected_region(Region {
-        sources: slice::from_raw_parts(sources, ns),
-        dest,
-        offset,
-        axes: slice::from_raw_parts(axes, 3),
-        matrix: slice::from_raw_parts(matrix, 8),
-        points: slice::from_raw_parts(points, n),
-        radius,
-        width,
-        height,
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn fixture() -> Engine {
-        let mut e = Engine::new(6);
-        e.times = vec![1; 6];
+    fn fixture() -> Edit<'static> {
+        let population = Box::leak(Box::new(crate::tests::population(vec![1; 6], vec![])));
         // First two overlap in x/y but have different depth; the fourth channel
         // must have no effect. Label 7 is never a source.
-        e.amplitudes = vec![
+        population.amplitudes = vec![
             51, 51, 0, 255, 51, 51, 255, 0, 204, 51, 51, 0, 51, 51, 51, 0, 51, 204, 51, 0, 51, 51,
             51, 0,
         ];
-        e.labels = vec![1, 1, 1, 7, 1, 3];
-        e.recount();
-        e
+        Edit {
+            population,
+            pca: None,
+            labels: vec![1, 1, 1, 7, 1, 3],
+        }
     }
     const XY: [f32; 8] = [1., 0., 0., 0., 0., 1., 0., 0.];
 
@@ -179,7 +148,7 @@ mod tests {
             2
         );
         assert_eq!(e.labels, [3, 3, 1, 7, 1, 3]);
-        assert_eq!(e.counts[3], 3);
+        assert_eq!(crate::counts(&e.labels)[3], 3);
     }
 
     #[test]
