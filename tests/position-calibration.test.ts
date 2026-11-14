@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { trajectory } from "../src/worker/compute";
 import { defaultSettings, fileId, positionSource, SYNC_HEADER } from "../src/types";
 import {
+  clearHeader,
   editHeader,
   headerRows,
   headersChanged,
@@ -99,6 +100,10 @@ describe("header edits", () => {
     expect(headersChanged({ position: "a", set: undefined }, edits, {})).toBe(true);
     expect(headersChanged({ position: "c" }, edits, { position: { k: "3" } })).toBe(true);
     expect(resetHeaders(edits, "a")).toEqual({ b: { k: "2" } });
+    // Clearing one edit keeps the file's others, and the file only while it has some.
+    const two = editHeader(edits, "a", "j", "3");
+    expect(clearHeader(two, "a", "j")).toEqual(edits);
+    expect(clearHeader(edits, "a", "k")).toEqual({ b: { k: "2" } });
   });
 });
 
@@ -107,7 +112,7 @@ describe("sync offset header", () => {
   it("is shown for every position file, as 0 until edited, and only there", () => {
     expect(sync(headerRows("position", { duration: "4" }))).toMatchObject({
       value: "0",
-      note: "in memory only",
+      note: "editable, but not a real header in the file",
       editable: true,
     });
     expect(sync(headerRows("position", {}, { [SYNC_HEADER]: "-40" }))).toMatchObject({

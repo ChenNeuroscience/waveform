@@ -41,6 +41,11 @@ export function validHeader(section: string, key: string, text: string) {
 export function editHeader(all: HeaderEdits, file: string, key: string, value: string) {
   return { ...all, [file]: { ...all[file], [key]: value } };
 }
+/** `all` without `file`'s edit of `key` (or any of its edits, if that was the last). */
+export function clearHeader(all: HeaderEdits, file: string, key: string) {
+  const { [key]: _cleared, ...rest } = all[file] ?? {};
+  return Object.keys(rest).length ? { ...all, [file]: rest } : resetHeaders(all, file);
+}
 export function resetHeaders(all: HeaderEdits, file: string) {
   const { [file]: _reset, ...rest } = all;
   return rest;
@@ -82,7 +87,7 @@ export function headerRows(
         : key in estimated
           ? `estimated, ${was}`
           : inFile === undefined && key in memory
-            ? "in memory only"
+            ? "editable, but not a real header in the file"
             : "";
     return {
       key,
