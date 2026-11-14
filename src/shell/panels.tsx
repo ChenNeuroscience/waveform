@@ -14,7 +14,14 @@ import {
 import { usePreference } from "../preferences";
 import { decodeSettings, encodeSettings } from "../app/settings-clipboard";
 import type { HeaderEdits, HistoryEntry, Settings } from "../types";
-import { editHeader, headerRows, resetHeaders, validHeader } from "./header-edits";
+import {
+  editHeader,
+  headerRows,
+  headerRule,
+  resetHeaders,
+  stepHeader,
+  validHeader,
+} from "./header-edits";
 
 export type PanelName = "settings" | "history" | "headers" | "help";
 /** Everything the tool panels read or act on, assembled once by App. */
@@ -205,7 +212,7 @@ export function SettingsPanel({
             step={0.25}
             unit="m/s"
             zeroLabel="Off"
-            zeroHint="Position jumps are not filtered."
+            hint={(v) => v === 0 && "Position jumps are not filtered."}
             onChange={(v) => update("maxSpeed", v)}
           />
           <Slider
@@ -216,7 +223,7 @@ export function SettingsPanel({
             step={0.1}
             unit="s"
             zeroLabel="Off"
-            zeroHint="Position coordinates are not smoothed."
+            hint={(v) => v === 0 && "Position coordinates are not smoothed."}
             onChange={(v) => update("posSmooth", v)}
           />
         </>
@@ -259,7 +266,7 @@ export function SettingsPanel({
             step={1}
             unit="bins"
             zeroLabel="Off"
-            zeroHint="Spatial smoothing is off."
+            hint={(v) => v === 0 && "Spatial smoothing is off."}
             onChange={(v) => update("smooth", v)}
           />
           <Slider
@@ -270,7 +277,7 @@ export function SettingsPanel({
             step={1}
             unit="Hz"
             zeroLabel="Auto"
-            zeroHint="Uses each cell's peak rate."
+            hint={(v) => v === 0 && "Uses each cell's peak rate."}
             onChange={(v) => update("maxRate", v)}
           />
           <Slider
@@ -323,7 +330,7 @@ export function SettingsPanel({
             step={1}
             unit="bins"
             zeroLabel="Off"
-            zeroHint="Directional smoothing is off."
+            hint={(v) => v === 0 && "Directional smoothing is off."}
             onChange={(v) => update("dirSmooth", v)}
           />
         </>
@@ -491,7 +498,7 @@ function Slider({
   step,
   unit = "",
   zeroLabel,
-  zeroHint,
+  hint,
   onChange,
 }: {
   label: string;
@@ -501,7 +508,8 @@ function Slider({
   step: number;
   unit?: string;
   zeroLabel?: "Off" | "Auto";
-  zeroHint?: string;
+  /** A note under the slider for the current value; falsy shows none. */
+  hint?: (n: number) => string | false | undefined;
   onChange: (n: number) => void;
 }) {
   const id = useId();
@@ -511,6 +519,7 @@ function Slider({
   };
   const state = value === 0 ? zeroLabel : undefined;
   const current = state || format(value);
+  const note = hint?.(value);
   return (
     <label className="slider-field" htmlFor={id} data-state={state?.toLowerCase()}>
       <span className="slider-heading">
@@ -523,7 +532,7 @@ function Slider({
         id={id}
         aria-label={label}
         aria-valuetext={current}
-        aria-describedby={state && zeroHint ? `${id}-hint` : undefined}
+        aria-describedby={note ? `${id}-hint` : undefined}
         type="range"
         value={value}
         min={min}
@@ -535,9 +544,9 @@ function Slider({
         <span>{min === 0 && zeroLabel ? zeroLabel : format(min)}</span>
         <span>{format(max)}</span>
       </span>
-      {state && zeroHint && (
+      {note && (
         <small className="slider-hint" id={`${id}-hint`}>
-          {zeroHint}
+          {note}
         </small>
       )}
     </label>
@@ -553,19 +562,22 @@ function Shortcut({ keys, text }: { keys: string; text: string }) {
 }
 /** A header that can be changed: its value, where that came from, and the box to change it. */
 function EditableHeader({
+  section,
   name,
   value,
   note,
   onChange,
 }: {
+  section: string;
   name: string;
   value: string;
   note: string;
   onChange: (value: string) => void;
 }) {
   const [text, setText] = useState<string | null>(null);
+  const valid = (t: string) => validHeader(section, name, t);
   const finish = () => {
-    if (text !== null && validHeader(text)) {
+    if (text !== null && valid(text)) {
       onChange(text.trim());
       setText(null);
     }
@@ -578,7 +590,7 @@ function EditableHeader({
         <button
           title={`Change ${name}, in this browser only`}
           aria-label={`Change ${name}`}
-          onClick={() => setText(validHeader(value) ? value : "")}
+          onClick={() => setText(valid(value) ? value : "")}
         >
           <Pencil size={11} />
         </button>
@@ -590,7 +602,7 @@ function EditableHeader({
       <input
         autoFocus
         aria-label={`New ${name}`}
-        aria-invalid={!validHeader(text)}
+        aria-invalid={!valid(text)}
         inputMode="decimal"
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -600,11 +612,14 @@ function EditableHeader({
             finish();
           } else if (e.key === "Escape") {
             setText(null);
+          } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            setText(stepHeader(section, name, text, e.key === "ArrowUp" ? 1 : -1));
           }
         }}
-        onBlur={() => (validHeader(text) ? finish() : setText(null))}
+        onBlur={() => (valid(text) ? finish() : setText(null))}
       />
-      {!validHeader(text) && <em>A number above 0</em>}
+      {!valid(text) && <em>{headerRule(section, name)}</em>}
     </dd>
   );
 }
@@ -646,6 +661,7 @@ export function HeadersPanel({ c }: { c: PanelContext }) {
                     <dt>{r.key}</dt>
                     {r.editable && id ? (
                       <EditableHeader
+                        section={section}
                         name={r.key}
                         value={r.value}
                         note={r.note}

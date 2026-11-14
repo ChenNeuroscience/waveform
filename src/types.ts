@@ -122,7 +122,7 @@ export interface ViewData {
   waveStarts: Uint32Array;
   /** Two u32 halves per cell of a hash of its resident slot set. */
   waveHashes: Uint32Array;
-  /** Two u32 halves per cell of a hash of its full spike set (analysis cache key). */
+  /** Two u32 halves per cell of a hash of its full spike set (part of analysis keys). */
   cellHashes: Uint32Array;
   headers: Record<string, Header>;
   undo: HistoryEntry[];
@@ -137,6 +137,8 @@ export type ViewMessage = Omit<ViewData, "features" | "times"> &
   Partial<Pick<ViewData, "features" | "times">>;
 /** The animal's path, shared by every cell; sent once per position settings. */
 export interface Trajectory {
+  /** Its key in the worker's compute graph: equal keys mean an identical path. */
+  key: string;
   /** The calibration used, and whether it's only a guess because no file or edit gave one. */
   ppm: number;
   ppmEstimated: boolean;
@@ -144,47 +146,104 @@ export interface Trajectory {
   arenaWidth: number;
   arenaHeight: number;
 }
-/** Cache key for a cell's spike set: count plus a 64-bit membership hash. */
+/** A cell's spike set: count plus a 64-bit membership hash. */
 export const membershipKey = (data: ViewData, cell: number) =>
   `${data.counts[cell]}:${data.cellHashes[cell * 2]}:${data.cellHashes[cell * 2 + 1]}`;
+/** The parts of a cell's analysis, each from its own handler in the worker's compute graph
+ * (core/src/compute_handlers.rs), and asked for only where they're shown. */
+export const ANALYSIS_PARTS = [
+  "stats",
+  "spatial",
+  "sc",
+  "direction",
+  "speed",
+  "speedDwell",
+  "ac",
+  "spikes",
+] as const;
+export type AnalysisPart = (typeof ANALYSIS_PARTS)[number];
+/** A cell's analysis. Parts that weren't asked for are empty, with no key. */
 export interface AnalysisData {
   /** The membership key the worker analysed (see membershipKey). */
   membership?: string;
+  /** Each part's key in the compute graph: an equal key means identical values. */
+  keys: Partial<Record<AnalysisPart, string>>;
+  cell: number;
   arenaWidth: number;
   arenaHeight: number;
-  cell: number;
+  /** stats */
+  count: number;
+  refractory: number;
+  rate: number;
+  /** spatial */
   spatial: Float32Array;
   width: number;
   height: number;
   peak: number;
-  spikes: Float32Array;
+  /** Full linear spatial autocorrelation, (2*width-1) by (2*height-1), if asked for. Either
+   * part gives the rate map's width and height. */
+  spatialAc?: Float32Array;
   direction: Float32Array;
   speed: Float32Array;
   speedDwell: Float32Array;
   ac: Float32Array;
-  /** Full linear spatial autocorrelation, (2*width-1) by (2*height-1), if requested. */
-  spatialAc?: Float32Array;
-  refractory: number;
-  rate: number;
+  /** Normalised (x, y) of each spike on the path. */
+  spikes: Float32Array;
+}
+/** The fields each part fills. */
+const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
+  stats: ["count", "refractory", "rate"],
+  spatial: ["spatial", "width", "height", "peak"],
+  sc: ["spatialAc", "width", "height"],
+  direction: ["direction"],
+  speed: ["speed"],
+  speedDwell: ["speedDwell"],
+  ac: ["ac"],
+  spikes: ["spikes"],
+};
+/**
+ * `next`, keeping `held`'s values for every part whose key is unchanged, so plots of those
+ * parts see the same arrays and needn't redraw. `held` itself if nothing changed.
+ */
+export function reuseParts(held: AnalysisData | null, next: AnalysisData): AnalysisData {
+  if (!held || held.cell !== next.cell) {
+    return next;
+  }
+  const merged: Record<string, unknown> = { ...next };
+  let changed = held.membership !== next.membership;
+  for (const part of ANALYSIS_PARTS) {
+    const key = next.keys[part];
+    if (key && key === held.keys[part]) {
+      for (const field of PART_FIELDS[part]) {
+        merged[field] = held[field];
+      }
+    } else if (key || held.keys[part]) {
+      changed = true;
+    }
+  }
+  return changed ? (merged as unknown as AnalysisData) : held;
 }
 export const fileId = (f: File) => `${f.webkitRelativePath || f.name}:${f.size}:${f.lastModified}`;
 /** Header values changed in the browser, by `fileId`. They are never written to the files,
  * and last only as long as the browser has the files. */
 export type HeaderEdits = Record<string, Header>;
-const editedPpm = (trial: Trial | undefined, edits: HeaderEdits) =>
-  trial?.pos ? edits[fileId(trial.pos)]?.pixels_per_metre : undefined;
-/** The worker cache key for a trial's position file and its calibration, or "" without one. */
-export const positionKey = (trial: Trial | undefined, edits: HeaderEdits) =>
-  trial?.pos ? `${trial.id}|${fileId(trial.pos)}|${editedPpm(trial, edits) ?? ""}` : "";
-/** What the worker needs to process a trial's position. */
-export const positionSource = (trial: Trial | undefined, edits: HeaderEdits) => {
-  const ppm = editedPpm(trial, edits);
-  return {
-    pos: trial?.pos,
-    posKey: positionKey(trial, edits),
-    ppm: ppm === undefined ? undefined : parseFloat(ppm),
-  };
-};
+/** The position header for a sync correction. Files never have it: it exists only as an
+ * edit, in ms added to position times (spike times are the reference). */
+export const SYNC_HEADER = "sync_offset_ms";
+/** A position header's edited value as a number, if it has a valid one. Parsed with
+ * `Number`, as edits are validated (see header-edits.ts). */
+function editedNumber(trial: Trial | undefined, edits: HeaderEdits, key: string) {
+  const text = trial?.pos ? edits[fileId(trial.pos)]?.[key] : undefined;
+  const value = Number(text);
+  return text !== undefined && text.trim() !== "" && Number.isFinite(value) ? value : undefined;
+}
+/** A trial's position, as the worker's compute graph takes it (see core/src/compute.rs). */
+export const positionSource = (trial: Trial | undefined, edits: HeaderEdits) => ({
+  pos: trial?.pos,
+  posFile: trial?.pos ? `${trial.id}|${fileId(trial.pos)}` : undefined,
+  ppm: editedNumber(trial, edits, "pixels_per_metre"),
+  sync: editedNumber(trial, edits, SYNC_HEADER),
+});
 export { groupTextColor } from "./palette";
 import { groupRgb8, groupTextColor } from "./palette";
 export const cellRgb = (cell: number) => groupRgb8(cell).map((value) => value / 255);

@@ -1,31 +1,19 @@
-// Browser I/O and ABI bridge. Numeric position/analysis code is in Rust.
+// Browser I/O and ABI bridge. Positions and analyses are computed by handlers in Rust
+// (core/src/compute_handlers.rs), a compute graph (core/src/compute.rs); this writes their inputs,
+// supplies files they say they need, and copies their answers out.
 import { parseHeader } from "../files";
 import { streamFile, copyF32, type Core } from "./wasm";
-import type { Header, Settings, AnalysisData, Trajectory } from "../types";
-export interface Position {
-  handle: number;
-  identity: string;
-  header: Header;
-  ppm: number;
-  ppmEstimated: boolean;
+import type { AnalysisData, AnalysisPart, Header, Trajectory } from "../types";
+import type { PositionRequest } from "./protocol";
+
+/** Reads a position file's header. */
+export async function positionHeader(file: File): Promise<Header> {
+  return parseHeader(new Uint8Array(await file.slice(0, 65536).arrayBuffer())).header;
 }
-export async function parsePosition(
-  file: File,
-  s: Settings,
-  w: Core,
-  identity: string,
-  base?: Position,
-  editedPpm?: number,
-): Promise<Position> {
-  if (base) {
-    return {
-      handle: w.position_variant(base.handle, s.leds, s.maxSpeed, s.posSmooth),
-      identity,
-      header: base.header,
-      ppm: base.ppm,
-      ppmEstimated: base.ppmEstimated,
-    };
-  }
+
+/** Reads a position file with its calibration (an edit, the file's, or a guess), unprocessed,
+ * into a new handle. */
+export async function readPosition(file: File, w: Core, editedPpm?: number): Promise<number> {
   const { header: h, offset } = parseHeader(
     new Uint8Array(await file.slice(0, 65536).arrayBuffer()),
   );
@@ -49,8 +37,8 @@ export async function parsePosition(
   ) {
     throw new Error("Invalid or truncated position file.");
   }
-  const ppmEstimated = !(stated > 0);
-  const handle = w.position_new(n, ppmEstimated ? 1 : stated, rate, minX, minY, maxX, maxY);
+  const estimated = !(stated > 0);
+  const handle = w.position_new(n, estimated ? 1 : stated, rate, minX, minY, maxX, maxY);
   try {
     w.position_bearing(handle, parseFloat(h.bearing_colour_1 || "0"));
     await streamFile(w, file, offset, n * 20, 32768 * 20, (p, bytes) =>
@@ -58,82 +46,236 @@ export async function parsePosition(
     );
     // With no calibration, the largest dimension used is taken to be a metre, just so that
     // there's something to look at. If the LEDs were never seen, the same goes for the window.
-    const ppm = ppmEstimated
+    const ppm = estimated
       ? w.position_used_extent(handle) || Math.max(maxX - minX, maxY - minY)
       : stated;
-    w.position_set_ppm(handle, ppm);
-    w.position_finish(handle, s.leds, s.maxSpeed, s.posSmooth);
-    return { handle, identity, header: h, ppm, ppmEstimated };
+    w.position_set_ppm(handle, ppm, estimated ? 1 : 0);
+    return handle;
   } catch (e) {
     w.position_free(handle);
     throw e;
   }
 }
-/** The trajectory for a processed position, computed once in Rust and cached there. */
-export function trajectory(w: Core, pos: Position): Trajectory {
-  const size = w.alloc_bytes(8);
+/** The numeric inputs, in the order Rust reads them (checked by a test against
+ * `compute_input_name`). */
+export const COMPUTE_INPUTS = [
+  "leds",
+  "maxSpeed",
+  "posSmooth",
+  "binCm",
+  "smooth",
+  "maxRate",
+  "rateMapSteps",
+  "scMinOverlap",
+  "dirBin",
+  "dirSmooth",
+  "speedBin",
+  "speedMax",
+  "acWindow",
+  "acBinMs",
+  "ppm",
+  "sync",
+] as const;
+/** The compute graph's inputs, besides the cell (which Rust works out from the engine). */
+export interface ComputeInputs extends PositionRequest {
+  /** The recording asset. */
+  recording?: string;
+  /** Names cells by cut and revision rather than membership hash, for recordings whose
+   * spikes aren't loaded. */
+  cellPrefix?: string;
+}
+function setText(w: Core, field: number, text: string) {
+  const bytes = new TextEncoder().encode(text);
+  const p = w.alloc_bytes(Math.max(1, bytes.length));
   try {
-    w.position_size(pos.handle, size);
-    const [arenaWidth, arenaHeight] = new Float32Array(w.memory.buffer, size, 2);
-    return {
-      ppm: pos.ppm,
-      ppmEstimated: pos.ppmEstimated,
-      path: copyF32(w, w.position_path(pos.handle), w.position_path_len(pos.handle)),
-      arenaWidth,
-      arenaHeight,
-    };
+    new Uint8Array(w.memory.buffer, p, bytes.length).set(bytes);
+    w.compute_set_text(field, p, bytes.length);
   } finally {
-    w.free_bytes(size, 8);
+    w.free_bytes(p, Math.max(1, bytes.length));
   }
 }
-export function analyse(
-  w: Core,
-  engine: number,
-  cell: number,
-  tb: number,
-  duration: number,
-  pos: Position | undefined,
-  s: Settings,
-  spatialAc = false,
-): AnalysisData {
-  w.engine_analyse(
-    engine,
-    pos?.handle || 0,
-    cell,
-    tb,
-    duration,
-    s.binCm,
-    s.smooth,
-    s.acWindow,
-    s.acBinMs,
-    s.dirBin,
-    s.dirSmooth,
-    s.speedBin,
-    s.speedMax,
-  );
-  if (spatialAc) {
-    w.engine_analyse_sc(engine, s.scMinOverlap);
+function writeInputs(w: Core, i: ComputeInputs) {
+  // Pointer first: the call can grow memory, detaching an earlier `memory.buffer`.
+  const at = w.compute_inputs();
+  const numbers = new Float64Array(w.memory.buffer, at, COMPUTE_INPUTS.length);
+  COMPUTE_INPUTS.forEach((name, j) => {
+    numbers[j] =
+      name === "ppm" ? (i.ppm ?? NaN) : name === "sync" ? (i.sync ?? 0) : i.settings[name];
+  });
+  setText(w, 0, i.pos ? (i.posFile ?? "") : "");
+  setText(w, 1, i.recording ?? "");
+  setText(w, 2, i.cellPrefix ?? "");
+}
+/** The handlers JavaScript can ask for, in the order Rust lists them (checked by a test
+ * against `compute_handler_name`). */
+export const HANDLERS = [
+  "path",
+  "positionInfo",
+  "cellStats",
+  "spikePositions",
+  "ratemap",
+  "spatialAc",
+  "direction",
+  "speed",
+  "speedDwell",
+  "temporalAc",
+] as const;
+export type HandlerName = (typeof HANDLERS)[number];
+/** A cell asked about: its number, its recording's clock, and its engine, or 0 to only look
+ * among values already computed. */
+export interface CellRequest {
+  engine: number;
+  cell: number;
+  tb: number;
+  duration: number;
+}
+/** A handler's answer: its key's digest and its named buffers. */
+export interface Answer {
+  key: string;
+  buffers: Record<string, Float32Array | Float64Array>;
+}
+function readAnswer(w: Core): Answer {
+  // Pointers before views: a call can grow memory, detaching an earlier `memory.buffer`.
+  const digest = w.answer_digest();
+  const [lo, hi] = new Uint32Array(w.memory.buffer, digest, 2);
+  const buffers: Answer["buffers"] = {};
+  for (let i = 0; i < w.answer_count(); i++) {
+    const [at, length] = [w.answer_name(i), w.answer_name_len(i)];
+    const name = new TextDecoder().decode(new Uint8Array(w.memory.buffer, at, length));
+    const [data, n] = [w.answer_data(i), w.answer_len(i)];
+    buffers[name] = w.answer_kind(i)
+      ? new Float64Array(w.memory.buffer, data, n).slice()
+      : copyF32(w, data, n);
   }
-  const meta = new Float64Array(w.memory.buffer, w.engine_analysis_meta(engine), 8).slice();
-  const array = (name: "spatial" | "spikes" | "direction" | "speed" | "speed_dwell" | "ac") =>
-    copyF32(w, w[`engine_analysis_${name}`](engine), w[`engine_analysis_${name}_len`](engine));
+  return { key: hi.toString(16).padStart(8, "0") + lo.toString(16).padStart(8, "0"), buffers };
+}
+/**
+ * Asks the compute graph's `handler` for `inputs` (and `cell`, for a cell's analyses).
+ * Reads the position file and hands it over if the graph says it needs it. Undefined if it needs the
+ * recording's spikes and `cell` has no engine.
+ */
+export async function ask(
+  w: Core,
+  inputs: ComputeInputs,
+  handler: HandlerName,
+  cell: CellRequest = { engine: 0, cell: 0, tb: 0, duration: 0 },
+): Promise<Answer | undefined> {
+  const id = HANDLERS.indexOf(handler);
+  for (let read = false; ; read = true) {
+    writeInputs(w, inputs);
+    const status = w.compute_request(id, cell.engine, cell.cell, cell.tb, cell.duration);
+    if (status === 0) {
+      return readAnswer(w);
+    }
+    if (status === 1) {
+      return undefined;
+    }
+    if (read || !inputs.pos) {
+      throw new Error("The position isn't available.");
+    }
+    // Requests are handled one at a time, so the inputs are still these when it's stored.
+    const handle = await readPosition(inputs.pos, w, inputs.ppm);
+    writeInputs(w, inputs);
+    w.compute_supply_position(handle);
+  }
+}
+
+/** The trajectory for `inputs`, or null without a position. */
+export async function trajectory(w: Core, inputs: ComputeInputs): Promise<Trajectory | null> {
+  if (!inputs.pos) {
+    return null;
+  }
+  const path = (await ask(w, inputs, "path"))!;
+  const [arenaWidth, arenaHeight, ppm, estimated] = (await ask(w, inputs, "positionInfo"))!.buffers
+    .info;
   return {
-    cell: meta[0],
-    arenaWidth: meta[6],
-    arenaHeight: meta[7],
-    width: meta[1],
-    height: meta[2],
-    peak: meta[3],
-    refractory: meta[4],
-    rate: meta[5],
-    spatial: array("spatial"),
-    spikes: array("spikes"),
-    direction: array("direction"),
-    speed: array("speed"),
-    speedDwell: array("speed_dwell"),
-    ac: array("ac"),
-    spatialAc: spatialAc
-      ? copyF32(w, w.engine_analysis_sc(engine), w.engine_analysis_sc_len(engine))
-      : undefined,
+    key: path.key,
+    path: path.buffers.values as Float32Array,
+    arenaWidth,
+    arenaHeight,
+    ppm,
+    ppmEstimated: !!estimated,
   };
+}
+
+/** Which handler gives each part of a cell's analysis. */
+const PART_HANDLERS: Record<AnalysisPart, HandlerName> = {
+  stats: "cellStats",
+  spatial: "ratemap",
+  sc: "spatialAc",
+  direction: "direction",
+  speed: "speed",
+  speedDwell: "speedDwell",
+  ac: "temporalAc",
+  spikes: "spikePositions",
+};
+/** Parts that need a position; without one they're left empty. */
+const POSITIONAL = new Set<AnalysisPart>([
+  "spatial",
+  "sc",
+  "direction",
+  "speed",
+  "speedDwell",
+  "spikes",
+]);
+/**
+ * The `parts` of a cell's analysis, from the compute graph. Undefined if a
+ * part needs the recording's spikes and `cell` has no engine.
+ */
+export async function analysis(
+  w: Core,
+  inputs: ComputeInputs,
+  cell: CellRequest,
+  parts: readonly AnalysisPart[],
+): Promise<AnalysisData | undefined> {
+  const empty = new Float32Array();
+  const result: AnalysisData = {
+    keys: {},
+    cell: cell.cell,
+    arenaWidth: 0,
+    arenaHeight: 0,
+    count: 0,
+    refractory: 0,
+    rate: 0,
+    spatial: empty,
+    width: 0,
+    height: 0,
+    peak: 0,
+    direction: empty,
+    speed: empty,
+    speedDwell: empty,
+    ac: empty,
+    spikes: empty,
+  };
+  const hasPos = !!inputs.pos;
+  if (hasPos) {
+    [result.arenaWidth, result.arenaHeight] = (await ask(w, inputs, "positionInfo"))!.buffers.info;
+  }
+  for (const part of new Set(parts)) {
+    if (POSITIONAL.has(part) && !hasPos) {
+      continue;
+    }
+    const answer = await ask(w, inputs, PART_HANDLERS[part], cell);
+    if (!answer) {
+      return undefined;
+    }
+    result.keys[part] = answer.key;
+    const { values, stats, shape } = answer.buffers;
+    switch (part) {
+      case "stats":
+        [result.count, result.refractory, result.rate] = stats;
+        break;
+      case "spatial":
+        result.spatial = values as Float32Array;
+        [result.width, result.height, result.peak] = shape;
+        break;
+      case "sc":
+        result.spatialAc = values as Float32Array;
+        [result.width, result.height] = shape;
+        break;
+      default:
+        result[part] = values as Float32Array;
+    }
+  }
+  return result;
 }

@@ -3,14 +3,14 @@
 // every loop over spike, label, waveform and position records.
 import { demoFiles, recordingSource } from "./demo";
 import { parseHeader, textHeader, readCut } from "../files";
-import type { Settings, Header, HistoryEntry, ViewMessage, AnalysisData } from "../types";
-import { parsePosition, analyse, trajectory, type Position } from "./position";
+import type { AnalysisData, AnalysisPart, Header, HistoryEntry, ViewMessage } from "../types";
+import { analysis, positionHeader, trajectory, type ComputeInputs } from "./position";
 import { openStore, put, get } from "./history";
 import { streamFile, copyU8, copyU16, copyU32, withU16, withF32, type Core } from "./wasm";
 import { Superseded } from "./protocol";
 import { readRecording } from "./recording";
 import { fitPca } from "./pca";
-import type { PositionRequest, RequestType, WorkerMessage, WorkerResult } from "./protocol";
+import type { RequestType, WorkerMessage, WorkerResult } from "./protocol";
 interface Asset {
   key: string;
   wasm: Core;
@@ -35,8 +35,6 @@ interface Session {
 }
 const assets = new Map<string, Asset>();
 const sessions = new Map<string, Session>();
-const positions = new Map<string, Position>();
-const analyses = new Map<string, AnalysisData>();
 let wasmPromise: Promise<Core>;
 let latestLoad = 0;
 let latestCopy = 0;
@@ -237,24 +235,6 @@ async function waveformColumn(a: Asset, channel: number, sample: number, id: num
       ),
   );
 }
-const positionKey = (m: PositionRequest) =>
-  m.pos ? `${m.posKey}|${m.settings.leds}|${m.settings.maxSpeed}|${m.settings.posSmooth}` : "";
-/** The processed position for a request, parsed once per file and LED/speed settings. */
-async function positionFor(m: PositionRequest, w: Core) {
-  const pk = positionKey(m);
-  let pos = positions.get(pk);
-  if (m.pos && !pos) {
-    const base = [...positions.values()].find((p) => p.identity === m.posKey);
-    pos = await parsePosition(m.pos, m.settings, w, m.posKey, base, m.ppm);
-    positions.set(pk, pos);
-    if (positions.size > 4) {
-      const oldest = positions.keys().next().value!;
-      w.position_free(positions.get(oldest)!.handle);
-      positions.delete(oldest);
-    }
-  }
-  return pos;
-}
 async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
   if (
     splitState &&
@@ -325,77 +305,97 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
       }
       const session = sessions.get(`${recording.assetKey}|${recording.cutKey || "unsorted"}`);
       const live = m.path && session?.key === active?.key ? activeAsset : undefined;
-      const saved =
-        session && !live
-          ? await get<Uint16Array>(await dbPromise, `labels:${session.key}`)
-          : undefined;
-      if (session?.localCut && !saved && !live) {
-        throw new Error("Modified cut state is unavailable.");
-      }
-      let a = live;
-      if (!a) {
-        const file = recordingSource(w, recording.file);
-        evict(Math.ceil(file.size / 216) * 12 + 30000000);
-        const recordingData = await readRecording(w, file, saved ? undefined : recording.cut, {
-          current,
-        });
-        a = { ...recordingData, key: recording.assetKey, wasm: w, last: performance.now() };
-      }
-      try {
-        if (saved) {
-          if (saved.length !== a.n) {
-            throw new Error("Saved cut does not match its recording.");
+      // A recording that isn't loaded names its cells by cut and revision, so their analyses
+      // can be found among values already computed without reading its spikes.
+      const inputs: ComputeInputs = {
+        ...recording,
+        settings: m.settings,
+        recording: recording.assetKey,
+        cellPrefix: live ? "" : `${recording.cutKey || "unsorted"}|${recording.revision ?? 0}`,
+      };
+      // Tile charts omit per-spike overlays; path copies keep selected dots and need the
+      // speed dwell, falling back on cell 0 for it.
+      const parts: AnalysisPart[] = m.path
+        ? ["stats", "spikes", "speedDwell"]
+        : ["stats", "spatial", "direction", "speed", "ac", ...(m.spatialAc ? ["sc" as const] : [])];
+      const wanted = [...new Set(m.path ? [...m.cells, 0] : m.cells)];
+      const found = new Map<number, AnalysisData>();
+      const look = async (engine: number, tb: number, duration: number) => {
+        for (const cell of wanted) {
+          const result = found.has(cell)
+            ? undefined
+            : await analysis(w, inputs, { engine, cell, tb, duration }, parts);
+          if (result) {
+            found.set(cell, result);
           }
-          new Uint16Array(w.memory.buffer, w.engine_labels(a.e), a.n).set(saved);
-          w.engine_recount(a.e);
         }
-        const pos = await positionFor({ ...recording, settings: m.settings }, w);
-        if (!current()) {
-          throw new Superseded("Superseded clipboard selection.");
-        }
-        const counts = new Uint32Array(w.memory.buffer, w.engine_counts(a.e), 1024).slice();
-        const timebase = parseFloat(a.header.timebase);
-        const times = new Uint32Array(w.memory.buffer, w.engine_times(a.e), a.n);
-        const duration = parseFloat(a.header.duration) || (times[a.n - 1] || 0) / timebase;
-        const cells = m.cells.map((cell) => {
-          const data = counts[cell]
-            ? analyse(w, a.e, cell, timebase, duration, pos, m.settings, m.spatialAc)
-            : null;
-          // Tile charts omit per-spike overlays; path copies retain selected dots.
-          return {
-            cell,
-            spikes: counts[cell],
-            data: data && (m.path ? data : { ...data, spikes: new Float32Array() }),
-          };
-        });
-        const overview = m.path
-          ? cells.find((c) => c.data)?.data ||
-            analyse(w, a.e, 0, timebase, duration, pos, m.settings)
-          : undefined;
-        const header = overview
-          ? {
-              ...a.header,
-              ...pos?.header,
-              ...(recording.set ? textHeader(await recording.set.text()) : {}),
-            }
-          : a.header;
-        results.push({
-          trialId: recording.trialId,
-          cells,
-          position: overview
-            ? {
-                trajectory: pos ? trajectory(w, pos) : null,
-                overview: { ...overview, spikes: new Float32Array() },
-                header,
-                duration,
+      };
+      const source = recordingSource(w, recording.file);
+      let header: Header;
+      let duration: number;
+      if (live) {
+        const timebase = parseFloat(live.header.timebase);
+        header = live.header;
+        duration = parseFloat(header.duration) || (times(live)[live.n - 1] || 0) / timebase;
+        await look(live.e, timebase, duration);
+      } else {
+        await look(0, 0, 0);
+        header = parseHeader(new Uint8Array(await source.slice(0, 65536).arrayBuffer())).header;
+        duration = parseFloat(header.duration);
+        if (found.size < wanted.length || !(duration > 0)) {
+          const saved = session
+            ? await get<Uint16Array>(await dbPromise, `labels:${session.key}`)
+            : undefined;
+          if (session?.localCut && !saved) {
+            throw new Error("Modified cut state is unavailable.");
+          }
+          evict(Math.ceil(source.size / 216) * 12 + 30000000);
+          const a = await readRecording(w, source, saved ? undefined : recording.cut, {
+            current,
+          });
+          try {
+            if (saved) {
+              if (saved.length !== a.n) {
+                throw new Error("Saved cut does not match its recording.");
               }
-            : undefined,
-        });
-      } finally {
-        if (!live) {
-          w.engine_free(a.e);
+              new Uint16Array(w.memory.buffer, w.engine_labels(a.e), a.n).set(saved);
+              w.engine_recount(a.e);
+            }
+            const timebase = parseFloat(a.header.timebase);
+            const spikeTimes = new Uint32Array(w.memory.buffer, w.engine_times(a.e), a.n);
+            header = a.header;
+            duration = parseFloat(a.header.duration) || (spikeTimes[a.n - 1] || 0) / timebase;
+            await look(a.e, timebase, duration);
+          } finally {
+            w.engine_free(a.e);
+          }
         }
       }
+      if (!current()) {
+        throw new Superseded("Superseded clipboard selection.");
+      }
+      const cells = m.cells.map((cell) => {
+        const data = found.get(cell);
+        const spikes = data?.count ?? 0;
+        return { cell, spikes, data: spikes ? data! : null };
+      });
+      const overview = m.path ? cells.find((c) => c.data)?.data || found.get(0) : undefined;
+      results.push({
+        trialId: recording.trialId,
+        cells,
+        position: overview
+          ? {
+              trajectory: await trajectory(w, inputs),
+              overview: { ...overview, spikes: new Float32Array() },
+              header: {
+                ...header,
+                ...(recording.pos ? await positionHeader(recording.pos) : {}),
+                ...(recording.set ? textHeader(await recording.set.text()) : {}),
+              },
+              duration,
+            }
+          : undefined,
+      });
     }
     return results;
   }
@@ -703,39 +703,24 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     return { waves: await waveBatch(a, m.first, m.count) };
   }
   if (m.type === "trajectory") {
-    const pos = await positionFor(m, w);
-    return pos ? trajectory(w, pos) : null;
+    return trajectory(w, m);
   }
   if (m.type === "analysis") {
-    const opts = m.settings as Settings;
-    const pos = await positionFor(m, w);
-    // Keyed by the cell's spike set rather than its number or the cut
-    // revision, so edits only recompute cells whose membership changed.
-    const hashes = new Uint32Array(w.memory.buffer, w.engine_cell_hashes(e), 2048);
+    // The membership the worker analysed, so the client can tell if its cut moved on.
+    // Pointer first: rebuilding hashes after an edit can grow memory.
+    const hashesAt = w.engine_cell_hashes(e);
+    const hashes = new Uint32Array(w.memory.buffer, hashesAt, 2048);
     const membership = `${counts(a)[m.cell]}:${hashes[m.cell * 2]}:${hashes[m.cell * 2 + 1]}`;
-    const key = `${a.key}|${membership}|${positionKey(m)}|${opts.binCm}|${opts.smooth}|${opts.acWindow}|${opts.acBinMs}|${opts.dirBin}|${opts.dirSmooth}|${opts.speedBin}|${opts.speedMax}|SC:${m.spatialAc ? opts.scMinOverlap : "off"}`;
-    let result = analyses.get(key);
-    if (result) {
-      analyses.delete(key);
-    } else {
-      result = analyse(
-        w,
-        e,
-        m.cell,
-        parseFloat(a.header.timebase),
-        parseFloat(a.header.duration) || (times(a)[a.n - 1] || 0) / parseFloat(a.header.timebase),
-        pos,
-        opts,
-        m.spatialAc,
-      );
-      if (analyses.size >= 200) {
-        analyses.delete(analyses.keys().next().value!);
-      }
-      evict(0);
-    }
-    analyses.set(key, result);
-    const answer = { ...result, cell: m.cell, membership };
-    return m.summary ? { ...answer, spikes: new Float32Array() } : answer;
+    const timebase = parseFloat(a.header.timebase);
+    const cell = {
+      engine: e,
+      cell: m.cell,
+      tb: timebase,
+      duration: parseFloat(a.header.duration) || (times(a)[a.n - 1] || 0) / timebase,
+    };
+    const result = (await analysis(w, { ...m, recording: a.key }, cell, m.parts))!;
+    evict(0);
+    return { ...result, membership };
   }
   if (m.type === "export") {
     return exportLabels(w, e, a.n, m.trial, m.format);
@@ -782,15 +767,20 @@ self.onmessage = (event: MessageEvent) => {
         throw new Superseded("Superseded analysis.");
       }
       const data = await handle(m);
-      const transfer: Transferable[] = [];
-      if (data && m.type !== "analysis") {
-        for (const value of Object.values(data)) {
-          if (ArrayBuffer.isView(value)) {
-            transfer.push(value.buffer as ArrayBuffer);
-          }
+      // Results are fresh copies (cached values stay in Rust), so their buffers move to
+      // the page rather than being copied again. Clipboard results nest theirs per trial.
+      const transfer = new Set<ArrayBuffer>();
+      const collect = (value: unknown, nested: boolean) => {
+        if (ArrayBuffer.isView(value)) {
+          transfer.add(value.buffer as ArrayBuffer);
+        } else if (nested && value && typeof value === "object") {
+          Object.values(value).forEach((v) => collect(v, true));
         }
+      };
+      if (data && typeof data === "object") {
+        Object.values(data).forEach((v) => collect(v, m.type === "copy_analysis"));
       }
-      self.postMessage({ id: m.id, data }, transfer);
+      self.postMessage({ id: m.id, data }, [...transfer]);
     } catch (error) {
       self.postMessage({
         id: m.id,

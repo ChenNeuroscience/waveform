@@ -15,6 +15,8 @@ import {
   type ViewData,
   type AnalysisData,
   membershipKey,
+  reuseParts,
+  type AnalysisPart,
   type Settings,
   type PlotMode,
   type SplitPoint,
@@ -81,23 +83,6 @@ function tileSizes(shown: VisiblePlots) {
   };
 }
 
-/** The settings that change a cell's analysis (cache key). */
-function analysisSettingsKey(s: Settings) {
-  return [
-    s.binCm,
-    s.smooth,
-    s.acWindow,
-    s.acBinMs,
-    s.leds,
-    s.maxSpeed,
-    s.posSmooth,
-    s.dirBin,
-    s.dirSmooth,
-    s.speedBin,
-    s.speedMax,
-  ].join("|");
-}
-
 /** Join the class names whose flags are set. */
 function classNames(base: string, flags: Record<string, boolean>) {
   return [base, ...Object.keys(flags).filter((name) => flags[name])].join(" ");
@@ -161,7 +146,7 @@ export function TileWall({
   ref?: Ref<TileWallHandle>;
 }) {
   const position = positionSource(trial, headerEdits);
-  const { pos, posKey } = position;
+  const { pos } = position;
   const scroller = useRef<HTMLDivElement>(null);
   const waveCanvas = useRef<HTMLCanvasElement>(null);
 
@@ -170,9 +155,9 @@ export function TileWall({
   const [height, setHeight] = useState(800);
   const [width, setWidth] = useState(800);
 
-  // Tile analyses keyed by cell membership, so edits only refetch cells whose
-  // spikes changed and swapped cell numbers keep theirs; the version re-renders.
-  const cache = useRef(new Map<string, AnalysisData>());
+  // The visible tiles' analyses, by cell: references to what is on screen, kept only while
+  // shown. The version re-renders when they change.
+  const held = useRef(new Map<number, AnalysisData>());
   const [analysisVersion, setAnalysisVersion] = useState(0);
 
   // Hover glow and post-edit jiggle overlays, drawn in the page layer.
@@ -217,10 +202,21 @@ export function TileWall({
   const waveScope = `${data.session}|${data.revision}`;
   const waveKey = `${waveScope}|${signature}|${settings.renderMode}|${waveFrameWidth}`;
   const wavesReady = wavesDone === waveKey;
-  const analysisKey = `${data.key}|${posKey}|${analysisSettingsKey(settings)}|SC:${shown.sc ? settings.scMinOverlap : "off"}`;
-  // Cancels in-flight tile gestures whenever the cut or analyses change.
-  const scope = `${data.session}|${data.revision}|${analysisKey}`;
-  const analysisFor = (cell: number) => cache.current.get(membershipKey(data, cell));
+  // Cancels in-flight tile gestures whenever the cut or anything analyses read changes.
+  const scope = `${data.session}|${data.revision}|${JSON.stringify([position.posFile, position.ppm, position.sync, settings, shown.sc])}`;
+  // Only the parts of the plots that are on (the stats line shows only their peaks).
+  const parts: AnalysisPart[] = [
+    ...(shown.spatial ? (["spatial"] as const) : []),
+    ...(shown.direction ? (["direction"] as const) : []),
+    ...(shown.sc ? (["sc"] as const) : []),
+    ...(shown.speed ? (["speed"] as const) : []),
+    ...(shown.ac ? (["ac"] as const) : []),
+  ];
+  /** A cell's held analysis, if it was made from the cell's current spikes. */
+  const analysisFor = (cell: number) => {
+    const a = held.current.get(cell);
+    return a?.membership === membershipKey(data, cell) ? a : undefined;
+  };
   const gestures = useTileGestures({
     splitSource: splitPoint?.source,
     grab: grabMode,
@@ -238,28 +234,23 @@ export function TileWall({
         transparentBadge: true,
       })?.toDataURL(),
   });
-  // Fetches missing analyses (unbatched, so the visible tiles' requests aren't
-  // superseded) and draws each plot off-screen at its tile size.
+  // Asks for every cell's analysis afresh (unbatched, so the visible tiles' requests
+  // aren't superseded; unchanged values aren't recomputed), so a copy made just after a
+  // setting changes can't use a tile's older one. Draws each plot off-screen at its tile size.
   const capture = async (cells: number[]): Promise<CellCapture[]> => {
     const renderer = shown.waveforms ? gpu.current : null;
-    const missing = cells.filter((cell) => !analysisFor(cell));
     const results = await Promise.all(
-      missing.map((cell) =>
+      cells.map((cell) =>
         request("analysis", {
           session: data.session,
           cell,
           ...position,
           settings,
-          summary: true,
-          spatialAc: shown.sc,
+          parts,
         }),
       ),
     );
-    for (const result of results) {
-      if (result.membership) {
-        cache.current.set(result.membership, result);
-      }
-    }
+    const fetched = new Map(results.map((result) => [result.cell, result]));
     await renderer?.whenLoaded();
     if (renderer && (renderer !== gpu.current || renderer.scene?.data !== data)) {
       throw new Superseded("Recording changed before the clipboard capture completed.");
@@ -270,14 +261,14 @@ export function TileWall({
       return size ? [{ mode, name, ...size }] : [];
     });
     return cells.map((cell) => {
-      const a = analysisFor(cell);
+      const a = fetched.get(cell);
       const spikes = data.counts[cell];
       const plots = captureAnalysisPlots(a, spikes, !!pos, settings, frames);
       const waves = renderer?.capture(cell);
       if (waves) {
         plots.unshift({ mode: "waveforms", name: "Waveforms", canvas: waves });
       }
-      return { cell, spikes, stats: cellStatEntries(a, !!pos, spikes), plots };
+      return { cell, spikes, stats: cellStatEntries(a, !!pos, spikes, shown), plots };
     });
   };
   useImperativeHandle(ref, () => ({ capture }));
@@ -328,26 +319,19 @@ export function TileWall({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll only when the selection, cut or column count changes, not as cells are added
   }, [selected, data.session, columns]);
-  useEffect(() => {
-    cache.current.clear();
-    setAnalysisVersion((v) => v + 1);
-  }, [analysisKey]);
+  // Whenever anything an analysis reads might have changed, asks again for every visible
+  // cell; unchanged values aren't recomputed, and keep their objects.
   useEffect(() => {
     let current = true;
     const batch = crypto.randomUUID();
-    const missing = visible.filter((c) => !analysisFor(c));
-    if (!missing.length) {
-      return;
-    }
     Promise.all(
-      missing.map((cell) =>
+      visible.map((cell) =>
         request("analysis", {
           session: data.session,
           cell,
           ...position,
           settings,
-          summary: true,
-          spatialAc: shown.sc,
+          parts,
           batch,
         }),
       ),
@@ -356,24 +340,33 @@ export function TileWall({
         if (!current) {
           return;
         }
-        // Stored under the membership the worker actually analysed, which can
-        // differ from this render's data if an edit was processed first.
+        // Each keeps the membership the worker actually analysed, which can differ from
+        // this render's data if an edit was processed first (see analysisFor).
+        const next = new Map<number, AnalysisData>();
         for (const result of results) {
-          if (result.membership) {
-            cache.current.set(result.membership, result);
-          }
+          const previous = held.current.get(result.cell);
+          next.set(result.cell, reuseParts(previous ?? null, result));
         }
-        while (cache.current.size > 512) {
-          cache.current.delete(cache.current.keys().next().value!);
-        }
+        held.current = next;
         setAnalysisVersion((v) => v + 1);
       })
       .catch(() => {});
     return () => {
       current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by analysisKey (position and analysis settings), the visible signature and data
-  }, [analysisKey, signature, data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- visible follows signature; position follows trial and headerEdits; parts follow the shown plots
+  }, [
+    signature,
+    data,
+    trial,
+    headerEdits,
+    settings,
+    shown.spatial,
+    shown.direction,
+    shown.sc,
+    shown.speed,
+    shown.ac,
+  ]);
   useEffect(() => {
     if (!shown.waveforms || !waveCanvas.current) {
       return;
@@ -678,7 +671,7 @@ export function TileWall({
                   </div>
                 )}
                 {jiggles.some((tile) => tile.cell === cell) && <div className="tile-edit-cover" />}
-                <CellStats entries={cellStatEntries(a, !!pos, data.counts[cell])} />
+                <CellStats entries={cellStatEntries(a, !!pos, data.counts[cell], shown)} />
               </section>
             );
           })}

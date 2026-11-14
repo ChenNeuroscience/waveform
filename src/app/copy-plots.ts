@@ -28,16 +28,18 @@ export interface AnalysisFrame {
   height: number;
 }
 
+/** A cell's stats line: the peak of each shown map, then its spike count. */
 export function cellStatEntries(
   a: AnalysisData | undefined | null,
   hasPos: boolean,
   spikes: number,
+  shown: { spatial: boolean; direction: boolean },
 ) {
   const entries = [];
-  if (a && hasPos && a.peak > 0) {
+  if (a && hasPos && shown.spatial && a.peak > 0) {
     entries.push({ label: "spa max", value: `${a.peak.toFixed(1)}Hz` });
   }
-  const direction = a && hasPos ? Math.max(...a.direction) : 0;
+  const direction = a && hasPos && shown.direction ? Math.max(...a.direction) : 0;
   if (direction > 0) {
     entries.push({ label: "dir max", value: `${direction.toFixed(1)}Hz` });
   }

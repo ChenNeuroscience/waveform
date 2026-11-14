@@ -11,7 +11,6 @@ import { escapeHtml } from "./clipboard-layout";
 export interface PathSource {
   name: string;
   id: string;
-  key: string;
   recording?: CopyRecording;
 }
 
@@ -27,36 +26,24 @@ export async function capturePaths(
   cells: number[],
   settings: Settings,
   tetNum: number,
-  cache: Map<string, CopyTrialAnalysis>,
   checkCurrent: () => void,
 ) {
+  // The worker answers what it has already analysed from its cache.
   const results = await request("copy_analysis", {
-    recordings: sources
-      .filter(
-        (s) =>
-          s.recording &&
-          (!cache.has(s.key) ||
-            cells.some((cell) => !cache.get(s.key)!.cells.some((c) => c.cell === cell))),
-      )
-      .map((s) => s.recording!),
+    recordings: sources.flatMap((s) => (s.recording ? [s.recording] : [])),
     cells,
     settings,
     path: true,
   });
   checkCurrent();
-  for (const result of results) {
-    const source = sources.find((s) => s.id === result.trialId)!;
-    const previous = cache.get(source.key);
-    const merged = new Map(previous?.cells.map((c) => [c.cell, c]));
-    result.cells.forEach((c) => merged.set(c.cell, c));
-    cache.set(source.key, { ...result, cells: [...merged.values()] });
-  }
+  const resultFor = (source: PathSource | undefined) =>
+    results.find((r) => r.trialId === source?.id);
   const html: string[] = [];
   const text: string[] = [];
   const size = 160;
   const ratio = Math.min(2, devicePixelRatio || 1);
   for (const source of sources) {
-    const result = cache.get(source.key);
+    const result = resultFor(source);
     const position = result?.position;
     const timing = position && experimentTiming({ tetrode: position.header }, position.duration);
     const title = `${source.name} · t${tetNum}${timing ? ` · ${timing.durationText}${timing.text !== "Start time unavailable" ? ` · ${timing.text}` : ""}${timing.date ? ` · ${timing.date}` : ""}` : ""}`;
@@ -102,6 +89,6 @@ export async function capturePaths(
   return {
     html: html.join(""),
     text: text.join("\n"),
-    layers: pathLayers(cache.get(sources[0]?.key), cells),
+    layers: pathLayers(resultFor(sources[0]), cells),
   };
 }

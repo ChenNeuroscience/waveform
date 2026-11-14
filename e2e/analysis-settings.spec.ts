@@ -30,7 +30,13 @@ test("temporal and directional controls reach Rust without coupling spatial sett
         });
       }
       override postMessage(message: any) {
-        if (message.type === "analysis" && message.cell === 1)
+        // Only requests for the parts checked here: others leave them empty.
+        if (
+          message.type === "analysis" &&
+          message.cell === 1 &&
+          message.parts?.includes("ac") &&
+          message.parts?.includes("direction")
+        )
           this.requests.set(message.id, message.settings);
         super.postMessage(message);
       }
