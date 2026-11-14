@@ -1,5 +1,7 @@
 import { it, expect } from "vitest";
-import { corePromise, decodeCut } from "./wasm";
+import { corePromise, decodeCut, seedRecording } from "./wasm";
+import { ask } from "../src/worker/compute";
+import { defaultSettings } from "../src/types";
 import { demoFiles, recordingSource } from "../src/worker/demo";
 import { parseHeader } from "../src/files";
 it("generated files share an acquisition clock and support exact random-access byte ranges", async () => {
@@ -37,17 +39,11 @@ it("generated files share an acquisition clock and support exact random-access b
       ).header.num_spikes,
     );
   expect(new Set(await decodeCut(partial, n7))).toEqual(new Set([0, 1, 2]));
-  const p = w.alloc_bytes(216 * 9),
-    engine = w.engine_new(9);
-  try {
-    new Uint8Array(w.memory.buffer, p, b.length).set(b);
-    w.engine_push(engine, p, b.length);
-    const times = [...new Uint32Array(w.memory.buffer, w.engine_times(engine), 9)];
-    // Poisson spike times on the 96 kHz clock, starting in the first seconds.
-    expect(times).toEqual([...times].sort((x, y) => x - y));
-    expect(times[8]).toBeLessThan(96000 * 5);
-  } finally {
-    w.engine_free(engine);
-    w.free_bytes(p, 216 * 9);
-  }
+  const nine = await seedRecording([], Array(9).fill(0), { raw: b });
+  const times = [
+    ...(await ask(w, { settings: defaultSettings, recording: nine }, "population")).buffers.times,
+  ];
+  // Poisson spike times on the 96 kHz clock, starting in the first seconds.
+  expect(times).toEqual([...times].sort((x, y) => x - y));
+  expect(times[8]).toBeLessThan(96000 * 5);
 });

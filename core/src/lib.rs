@@ -1,15 +1,17 @@
 //! Chunk-fed LTX decoding and exact population cut operations.
 //!
-//! ABI safety contract: engine pointers must be live pointers from engine_new; byte
-//! allocations must be freed once with their original length; inputs must be in-bounds
-//! and labels must be validated to 0..MAX_CELLS before recounting. This module is called
-//! only by the trusted worker wrapper; raw ABI functions are not a public input API.
+//! Nothing here holds state between requests. A recording's spikes are read into a
+//! `Population` and kept by the compute graph (compute.rs), as are its labels at each point
+//! of its edit history; edits are commands (commands.rs) that make new labels from the
+//! current ones, working on an `Edit`.
+//!
+//! ABI safety contract: builder pointers must be live pointers from their `*_new`; byte
+//! allocations must be freed once with their original length; inputs must be in-bounds.
+//! This module is called only by the trusted worker wrapper; raw ABI functions are not a
+//! public input API.
 use std::slice;
-macro_rules! getter{($ptr:ident,$len:ident,[$($field:ident).+],$typ:ty)=>{
- #[no_mangle]pub unsafe extern "C" fn $ptr(e:*mut Engine)->*const $typ{let e=&*e;e.$($field).+.as_ptr()}
- #[no_mangle]pub unsafe extern "C" fn $len(e:*mut Engine)->usize{let e=&*e;e.$($field).+.len()}
-};}
 mod cache;
+mod commands;
 mod compute;
 mod compute_handlers;
 mod dsp;
@@ -22,40 +24,19 @@ pub mod synthetic;
 mod waves;
 pub const RECORD: usize = 216;
 pub const MAX_CELLS: usize = 1024;
+
+/// A recording's spikes as read from its file: each spike's time and four peak-to-peak
+/// amplitudes. Raw waveforms are never kept.
 #[derive(Default)]
-pub struct Engine {
-    times: Vec<u32>,
-    amplitudes: Vec<u8>,
-    labels: Vec<u16>,
-    counts: Vec<u32>,
-    waves: waves::Waves,
-    gates: Vec<processing::Gate>,
-    edit: processing::EditState,
-    cut: Option<processing::CutParser>,
-    output: Vec<u8>,
-    groups: Vec<Vec<u32>>,
-    groups_dirty: bool,
-    /// Two u32 halves per cell of an order-independent hash of its full spike set;
-    /// cleared by every label change and rebuilt on first read.
-    cell_hashes: Vec<u32>,
-    pca: pca::Pca,
+pub struct Population {
+    pub(crate) times: Vec<u32>,
+    pub(crate) amplitudes: Vec<u8>,
 }
-impl Engine {
+impl Population {
     pub fn new(n: usize) -> Self {
         Self {
             times: Vec::with_capacity(n),
             amplitudes: Vec::with_capacity(n * 4),
-            labels: vec![0; n],
-            counts: vec![0; MAX_CELLS],
-            waves: Default::default(),
-            gates: vec![],
-            edit: Default::default(),
-            cut: None,
-            output: vec![],
-            groups: vec![],
-            groups_dirty: true,
-            cell_hashes: vec![],
-            pca: Default::default(),
         }
     }
     pub fn push(&mut self, data: &[u8]) {
@@ -74,41 +55,68 @@ impl Engine {
             }
         }
     }
-    pub fn recount(&mut self) {
-        self.groups_dirty = true;
-        self.cell_hashes.clear();
-        self.counts.fill(0);
-        for &c in &self.labels {
-            self.counts[c as usize] += 1;
-        }
+    pub fn len(&self) -> usize {
+        self.times.len()
     }
-    fn ensure_groups(&mut self) {
-        if !self.groups_dirty {
-            return;
-        }
-        self.groups = vec![];
-        self.groups = self
-            .counts
-            .iter()
-            .map(|&n| Vec::with_capacity(n as usize))
-            .collect();
-        for (i, &c) in self.labels.iter().enumerate() {
-            self.groups[c as usize].push(i as u32);
-        }
-        self.groups_dirty = false;
+    pub(crate) fn bytes(&self) -> usize {
+        self.times.capacity() * 4 + self.amplitudes.capacity()
     }
+}
+
+/// Spikes per cell.
+pub(crate) fn counts(labels: &[u16]) -> Vec<u32> {
+    let mut counts = vec![0; MAX_CELLS];
+    for &c in labels {
+        counts[c as usize] += 1;
+    }
+    counts
+}
+/// Each cell's spike indices, ascending.
+pub(crate) fn groups(labels: &[u16], counts: &[u32]) -> Vec<Vec<u32>> {
+    let mut groups: Vec<Vec<u32>> = counts
+        .iter()
+        .map(|&n| Vec::with_capacity(n as usize))
+        .collect();
+    for (i, &c) in labels.iter().enumerate() {
+        groups[c as usize].push(i as u32);
+    }
+    groups
+}
+/// Two u32 halves per cell of an order-independent hash of its spike set, so values made
+/// from a cell's spikes survive edits that leave them unchanged (including number swaps).
+pub(crate) fn cell_hashes(labels: &[u16]) -> Vec<u32> {
+    let mut sums = vec![0u64; MAX_CELLS];
+    for (i, &c) in labels.iter().enumerate() {
+        sums[c as usize] = sums[c as usize].wrapping_add(waves::mix(i as u64));
+    }
+    sums.iter()
+        .flat_map(|&h| [h as u32, (h >> 32) as u32])
+        .collect()
+}
+
+/// A working copy of a recording's labels for a command to change, with what it selects
+/// spikes by: their amplitudes, times and, if fitted, principal components.
+pub(crate) struct Edit<'a> {
+    pub(crate) population: &'a Population,
+    pub(crate) pca: Option<&'a [f32]>,
+    pub(crate) labels: Vec<u16>,
+}
+impl Edit<'_> {
+    /// A spike's normalised coordinate on a feature axis: four amplitudes, time, then four
+    /// principal components.
     fn axis(&self, i: usize, axis: usize) -> f32 {
+        let p = self.population;
         if axis < 4 {
-            self.amplitudes[i * 4 + axis] as f32 / 255.
+            p.amplitudes[i * 4 + axis] as f32 / 255.
         } else if axis == 4 {
-            self.times[i] as f32 / self.times.last().copied().unwrap_or(1).max(1) as f32
-        } else if (5..9).contains(&axis) && self.pca.ready {
-            self.pca.values[i * 4 + axis - 5]
+            p.times[i] as f32 / p.times.last().copied().unwrap_or(1).max(1) as f32
+        } else if let (5..9, Some(pca)) = (axis, self.pca) {
+            pca[i * 4 + axis - 5]
         } else {
             0.5
         }
     }
-    pub fn relabel(&mut self, source: u16, dest: u16, swap: bool) -> usize {
+    pub(crate) fn relabel(&mut self, source: u16, dest: u16, swap: bool) -> usize {
         let mut n = 0;
         for c in &mut self.labels {
             if *c == source {
@@ -119,10 +127,9 @@ impl Engine {
                 n += 1;
             }
         }
-        self.recount();
         n
     }
-    pub fn polygon(
+    pub(crate) fn polygon(
         &mut self,
         sources: &[u16],
         dest: u16,
@@ -143,10 +150,16 @@ impl Engine {
                 n += 1;
             }
         }
-        self.recount();
         n
     }
-    pub fn mask(&mut self, sources: &[u16], dest: u16, ax: usize, ay: usize, mask: &[u8]) -> usize {
+    pub(crate) fn mask(
+        &mut self,
+        sources: &[u16],
+        dest: u16,
+        ax: usize,
+        ay: usize,
+        mask: &[u8],
+    ) -> usize {
         let mut n = 0;
         for i in 0..self.labels.len() {
             let x = (self.axis(i, ax) * 255.).round() as usize;
@@ -159,7 +172,6 @@ impl Engine {
                 n += 1;
             }
         }
-        self.recount();
         n
     }
 }
@@ -184,94 +196,58 @@ pub extern "C" fn alloc_bytes(n: usize) -> *mut u8 {
 pub unsafe extern "C" fn free_bytes(p: *mut u8, n: usize) {
     drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(p, n)));
 }
+/// A population to stream a recording into (`population_push`), then hand to the compute
+/// graph (`compute_supply_population`) or free.
 #[no_mangle]
-pub extern "C" fn engine_new(n: usize) -> *mut Engine {
-    Box::into_raw(Box::new(Engine::new(n)))
-}
-/// A label-only engine for exporting an inactive cut; waveform arrays stay empty.
-#[no_mangle]
-pub extern "C" fn engine_new_cut(n: usize) -> *mut Engine {
-    let mut e = Engine::new(0);
-    e.labels = vec![0; n];
-    Box::into_raw(Box::new(e))
+pub extern "C" fn population_new(n: usize) -> *mut Population {
+    Box::into_raw(Box::new(Population::new(n)))
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_free(e: *mut Engine) {
-    drop(Box::from_raw(e));
+pub unsafe extern "C" fn population_push(p: *mut Population, data: *const u8, n: usize) {
+    (*p).push(slice::from_raw_parts(data, n));
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_push(e: *mut Engine, p: *const u8, n: usize) {
-    (*e).push(slice::from_raw_parts(p, n));
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_times(e: *mut Engine) -> *const u32 {
-    (*e).times.as_ptr()
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_amps(e: *mut Engine) -> *const u8 {
-    (*e).amplitudes.as_ptr()
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_labels(e: *mut Engine) -> *mut u16 {
-    (*e).labels.as_mut_ptr()
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_counts(e: *mut Engine) -> *const u32 {
-    (*e).counts.as_ptr()
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_recount(e: *mut Engine) {
-    (*e).recount();
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_relabel(e: *mut Engine, a: u16, b: u16, swap: u32) -> usize {
-    (*e).relabel(a, b, swap != 0)
-}
-#[no_mangle]
-pub unsafe extern "C" fn engine_polygon(
-    e: *mut Engine,
-    src: *const u16,
-    ns: usize,
-    dest: u16,
-    ax: usize,
-    ay: usize,
-    p: *const f32,
-    n: usize,
-) -> usize {
-    (*e).polygon(
-        slice::from_raw_parts(src, ns),
-        dest,
-        ax,
-        ay,
-        slice::from_raw_parts(p, n),
-    )
+pub unsafe extern "C" fn population_free(p: *mut Population) {
+    drop(Box::from_raw(p));
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    /// A population with these times and amplitudes.
+    pub(crate) fn population(times: Vec<u32>, amplitudes: Vec<u8>) -> Population {
+        Population { times, amplitudes }
+    }
+    fn edit<'a>(p: &'a Population, labels: Vec<u16>) -> Edit<'a> {
+        Edit {
+            population: p,
+            pca: None,
+            labels,
+        }
+    }
     #[test]
     fn signed_samples_big_endian_timestamps() {
-        let mut e = Engine::new(2);
+        let mut p = Population::new(2);
         let mut d = vec![0u8; RECORD * 2];
         for i in 0..2 {
             for c in 0..4 {
-                let p = i * RECORD + c * 54;
-                d[p..p + 4].copy_from_slice(&(4000u32 + i as u32).to_be_bytes());
-                d[p + 4] = 128;
-                d[p + 5] = 127;
+                let q = i * RECORD + c * 54;
+                d[q..q + 4].copy_from_slice(&(4000u32 + i as u32).to_be_bytes());
+                d[q + 4] = 128;
+                d[q + 5] = 127;
             }
         }
-        e.push(&d[..RECORD]);
-        e.push(&d[RECORD..]);
-        assert_eq!(e.times, vec![4000, 4001]);
-        assert_eq!(e.amplitudes, vec![255; 8]);
+        p.push(&d[..RECORD]);
+        p.push(&d[RECORD..]);
+        assert_eq!(p.times, vec![4000, 4001]);
+        assert_eq!(p.amplitudes, vec![255; 8]);
     }
     #[test]
     fn exact_polygon_and_swap() {
-        let mut e = Engine::new(4);
-        e.times = vec![1, 2, 3, 4];
-        e.amplitudes = vec![25, 25, 0, 0, 230, 230, 0, 0, 50, 50, 0, 0, 200, 200, 0, 0];
-        e.labels = vec![1, 1, 2, 2];
+        let p = population(
+            vec![1, 2, 3, 4],
+            vec![25, 25, 0, 0, 230, 230, 0, 0, 50, 50, 0, 0, 200, 200, 0, 0],
+        );
+        let mut e = edit(&p, vec![1, 1, 2, 2]);
         assert_eq!(
             e.polygon(&[1, 2], 3, 0, 1, &[0., 0., 0.5, 0., 0.5, 0.5, 0., 0.5]),
             2
@@ -279,32 +255,28 @@ mod tests {
         assert_eq!(e.labels, vec![3, 1, 3, 2]);
         e.relabel(1, 2, true);
         assert_eq!(e.labels, vec![3, 2, 3, 1]);
-        assert_eq!(e.counts.iter().sum::<u32>(), 4);
+        assert_eq!(counts(&e.labels).iter().sum::<u32>(), 4);
     }
     #[test]
     fn nine_million_spikes_one_hundred_cells() {
-        let mut e = Engine::new(9_000_000);
-        for (i, c) in e.labels.iter_mut().enumerate() {
-            *c = (i % 101) as u16;
-        }
-        e.recount();
-        assert_eq!(e.counts.iter().sum::<u32>(), 9_000_000);
-        let before = e.counts[1] + e.counts[100];
+        let p = Population::default();
+        let labels = (0..9_000_000).map(|i| (i % 101) as u16).collect();
+        let mut e = edit(&p, labels);
+        let before = counts(&e.labels);
+        assert_eq!(before.iter().sum::<u32>(), 9_000_000);
         e.relabel(100, 1, false);
-        assert_eq!(e.counts[1], before);
-        assert_eq!(e.counts[100], 0);
+        let after = counts(&e.labels);
+        assert_eq!(after[1], before[1] + before[100]);
+        assert_eq!(after[100], 0);
     }
     #[test]
     fn brush_mask_preserves_other_labels() {
-        let mut e = Engine::new(4);
-        e.labels = vec![0, 7, 7, 5];
-        e.times = vec![1, 2, 3, 4];
-        e.amplitudes = vec![0; 16];
-        e.recount();
+        let p = population(vec![1, 2, 3, 4], vec![0; 16]);
+        let mut e = edit(&p, vec![0, 7, 7, 5]);
         let mask = vec![1u8; 65536];
         assert_eq!(e.mask(&[7], 3, 0, 1, &mask), 2);
         assert_eq!(e.labels, vec![0, 3, 3, 5]);
-        assert_eq!(e.counts[3], 2);
-        assert_eq!(e.counts[0], 1);
+        let c = counts(&e.labels);
+        assert_eq!((c[3], c[0]), (2, 1));
     }
 }

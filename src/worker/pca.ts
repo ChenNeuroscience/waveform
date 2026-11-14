@@ -1,17 +1,19 @@
 /** Bounded file I/O for PCA; the sampling plan and all numeric work live in Rust. */
 import { streamFile, copyU32, type Core } from "./wasm";
 
+/** Fits PCA for a recording into a new builder handle, for the compute graph to take
+ * (`compute_supply_pca`). */
 export async function fitPca(
   w: Core,
-  recording: { e: number; n: number; file: File; offset: number },
+  recording: { n: number; file: File; offset: number },
   samples: number,
   check: () => void,
   progress: (fraction: number, message: string) => void,
-) {
-  const { e, n, file, offset } = recording;
-  w.engine_pca_begin(e, samples);
+): Promise<number> {
+  const { n, file, offset } = recording;
+  const pca = w.pca_new(n, samples);
   try {
-    const ranges = copyU32(w, w.engine_pca_ranges(e), w.engine_pca_ranges_len(e));
+    const ranges = copyU32(w, w.pca_ranges(pca), w.pca_ranges_len(pca));
     for (let i = 0; i < ranges.length; i += 2) {
       check();
       const [first, count] = ranges.subarray(i, i + 2);
@@ -23,14 +25,14 @@ export async function fitPca(
         Math.min(count, 32768) * 216,
         (p, bytes) => {
           check();
-          w.engine_pca_sample(e, p, bytes);
+          w.pca_sample(pca, p, bytes);
         },
       );
       progress((0.15 * (i + 2)) / ranges.length, "Sampling waveforms…");
     }
     check();
     progress(0.15, "Fitting four principal components…");
-    if (!w.engine_pca_fit(e)) {
+    if (!w.pca_fit(pca)) {
       throw new Error("PCA eigensolver did not converge.");
     }
     await streamFile(
@@ -41,16 +43,17 @@ export async function fitPca(
       32768 * 216,
       (p, bytes) => {
         check();
-        w.engine_pca_project(e, p, bytes);
+        w.pca_project(pca, p, bytes);
       },
       (fraction) => progress(0.2 + fraction * 0.8, "Projecting all spikes…"),
     );
     check();
-    if (!w.engine_pca_finish(e)) {
+    if (!w.pca_finish(pca)) {
       throw new Error("Incomplete PCA projection.");
     }
+    return pca;
   } catch (error) {
-    w.engine_pca_clear(e);
+    w.pca_free(pca);
     throw error;
   }
 }

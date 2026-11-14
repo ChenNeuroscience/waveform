@@ -1,6 +1,4 @@
 //! Position decoding/post-processing and numeric cell analysis, entirely in Wasm.
-#[cfg(test)]
-use crate::Engine;
 use std::{cell::OnceCell, slice, sync::Arc};
 #[derive(Default, Clone)]
 struct Raw {
@@ -343,7 +341,6 @@ pub(crate) struct Analysis {
     /// Cell, map width and height, peak, refractory %, rate, arena width and height, spikes.
     pub(crate) meta: [f64; 9],
     pub(crate) spatial: Vec<f32>,
-    pub(crate) sc: Vec<f32>,
     pub(crate) spikes: Vec<f32>,
     pub(crate) direction: Vec<f32>,
     pub(crate) speed: Vec<f32>,
@@ -622,7 +619,8 @@ pub(crate) fn refractory(times: &[u32], tb: f64) -> f64 {
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn analyse(
-    e: &mut Engine,
+    spikes: &[u32],
+    labels: &[u16],
     pos: Option<&Position>,
     cell: u16,
     tb: f64,
@@ -638,10 +636,11 @@ pub(crate) fn analyse(
 ) -> Analysis {
     let (speed_bin, speed_max, ns) = speed_bins(speed_bin, speed_max);
     let nd = direction_bins(dir_bin);
-    e.ensure_groups();
-    let times: Vec<u32> = e.groups[cell as usize]
+    let times: Vec<u32> = labels
         .iter()
-        .map(|&i| e.times[i as usize])
+        .zip(spikes)
+        .filter(|(&c, _)| c == cell)
+        .map(|(_, &t)| t)
         .collect();
     let n = times.len();
     let ac = temporal_ac(&times, tb, window, ac_bin_ms);
@@ -680,7 +679,6 @@ pub(crate) fn analyse(
             n as f64,
         ],
         spatial,
-        sc: vec![],
         spikes,
         direction,
         speed,
@@ -721,6 +719,17 @@ pub unsafe extern "C" fn position_free(p: *mut Position) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    /// Spike times and labels, as `analyse` takes them.
+    #[derive(Default)]
+    struct Engine {
+        times: Vec<u32>,
+        labels: Vec<u16>,
+    }
+    impl Engine {
+        fn new(_: usize) -> Self {
+            Self::default()
+        }
+    }
     pub(crate) fn recording(rows: &[[u16; 6]], ppm: f32, rate: f64) -> Position {
         let mut p = Position::new(rows.len(), ppm, rate, 0., 0., ppm, ppm);
         let mut bytes = vec![0u8; rows.len() * 20];
@@ -826,7 +835,8 @@ pub(crate) mod tests {
         e.times = vec![0];
         e.labels = vec![1];
         let a = analyse(
-            &mut e,
+            &e.times,
+            &e.labels,
             Some(&p),
             1,
             1000.,
@@ -841,7 +851,8 @@ pub(crate) mod tests {
             45.,
         );
         let b = analyse(
-            &mut e,
+            &e.times,
+            &e.labels,
             Some(&p),
             1,
             1000.,
@@ -856,7 +867,8 @@ pub(crate) mod tests {
             45.,
         );
         let c = analyse(
-            &mut e,
+            &e.times,
+            &e.labels,
             Some(&p),
             1,
             1000.,
@@ -884,11 +896,17 @@ pub(crate) mod tests {
         let mut e = Engine::new(4);
         e.times = vec![0, 5, 15, 25];
         e.labels = vec![1; 4];
-        let a = analyse(&mut e, None, 1, 1000., 1., 3., 1, 20., 5., 6., 1, 4., 45.);
+        let a = analyse(
+            &e.times, &e.labels, None, 1, 1000., 1., 3., 1, 20., 5., 6., 1, 4., 45.,
+        );
         assert_eq!(a.ac, vec![0., 1., 2., 1.]);
-        let b = analyse(&mut e, None, 1, 1000., 1., 3., 1, 18., 7., 6., 1, 4., 45.);
+        let b = analyse(
+            &e.times, &e.labels, None, 1, 1000., 1., 3., 1, 18., 7., 6., 1, 4., 45.,
+        );
         assert_eq!(b.ac, vec![1., 2., 1.]);
-        let c = analyse(&mut e, None, 1, 1000., 1., 3., 1, 20., 50., 6., 1, 4., 45.);
+        let c = analyse(
+            &e.times, &e.labels, None, 1, 1000., 1., 3., 1, 20., 50., 6., 1, 4., 45.,
+        );
         assert_eq!(c.ac, vec![4.]);
     }
 
@@ -906,7 +924,8 @@ pub(crate) mod tests {
         e.times = vec![0, 10, 20, 39, 40, 59, 60, 79, 80, 1000];
         e.labels = vec![1; 10];
         let a = analyse(
-            &mut e,
+            &e.times,
+            &e.labels,
             Some(&p),
             1,
             1000.,
@@ -938,7 +957,8 @@ pub(crate) mod tests {
         let mut xs = |sync: f64| -> Vec<u32> {
             p.process(1, 0., 0., sync);
             analyse(
-                &mut e,
+                &e.times,
+                &e.labels,
                 Some(&p),
                 1,
                 1000.,
@@ -998,7 +1018,8 @@ pub(crate) mod tests {
         e.times = (0..10).map(|i| i * 100).collect();
         e.labels = vec![1; 10];
         let a = analyse(
-            &mut e,
+            &e.times,
+            &e.labels,
             Some(&p),
             1,
             1000.,
@@ -1025,7 +1046,8 @@ pub(crate) mod tests {
         e.times = vec![0];
         e.labels = vec![1];
         let a = analyse(
-            &mut e,
+            &e.times,
+            &e.labels,
             Some(&p),
             1,
             1000.,
@@ -1065,7 +1087,8 @@ pub(crate) mod tests {
         e.times = vec![100, 1100, 2100];
         e.labels = vec![1; 3];
         let a = analyse(
-            &mut e,
+            &e.times,
+            &e.labels,
             Some(&p),
             1,
             1000.,

@@ -1,7 +1,7 @@
 //! Four global waveform PCs, fitted on bounded, time-stratified sample blocks.
 //! Covariance and eigendecomposition use nalgebra, as in prekk/src/extract.rs.
 //! Projection and scaling cover every spike; labels never influence the basis.
-use crate::{Engine, RECORD};
+use crate::RECORD;
 use nalgebra::{linalg::SymmetricEigen, DMatrix};
 use std::slice;
 
@@ -193,45 +193,61 @@ impl Pca {
         self.ready = true;
         true
     }
+}
 
-    pub(crate) fn bytes(&self) -> usize {
-        self.input.capacity() * 8 + self.values.capacity() * 4 + self.ranges.capacity() * 4
+/// PCA for one recording, built as the worker streams its file: sample blocks
+/// (`pca_ranges`), the fit, then every spike's projection. Then handed to the compute graph
+/// (`compute_supply_pca`) or freed.
+pub struct PcaBuilder {
+    pub(crate) pca: Pca,
+    n: usize,
+}
+impl PcaBuilder {
+    pub(crate) fn values(self) -> Vec<f32> {
+        self.pca.values
     }
 }
-
 #[no_mangle]
-pub unsafe extern "C" fn engine_pca_begin(e: *mut Engine, limit: usize) {
-    let e = &mut *e;
-    e.pca = Pca::new(e.labels.len(), limit);
+pub extern "C" fn pca_new(n: usize, limit: usize) -> *mut PcaBuilder {
+    Box::into_raw(Box::new(PcaBuilder {
+        pca: Pca::new(n, limit),
+        n,
+    }))
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_pca_sample(e: *mut Engine, p: *const u8, bytes: usize) {
-    (*e).pca.sample(slice::from_raw_parts(p, bytes));
+pub unsafe extern "C" fn pca_ranges(b: *const PcaBuilder) -> *const u32 {
+    (*b).pca.ranges.as_ptr()
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_pca_fit(e: *mut Engine) -> u32 {
-    let e = &mut *e;
-    if !e.pca.fit() {
+pub unsafe extern "C" fn pca_ranges_len(b: *const PcaBuilder) -> usize {
+    (*b).pca.ranges.len()
+}
+#[no_mangle]
+pub unsafe extern "C" fn pca_sample(b: *mut PcaBuilder, p: *const u8, bytes: usize) {
+    (*b).pca.sample(slice::from_raw_parts(p, bytes));
+}
+#[no_mangle]
+pub unsafe extern "C" fn pca_fit(b: *mut PcaBuilder) -> u32 {
+    let b = &mut *b;
+    if !b.pca.fit() {
         return 0;
     }
-    e.pca.values = Vec::with_capacity(e.labels.len() * PCS);
+    b.pca.values = Vec::with_capacity(b.n * PCS);
     1
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_pca_project(e: *mut Engine, p: *const u8, bytes: usize) {
-    (*e).pca.project(slice::from_raw_parts(p, bytes));
+pub unsafe extern "C" fn pca_project(b: *mut PcaBuilder, p: *const u8, bytes: usize) {
+    (*b).pca.project(slice::from_raw_parts(p, bytes));
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_pca_finish(e: *mut Engine) -> u32 {
-    let e = &mut *e;
-    e.pca.finish(e.labels.len()) as u32
+pub unsafe extern "C" fn pca_finish(b: *mut PcaBuilder) -> u32 {
+    let b = &mut *b;
+    b.pca.finish(b.n) as u32
 }
 #[no_mangle]
-pub unsafe extern "C" fn engine_pca_clear(e: *mut Engine) {
-    (*e).pca = Pca::default();
+pub unsafe extern "C" fn pca_free(b: *mut PcaBuilder) {
+    drop(Box::from_raw(b));
 }
-getter!(engine_pca_ranges, engine_pca_ranges_len, [pca.ranges], u32);
-getter!(engine_pca_values, engine_pca_values_len, [pca.values], f32);
 
 #[cfg(test)]
 mod tests {
@@ -339,39 +355,31 @@ mod tests {
         for (&a, &b) in p.values.iter().zip(&full.values) {
             assert!((a - b).abs() < 1e-5);
         }
-        let mut e = Engine::new(n);
-        e.push(&raw);
-        e.labels.fill(1);
-        e.recount();
-        e.pca = p;
+        let mut population = crate::Population::new(n);
+        population.push(&raw);
+        let mut e = crate::Edit {
+            population: &population,
+            pca: Some(&p.values),
+            labels: vec![1; n],
+        };
         let polygon = [0.75, -0.1, 1.1, -0.1, 1.1, 1.1, 0.75, 1.1];
         assert_eq!(e.polygon(&[1], 2, 0, 1, &polygon), 0);
-        unsafe {
-            crate::processing::engine_edit_begin(&mut e);
-        }
         assert_eq!(
             e.polygon(&[1], 2, 5, 6, &polygon),
             n / 2,
             "scores {:?}, bounds {:?}/{:?}",
-            &e.pca.values[..16],
-            e.pca.minimum,
-            e.pca.maximum
+            &p.values[..16],
+            p.minimum,
+            p.maximum
         );
         for (i, &label) in e.labels.iter().enumerate() {
-            assert_eq!(label, if e.pca.values[i * 4] > 0.75 { 2 } else { 1 });
+            assert_eq!(label, if p.values[i * 4] > 0.75 { 2 } else { 1 });
         }
-        unsafe {
-            crate::processing::engine_edit_finish(&mut e);
-            let patch = slice::from_raw_parts(
-                crate::processing::engine_patch(&mut e),
-                crate::processing::engine_patch_len(&mut e),
-            )
-            .to_vec();
-            assert_eq!(
-                crate::processing::engine_patch_apply(&mut e, patch.as_ptr(), patch.len(), 0),
-                0
-            );
-        }
+        let (_, patch) = crate::processing::diff(&vec![1; n], &e.labels);
+        assert_eq!(
+            crate::processing::apply_patch(&mut e.labels, &patch, false),
+            0
+        );
         assert!(e.labels.iter().all(|&c| c == 1));
     }
 

@@ -78,8 +78,6 @@ export interface CopyRecording {
   assetKey: string;
   cut?: File;
   cutKey?: string;
-  /** The cut's revision, which names its cells' analyses while it isn't loaded. */
-  revision?: number;
   pos?: File;
   posFile?: string;
   ppm?: number;

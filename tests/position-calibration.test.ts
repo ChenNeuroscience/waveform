@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { trajectory } from "../src/worker/position";
+import { trajectory } from "../src/worker/compute";
 import { defaultSettings, fileId, positionSource, SYNC_HEADER } from "../src/types";
 import {
   editHeader,

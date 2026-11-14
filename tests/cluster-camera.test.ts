@@ -8,11 +8,11 @@ import {
   encodeClusterProjection,
   decodeClusterProjection,
 } from "../src/plots/cluster-camera";
-import { corePromise } from "./wasm";
+import { corePromise, seedRecording } from "./wasm";
 import { pcaRecording } from "./pca-fixture";
-import { readRecording } from "../src/worker/recording";
-import { fitPca } from "../src/worker/pca";
-import { copyF32, copyU16, withF32, withU16 } from "../src/worker/wasm";
+import { ask, command } from "../src/worker/compute";
+import { withF32, withU16 } from "../src/worker/wasm";
+import { defaultSettings } from "../src/types";
 
 it("keeps a rectangular pane isotropic and zooms around the pointer", () => {
   const camera = { ...DEFAULT_CLUSTER_CAMERA, panX: 0.1, panY: -0.05 };
@@ -53,41 +53,34 @@ it("picks the front spike at an overlap, ignoring the fourth coordinate and clip
 it("rotated PCA lasso cuts use the selected PCs including PC4 and support exact undo", async () => {
   const w = await corePromise;
   const fixture = pcaRecording();
-  const a = await readRecording(w, new File([fixture.header, fixture.raw], "pca.1"));
-  try {
-    new Uint16Array(w.memory.buffer, w.engine_labels(a.e), a.n).set(fixture.labels);
-    w.engine_recount(a.e);
-    await fitPca(
-      w,
-      a,
-      64,
-      () => {},
-      () => {},
-    );
-    const values = copyF32(w, w.engine_pca_values(a.e), w.engine_pca_values_len(a.e));
-    // Omit PC2: view PC4 horizontally and PC3 vertically, with PC1 as depth.
-    const matrix = [0, 0, 1, 0, 0, 1, 0, 0];
-    const polygon = [0.5, -0.05, 1.05, -0.05, 1.05, 1.05, 0.5, 1.05];
-    const expected = fixture.labels.map((label, i) =>
-      label === 1 && values[i * 4 + 3] > 0.5 ? 3 : label,
-    );
-    w.engine_edit_begin(a.e);
+  const recording = await seedRecording([], fixture.labels, {
+    raw: fixture.raw,
+    header: fixture.header,
+  });
+  const settings = { ...defaultSettings, pcaSamples: 64 };
+  const values = (await ask(w, { settings, recording }, "pca")).buffers.values as Float32Array;
+  // Omit PC2: view PC4 horizontally and PC3 vertically, with PC1 as depth.
+  const matrix = [0, 0, 1, 0, 0, 1, 0, 0];
+  const polygon = [0.5, -0.05, 1.05, -0.05, 1.05, 1.05, 0.5, 1.05];
+  const expected = fixture.labels.map((label, i) =>
+    label === 1 && values[i * 4 + 3] > 0.5 ? 3 : label,
+  );
+  const { changed } = await command(w, { settings, recording, patch: "lasso" }, () =>
     withU16(w, [1], (sources, n) =>
       withU16(w, [0, 2, 3], (axes) =>
         withF32(w, matrix, (m) =>
           withF32(w, polygon, (p, count) =>
-            w.engine_projected_region(a.e, sources, n, 3, 5, axes, m, p, count, 0, 300, 200),
+            w.command_region(sources, n, 3, 5, axes, m, p, count, 0, 300, 200),
           ),
         ),
       ),
-    );
-    expect(w.engine_edit_finish(a.e)).toBeGreaterThan(0);
-    expect(copyU16(w, w.engine_labels(a.e), a.n)).toEqual(new Uint16Array(expected));
-    w.engine_patch_apply(a.e, w.engine_patch(a.e), w.engine_patch_len(a.e), 0);
-    expect(copyU16(w, w.engine_labels(a.e), a.n)).toEqual(new Uint16Array(fixture.labels));
-  } finally {
-    w.engine_free(a.e);
-  }
+    ),
+  );
+  expect(changed).toBeGreaterThan(0);
+  const at = async (history: string[]) =>
+    (await ask(w, { settings, recording: { ...recording, history } }, "view")).buffers.labels;
+  expect(await at(["lasso"])).toEqual(new Uint16Array(expected));
+  expect(await at([])).toEqual(new Uint16Array(fixture.labels));
 });
 
 it("projection codes name the displayed axes and restore every camera setting exactly", () => {

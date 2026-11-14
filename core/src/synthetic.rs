@@ -1027,7 +1027,7 @@ mod tests {
         let mut raw = vec![0; other.total * 216];
         other.records(0, &mut raw);
         assert_ne!(whole[..216 * 100], raw[..216 * 100]);
-        let mut e = crate::Engine::new(n);
+        let mut e = crate::Population::new(n);
         e.push(&whole);
         assert_eq!(e.times.len(), n);
         assert!(e.times.windows(2).all(|w| w[0] <= w[1]));

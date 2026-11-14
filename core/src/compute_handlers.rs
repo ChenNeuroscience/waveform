@@ -4,10 +4,16 @@
 //! many to keep. A value may carry by-products of its work (a rate map's peak) for other
 //! handlers to take from it, rather than computing them again.
 use crate::compute::{
-    answer, f32s, supply, Answer, Buffer, Handler, Leaf::*, Missing, Node, Part, Request, Route, L,
+    answer, f32s, staged_request, supply, u16s, u32s, u8s, Answer, Answered, Buffer, Handler, Key,
+    Leaf::*, Missing, Node, Part, Request, Route, L,
 };
+use crate::pca::PcaBuilder;
 use crate::position::{direction_bins, refractory, speed_bins, temporal_ac, Position};
+use crate::processing::{apply_patch, CellWaves as Waves, CutParser, Scan};
 use crate::spatial_ac::autocorrelation;
+use crate::waves::WaveOrder as Order;
+use crate::Population as Spikes;
+use std::{cell::RefCell, rc::Rc, slice};
 
 /// Rate-map colours are applied when the map is drawn, never computed with.
 const COLOURS: [Part; 2] = [L(MaxRate), L(RateMapSteps)];
@@ -17,9 +23,25 @@ const RAW_POSITIONS: usize = 2;
 const POSITIONS: usize = 4;
 const PER_POSITION: usize = 8;
 const PER_CELL: usize = 200;
+/// Recordings and their labels are large; the memo's budget bounds them too.
+const RECORDINGS: usize = 4;
+const LABELS: usize = 8;
+
+/// A scan to stream the file through, and where to keep its sample column and cell waveforms.
+type PendingScan = (Scan, Option<Key>, Option<Key>);
+thread_local! {
+    /// What JavaScript was last told is missing, when it needs more than the kind: a patch's
+    /// id, or the scan to stream the file through and where to keep what it reads.
+    static MISSING_PATCH: RefCell<Rc<str>> = RefCell::new("".into());
+    static PENDING_SCAN: RefCell<Option<PendingScan>> = const { RefCell::new(None) };
+}
 
 /// The handlers JavaScript can ask for, by name.
 pub(crate) static ROUTES: &[Route] = &[
+    ("population", answer::<Population>),
+    ("view", answer::<View>),
+    ("membership", membership),
+    ("pca", answer::<Pca>),
     ("path", answer::<Path>),
     ("positionInfo", answer::<PositionInfo>),
     ("cellStats", answer::<CellStats>),
@@ -31,6 +53,306 @@ pub(crate) static ROUTES: &[Route] = &[
     ("speedDwell", answer::<SpeedDwell>),
     ("temporalAc", answer::<TemporalAc>),
 ];
+
+/// A recording's spike times and amplitudes. Only JavaScript can read its file
+/// (`compute_supply_population`).
+pub(crate) struct Population;
+impl Handler for Population {
+    type Value = Spikes;
+    const NODE: Node = Node::Population;
+    const LIMIT: usize = RECORDINGS;
+    fn compute(_: &mut Request) -> Result<Spikes, Missing> {
+        Err(Missing::Population)
+    }
+    fn bytes(p: &Spikes) -> usize {
+        p.bytes()
+    }
+}
+impl Answer for Spikes {
+    fn buffers(&self) -> Vec<(&'static str, Buffer)> {
+        vec![
+            ("features", u8s(&self.amplitudes)),
+            ("times", u32s(&self.times)),
+        ]
+    }
+}
+/// Takes a population read for the staged inputs.
+#[no_mangle]
+pub unsafe extern "C" fn compute_supply_population(p: *mut Spikes) {
+    supply::<Population>(*Box::from_raw(p));
+}
+
+/// A cut file's labels, or none for an unsorted recording. Only JavaScript can read the file
+/// (`compute_supply_cut`).
+pub(crate) struct CutLabels;
+impl Handler for CutLabels {
+    type Value = Vec<u16>;
+    const NODE: Node = Node::CutLabels;
+    const LIMIT: usize = RECORDINGS;
+    fn compute(cx: &mut Request) -> Result<Vec<u16>, Missing> {
+        match &*cx.inputs().cut_source {
+            "unsorted" => Ok(vec![0; cx.inputs().n]),
+            _ => Err(Missing::Cut),
+        }
+    }
+    fn bytes(labels: &Vec<u16>) -> usize {
+        labels.len() * 2
+    }
+}
+/// Takes a finished cut parser for the staged inputs.
+#[no_mangle]
+pub unsafe extern "C" fn compute_supply_cut(p: *mut CutParser) {
+    supply::<CutLabels>(Box::from_raw(p).into_labels());
+}
+
+/// One edit's patch. Only JavaScript has it (`compute_supply_patch`).
+pub(crate) struct Patch;
+impl Handler for Patch {
+    type Value = Vec<u8>;
+    const NODE: Node = Node::Patch;
+    const LIMIT: usize = 64;
+    fn compute(cx: &mut Request) -> Result<Vec<u8>, Missing> {
+        let id = cx.inputs().patch.clone();
+        MISSING_PATCH.with(|m| *m.borrow_mut() = id);
+        Err(Missing::Patch)
+    }
+    fn bytes(patch: &Vec<u8>) -> usize {
+        patch.len()
+    }
+}
+/// The id of the patch last reported missing, as UTF-8.
+#[no_mangle]
+pub extern "C" fn missing_patch() -> *const u8 {
+    MISSING_PATCH.with(|m| m.borrow().as_ptr())
+}
+#[no_mangle]
+pub extern "C" fn missing_patch_len() -> usize {
+    MISSING_PATCH.with(|m| m.borrow().len())
+}
+/// Takes the bytes of the patch last reported missing.
+#[no_mangle]
+pub unsafe extern "C" fn compute_supply_patch(p: *const u8, n: usize) {
+    let id = MISSING_PATCH.with(|m| m.borrow().clone());
+    let mut cx = staged_request();
+    let _ = cx.keep_with::<Patch>(slice::from_raw_parts(p, n).to_vec(), |i| i.patch = id);
+}
+
+/// The labels after the edit history: the nearest kept earlier labels (or the cut's) with
+/// the patches since applied, in order.
+pub(crate) struct Labels;
+impl Handler for Labels {
+    type Value = Vec<u16>;
+    const NODE: Node = Node::Labels;
+    const LIMIT: usize = LABELS;
+    fn compute(cx: &mut Request) -> Result<Vec<u16>, Missing> {
+        let history = cx.inputs().history.clone();
+        let ids: Vec<&str> = history.split(',').filter(|id| !id.is_empty()).collect();
+        let kept = (1..ids.len()).rev().find_map(|k| {
+            let earlier = ids[..k].join(",");
+            Some((k, cx.peek_with::<Labels>(|i| i.history = earlier.into())?))
+        });
+        let (from, mut labels) = match kept {
+            Some((k, labels)) => (k, (*labels).clone()),
+            None => (0, (*cx.call::<CutLabels>()?).clone()),
+        };
+        for id in &ids[from..] {
+            let patch = cx.call_with::<Patch>(|i| i.patch = (*id).into())?;
+            if apply_patch(&mut labels, &patch, true) != 0 {
+                return Err(Missing::Invalid);
+            }
+        }
+        Ok(labels)
+    }
+    fn bytes(labels: &Vec<u16>) -> usize {
+        labels.len() * 2
+    }
+}
+pub(crate) struct Counts;
+impl Handler for Counts {
+    type Value = Vec<u32>;
+    const NODE: Node = Node::Counts;
+    const LIMIT: usize = LABELS;
+    fn compute(cx: &mut Request) -> Result<Vec<u32>, Missing> {
+        Ok(crate::counts(&cx.call::<Labels>()?))
+    }
+}
+/// Each cell's spike indices, ascending.
+pub(crate) struct Groups;
+impl Handler for Groups {
+    type Value = Vec<Vec<u32>>;
+    const NODE: Node = Node::Groups;
+    const LIMIT: usize = 2;
+    fn compute(cx: &mut Request) -> Result<Vec<Vec<u32>>, Missing> {
+        let labels = cx.call::<Labels>()?;
+        Ok(crate::groups(&labels, &cx.call::<Counts>()?))
+    }
+    fn bytes(groups: &Vec<Vec<u32>>) -> usize {
+        groups.iter().map(|g| g.len() * 4).sum()
+    }
+}
+pub(crate) struct CellHashes;
+impl Handler for CellHashes {
+    type Value = Vec<u32>;
+    const NODE: Node = Node::CellHashes;
+    const LIMIT: usize = LABELS;
+    fn compute(cx: &mut Request) -> Result<Vec<u32>, Missing> {
+        Ok(crate::cell_hashes(&cx.call::<Labels>()?))
+    }
+}
+pub(crate) struct WaveOrder;
+impl Handler for WaveOrder {
+    type Value = Order;
+    const NODE: Node = Node::WaveOrder;
+    const LIMIT: usize = 2;
+    fn compute(cx: &mut Request) -> Result<Order, Missing> {
+        Ok(crate::waves::order(&cx.call::<Labels>()?))
+    }
+    fn bytes(order: &Order) -> usize {
+        order.order.len() * 4
+    }
+}
+/// What the page shows of the labels.
+pub(crate) struct View;
+pub(crate) struct Shown {
+    labels: Rc<Vec<u16>>,
+    counts: Rc<Vec<u32>>,
+    hashes: Rc<Vec<u32>>,
+    order: Rc<Order>,
+}
+impl Handler for View {
+    type Value = Shown;
+    const NODE: Node = Node::View;
+    const LIMIT: usize = 2;
+    fn compute(cx: &mut Request) -> Result<Shown, Missing> {
+        Ok(Shown {
+            labels: cx.call::<Labels>()?,
+            counts: cx.call::<Counts>()?,
+            hashes: cx.call::<CellHashes>()?,
+            order: cx.call::<WaveOrder>()?,
+        })
+    }
+}
+impl Answer for Shown {
+    fn buffers(&self) -> Vec<(&'static str, Buffer)> {
+        vec![
+            ("labels", u16s(&self.labels)),
+            ("counts", u32s(&self.counts)),
+            ("cellHashes", u32s(&self.hashes)),
+            ("waveOrder", u32s(&self.order.order)),
+            ("waveStarts", u32s(&self.order.starts)),
+            ("waveHashes", u32s(&self.order.hashes)),
+        ]
+    }
+}
+
+/// The cell's spike count and membership hash, without copying the labels: so the page can
+/// tell whether an analysis was made from its cell's current spikes.
+fn membership(cx: &mut Request) -> Result<Answered, Missing> {
+    let cell = cx.cell() as usize;
+    let count = cx.call::<Counts>()?[cell];
+    let hashes = cx.call::<CellHashes>()?;
+    let values = vec![
+        count as f64,
+        hashes[cell * 2] as f64,
+        hashes[cell * 2 + 1] as f64,
+    ];
+    Ok(Answered::new(
+        0,
+        vec![("membership", Buffer::F64(values))],
+        None,
+    ))
+}
+
+/// Every waveform of a cell's spikes, read by streaming the file through a scan.
+pub(crate) struct CellWaves;
+impl Handler for CellWaves {
+    type Value = Waves;
+    const NODE: Node = Node::CellWaves;
+    const LIMIT: usize = 2;
+    fn compute(cx: &mut Request) -> Result<Waves, Missing> {
+        let indices = cx.call::<Groups>()?[cx.cell() as usize].clone();
+        let key = cx.key::<Self>()?;
+        let scan = Scan::new(cx.inputs().n, None, Some(indices));
+        PENDING_SCAN.with(|p| *p.borrow_mut() = Some((scan, None, Some(key))));
+        Err(Missing::Scan)
+    }
+    fn bytes(w: &Waves) -> usize {
+        w.waves.len() + w.indices.len() * 4
+    }
+}
+/// One sample of one channel for every spike, read by streaming the file through a scan.
+pub(crate) struct Gate;
+impl Handler for Gate {
+    type Value = Vec<i8>;
+    const NODE: Node = Node::Gate;
+    const LIMIT: usize = 2;
+    fn compute(cx: &mut Request) -> Result<Vec<i8>, Missing> {
+        let [channel, sample] = cx.inputs().gate;
+        let key = cx.key::<Self>()?;
+        let scan = Scan::new(
+            cx.inputs().n,
+            Some((channel as usize, sample as usize)),
+            None,
+        );
+        PENDING_SCAN.with(|p| *p.borrow_mut() = Some((scan, Some(key), None)));
+        Err(Missing::Scan)
+    }
+    fn bytes(column: &Vec<i8>) -> usize {
+        column.len()
+    }
+}
+/// The scan last reported missing, to stream the whole tetrode file through (`scan_feed`).
+#[no_mangle]
+pub extern "C" fn scan_take() -> *mut Scan {
+    PENDING_SCAN.with(|p| {
+        let (scan, gate, cell) = p.borrow_mut().take().expect("a scan was reported missing");
+        let scan = Box::into_raw(Box::new(scan));
+        // The keys stay behind for `compute_supply_scan`.
+        *p.borrow_mut() = Some((Scan::new(0, None, None), gate, cell));
+        scan
+    })
+}
+/// Keeps what a finished scan read where its request needed it.
+#[no_mangle]
+pub unsafe extern "C" fn compute_supply_scan(s: *mut Scan) {
+    let mut scan = *Box::from_raw(s);
+    let Some((_, gate, cell)) = PENDING_SCAN.with(|p| p.borrow_mut().take()) else {
+        return;
+    };
+    if let (Some(key), Some((_, _, column))) = (gate, scan.column.take()) {
+        crate::cache::put(key, column, Gate::LIMIT, Gate::bytes);
+    }
+    if scan.complete() {
+        if let (Some(key), Some((indices, waves))) = (cell, scan.cell.take()) {
+            crate::cache::put(
+                key,
+                Waves { indices, waves },
+                CellWaves::LIMIT,
+                CellWaves::bytes,
+            );
+        }
+    }
+}
+
+/// Four principal components of every spike. Only JavaScript can stream the samples and
+/// projection (`compute_supply_pca`).
+pub(crate) struct Pca;
+impl Handler for Pca {
+    type Value = Values;
+    const NODE: Node = Node::Pca;
+    const LIMIT: usize = 2;
+    fn compute(_: &mut Request) -> Result<Values, Missing> {
+        Err(Missing::Pca)
+    }
+    fn bytes(v: &Values) -> usize {
+        v.0.len() * 4
+    }
+}
+/// Takes a finished PCA for the staged inputs.
+#[no_mangle]
+pub unsafe extern "C" fn compute_supply_pca(b: *mut PcaBuilder) {
+    supply::<Pca>(Values(Box::from_raw(b).values()));
+}
 
 /// A position file as read. Only JavaScript can read it (`compute_supply_position`).
 pub(crate) struct RawPosition;
@@ -66,7 +388,7 @@ impl Handler for ProcessedPosition {
 }
 
 /// Values JavaScript copies out as one buffer.
-pub(crate) struct Values(Vec<f32>);
+pub(crate) struct Values(pub(crate) Vec<f32>);
 impl Answer for Values {
     fn buffers(&self) -> Vec<(&'static str, Buffer)> {
         vec![("values", f32s(&self.0))]
@@ -110,20 +432,23 @@ impl Answer for Info {
     }
 }
 
-/// A cell's spike times: the one handler that reads the loaded recording.
+/// A cell's spike times.
 pub(crate) struct CellSpikes;
 impl Handler for CellSpikes {
     type Value = Vec<u32>;
     const NODE: Node = Node::Spikes;
     const LIMIT: usize = PER_CELL;
     fn compute(cx: &mut Request) -> Result<Vec<u32>, Missing> {
-        let cell = cx.cell() as usize;
-        let e = cx.recording()?;
-        e.ensure_groups();
-        Ok(e.groups[cell]
+        let groups = cx.call::<Groups>()?;
+        let population = cx.call::<Population>()?;
+        let group = &groups[cx.cell() as usize];
+        Ok(group
             .iter()
-            .map(|&i| e.times[i as usize])
+            .map(|&i| population.times[i as usize])
             .collect())
+    }
+    fn bytes(times: &Vec<u32>) -> usize {
+        times.len() * 4
     }
 }
 
@@ -135,8 +460,17 @@ impl Handler for CellStats {
     const NODE: Node = Node::CellStats;
     const LIMIT: usize = PER_CELL;
     fn compute(cx: &mut Request) -> Result<Stats, Missing> {
-        let (tb, duration) = (cx.tb(), cx.duration());
+        let tb = cx.tb();
         let times = cx.call::<CellSpikes>()?;
+        // Without one in the header, the recording lasts until its last spike.
+        let duration = match cx.duration() {
+            d if d > 0. => d,
+            _ => cx
+                .call::<Population>()?
+                .times
+                .last()
+                .map_or(0., |&t| t as f64 / tb),
+        };
         let rate = if duration > 0. {
             times.len() as f64 / duration
         } else {
@@ -350,7 +684,7 @@ mod tests {
     use super::*;
     use crate::compute::{Inputs, NUMBERS};
     use crate::position::tests::recording;
-    use crate::Engine;
+    use crate::Population as Spikes;
 
     fn set(i: &mut Inputs, values: &[(crate::compute::Leaf, f64)]) {
         for &(leaf, value) in values {
@@ -368,6 +702,8 @@ mod tests {
         let mut i = Inputs {
             pos_file: "trial|a.pos".into(),
             recording: "t1".into(),
+            cut_source: "t1.cut".into(),
+            n: 30,
             cell: 1,
             tb: 1000.,
             duration: 1.,
@@ -397,28 +733,40 @@ mod tests {
         i
     }
     /// A walk over a 10 by 5 grid, unprocessed, and 30 spikes in two cells spread through it.
-    fn data() -> (Position, Engine) {
+    fn data() -> (Position, Vec<u32>, Vec<u16>) {
         let rows: Vec<_> = (0..50u16)
             .map(|i| [20 + (i % 10) * 5, 20 + (i / 10) * 5, 1023, 1023, 12, 0])
             .collect();
-        let mut e = Engine::new(30);
-        e.times = (0..30).map(|i| i * 31).collect();
-        e.labels = (0..30).map(|i| 1 + (i % 2) as u16).collect();
-        (recording(&rows, 100., 50.), e)
+        let times = (0..30).map(|i| i * 31).collect();
+        let labels = (0..30).map(|i| 1 + (i % 2) as u16).collect();
+        (recording(&rows, 100., 50.), times, labels)
     }
-    fn supply_raw(i: &Inputs, raw: Position) {
-        let key = Request::new(i.clone(), None).key::<RawPosition>().unwrap();
-        crate::cache::put(key, raw, RAW_POSITIONS);
+    /// Keeps `value` as `H`'s for `i`, as JavaScript supplies what handlers can't compute.
+    fn supply<H: Handler>(i: &Inputs, value: H::Value) {
+        let key = Request::new(i.clone()).key::<H>().unwrap();
+        crate::cache::put(key, value, H::LIMIT, H::bytes);
+    }
+    /// Supplies the recording's spikes (times only) and cut.
+    fn supply_recording(i: &Inputs, times: Vec<u32>, labels: Vec<u16>) {
+        supply::<Population>(
+            i,
+            Spikes {
+                times,
+                amplitudes: vec![0; 120],
+            },
+        );
+        supply::<CutLabels>(i, labels);
     }
 
     #[test]
     fn handlers_give_what_computing_everything_together_gives() {
-        let (raw, mut e) = data();
+        let (raw, times, labels) = data();
         let i = inputs();
-        supply_raw(&i, raw.variant(1, 0., 0., 0.));
+        supply_recording(&i, times.clone(), labels.clone());
+        supply::<RawPosition>(&i, raw.variant(1, 0., 0., 0.));
         let processed = raw.variant(1, 0., 0., 20.);
         for cell in [1, 2] {
-            let mut cx = Request::new(Inputs { cell, ..i.clone() }, Some(&mut e));
+            let mut cx = Request::new(Inputs { cell, ..i.clone() });
             let stats = cx.call::<CellStats>().unwrap();
             let rates = cx.call::<Ratemap>().unwrap();
             let sc = cx.call::<SpatialAc>().unwrap();
@@ -427,9 +775,9 @@ mod tests {
             let dwell = cx.call::<SpeedDwell>().unwrap();
             let ac = cx.call::<TemporalAc>().unwrap();
             let spikes = cx.call::<SpikePositions>().unwrap();
-            drop(cx);
             let direct = crate::position::analyse(
-                &mut e,
+                &times,
+                &labels,
                 Some(&processed),
                 cell,
                 1000.,
@@ -465,33 +813,136 @@ mod tests {
         }
     }
 
+    fn ask<H: Handler>(i: &Inputs) -> Result<u64, Missing> {
+        let mut cx = Request::new(i.clone());
+        cx.call::<H>()?;
+        Ok(cx.key::<H>()?.digest())
+    }
+
     #[test]
     fn handlers_say_what_they_miss_and_reuse_what_they_computed() {
-        let (raw, mut e) = data();
+        let (raw, times, labels) = data();
         let mut c = inputs();
-        // Named by cut, so a cell can be found without its spikes once computed.
-        c.cell_prefix = "cut|0".into();
-        fn ask<H: Handler>(i: &mut Inputs, e: Option<&mut Engine>) -> Result<u64, Missing> {
-            let mut cx = Request::new(i.clone(), e);
-            cx.call::<H>()?;
-            Ok(cx.key::<H>()?.digest())
-        }
-        assert_eq!(ask::<Ratemap>(&mut c, Some(&mut e)), Err(Missing::Position));
-        supply_raw(&c, raw.variant(1, 0., 0., 0.));
-        assert_eq!(ask::<Ratemap>(&mut c, None), Err(Missing::Recording));
-        let first = ask::<Ratemap>(&mut c, Some(&mut e)).unwrap();
-        assert_eq!(ask::<Ratemap>(&mut c, None), Ok(first));
-        // Colours never change the key. A bin width does, and that rate map is made from the
-        // spike samples already computed, so it still needs no recording; the speed dwell is unchanged.
-        let dwell = ask::<SpeedDwell>(&mut c, None).unwrap();
+        // Each missing resource in the order handlers need them.
+        assert_eq!(ask::<Ratemap>(&c), Err(Missing::Cut));
+        supply::<CutLabels>(&c, labels);
+        assert_eq!(ask::<Ratemap>(&c), Err(Missing::Position));
+        supply::<RawPosition>(&c, raw.variant(1, 0., 0., 0.));
+        assert_eq!(ask::<Ratemap>(&c), Err(Missing::Population));
+        supply::<Population>(
+            &c,
+            Spikes {
+                times,
+                amplitudes: vec![0; 120],
+            },
+        );
+        let first = ask::<Ratemap>(&c).unwrap();
+        // Colours never change the key; a bin width does, but not the speed dwell's.
+        let dwell = ask::<SpeedDwell>(&c).unwrap();
         set(&mut c, &[(MaxRate, 9.)]);
-        assert_eq!(ask::<Ratemap>(&mut c, None), Ok(first));
+        assert_eq!(ask::<Ratemap>(&c), Ok(first));
         set(&mut c, &[(BinCm, 2.)]);
-        let binned = ask::<Ratemap>(&mut c, None).unwrap();
-        assert_ne!(binned, first);
-        assert_eq!(ask::<SpeedDwell>(&mut c, None), Ok(dwell));
+        assert_ne!(ask::<Ratemap>(&c).unwrap(), first);
+        assert_eq!(ask::<SpeedDwell>(&c), Ok(dwell));
         // Another trial's position hasn't been read.
         c.pos_file = "other|a.pos".into();
-        assert_eq!(ask::<Ratemap>(&mut c, Some(&mut e)), Err(Missing::Position));
+        assert_eq!(ask::<Ratemap>(&c), Err(Missing::Position));
+    }
+
+    #[test]
+    fn labels_follow_the_edit_history_from_the_nearest_kept_point() {
+        let i = Inputs {
+            history: "a,b".into(),
+            ..inputs()
+        };
+        let base = vec![1, 1, 2, 2];
+        let after_a = vec![1, 3, 2, 2];
+        let after_b = vec![1, 3, 3, 2];
+        supply::<CutLabels>(&i, base.clone());
+        let labels = |history: &str| {
+            let mut cx = Request::new(Inputs {
+                history: history.into(),
+                ..i.clone()
+            });
+            cx.call::<Labels>().map(|l| (*l).clone())
+        };
+        assert_eq!(labels(""), Ok(base.clone()));
+        // A patch only JavaScript has: it is asked for by id.
+        assert_eq!(labels("a,b"), Err(Missing::Patch));
+        assert_eq!(MISSING_PATCH.with(|m| m.borrow().clone()), "a".into());
+        let patch = |id: &str, before: &[u16], after: &[u16]| {
+            let p = crate::processing::diff(before, after).1;
+            supply::<Patch>(
+                &Inputs {
+                    patch: id.into(),
+                    ..i.clone()
+                },
+                p,
+            );
+        };
+        patch("a", &base, &after_a);
+        assert_eq!(labels("a,b"), Err(Missing::Patch));
+        assert_eq!(MISSING_PATCH.with(|m| m.borrow().clone()), "b".into());
+        patch("b", &after_a, &after_b);
+        assert_eq!(labels("a,b"), Ok(after_b));
+        // Undo is the shorter history; a patch that doesn't fit is an error.
+        assert_eq!(labels("a"), Ok(after_a));
+        supply::<Patch>(
+            &Inputs {
+                patch: "bad".into(),
+                ..i.clone()
+            },
+            vec![1, 2, 3],
+        );
+        assert_eq!(labels("a,bad"), Err(Missing::Invalid));
+        // The cell's membership comes from the labels at its history.
+        let mut cx = Request::new(Inputs {
+            cell: 3,
+            ..i.clone()
+        });
+        let three = cx.key::<CellSpikesKey>().unwrap();
+        let mut cx = Request::new(Inputs {
+            cell: 3,
+            history: "a".into(),
+            ..i.clone()
+        });
+        assert_ne!(cx.key::<CellSpikesKey>().unwrap(), three);
+    }
+    /// The node of a cell's spikes, without computing them.
+    type CellSpikesKey = CellSpikes;
+
+    #[test]
+    fn commands_keep_new_labels_under_the_extended_history() {
+        let i = Inputs {
+            history: "".into(),
+            patch: "p1".into(),
+            ..inputs()
+        };
+        supply::<CutLabels>(&i, vec![1, 1, 2, 2]);
+        crate::compute::stage(i.clone());
+        assert_eq!(crate::commands::command_relabel(1, 2, 1), 0);
+        assert_eq!(crate::commands::command_changed(), 4);
+        let mut cx = Request::new(Inputs {
+            history: "p1".into(),
+            ..i.clone()
+        });
+        assert_eq!(*cx.call::<Labels>().unwrap(), vec![2, 2, 1, 1]);
+        // The patch is kept too, so the labels survive being dropped from the memo.
+        let mut cx = Request::new(Inputs {
+            patch: "p1".into(),
+            ..i.clone()
+        });
+        assert!(cx.call::<Patch>().is_ok());
+        // A split needs the source cell's waveforms, from a scan of the file.
+        crate::compute::stage(Inputs {
+            history: "p1".into(),
+            patch: "p2".into(),
+            ..i
+        });
+        assert_eq!(
+            crate::commands::command_split(1, 0, 14, 60),
+            Missing::Scan as i32
+        );
+        assert_eq!(crate::commands::command_split(1, 0, 99, 60), -1);
     }
 }
