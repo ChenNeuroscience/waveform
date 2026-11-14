@@ -94,7 +94,7 @@ export function useAnalyses({
           cell: displayCell,
           ...positionSource(trial, headerEdits),
           settings,
-          parts: DISPLAYED,
+          parts: settings.renderMode === "drift" ? [...DISPLAYED, "spikeDrift"] : DISPLAYED,
         })
           .then((a) => {
             if (live) {
@@ -135,7 +135,7 @@ export function useAnalyses({
           cell: target,
           ...positionSource(trial, headerEdits),
           settings,
-          parts: ["spikes"],
+          parts: settings.renderMode === "drift" ? ["spikes", "spikeDrift"] : ["spikes"],
         })
           .then((a) => {
             if (live) {

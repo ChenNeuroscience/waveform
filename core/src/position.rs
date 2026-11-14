@@ -373,6 +373,11 @@ fn box2(a: &[f32], w: usize, h: usize, k: usize) -> Vec<f32> {
     }
     out
 }
+/// The position samples of a cell's spikes in the arena, and those spikes' times.
+pub(crate) struct Samples {
+    pub(crate) samples: Vec<u32>,
+    pub(crate) times: Vec<u32>,
+}
 /// The speed histogram's bin width, maximum and bin count, from its settings.
 pub(crate) fn speed_bins(speed_bin: f32, speed_max: f32) -> (f32, f32, usize) {
     let speed_bin = speed_bin.clamp(0.5, 100.);
@@ -462,20 +467,22 @@ impl Position {
         }
         dwell
     }
-    /// The position sample of each spike (at `times`, in ticks of `tb`) that falls in the arena.
-    pub(crate) fn spike_samples(&self, times: &[u32], tb: f64) -> Vec<u32> {
+    /// The position sample of each spike (at `times`, in ticks of `tb`) that falls in the arena,
+    /// with that spike's time.
+    pub(crate) fn spike_samples(&self, times: &[u32], tb: f64) -> Samples {
         // Spike times are the reference clock; the position track was moved by
         // `sync`, so a spike at time t takes the sample recorded at t - sync.
         let shift = self.sync * tb;
-        times
+        let (samples, times) = times
             .iter()
             .filter_map(|&t| {
                 let at = (t as f64 - shift) * self.rate / tb;
                 let cursor = at.floor() as usize;
                 (at >= 0. && cursor < self.x.len() && self.dwell(cursor).is_some())
-                    .then_some(cursor as u32)
+                    .then_some((cursor as u32, t))
             })
-            .collect()
+            .unzip();
+        Samples { samples, times }
     }
     /// Normalised (x, y) of each spike's sample.
     pub(crate) fn spike_positions(&self, samples: &[u32]) -> Vec<f32> {
@@ -522,6 +529,31 @@ impl Position {
             })
             .collect();
         (map, peak)
+    }
+    /// The mean time of the spikes in each spatial bin, from 0 (the recording's start) to 1
+    /// (its last spike, at `last`), smoothed like the rate map; NaN where there are none, and
+    /// where the animal never went (as the rate map, by `occupancy`).
+    pub(crate) fn drift_map(
+        &self,
+        spikes: &Samples,
+        occupancy: &[f32],
+        last: u32,
+        w: usize,
+        h: usize,
+        smoothing: usize,
+    ) -> Vec<f32> {
+        let (mut hits, mut time) = (vec![0.; w * h], vec![0.; w * h]);
+        for (&i, &t) in spikes.samples.iter().zip(&spikes.times) {
+            let b = self.spatial_bin(i as usize, w, h);
+            hits[b] += 1.;
+            time[b] += t as f32 / last.max(1) as f32;
+        }
+        let (sh, st) = (box2(&hits, w, h, smoothing), box2(&time, w, h, smoothing));
+        sh.iter()
+            .zip(st)
+            .zip(occupancy)
+            .map(|((&n, t), &o)| if n > 0. && o > 0. { t / n } else { f32::NAN })
+            .collect()
     }
     /// Spikes per second facing each direction, smoothed around the circle.
     pub(crate) fn direction_map(
@@ -647,7 +679,7 @@ pub(crate) fn analyse(
     let (w, h) = pos.map(|p| p.grid(bin)).unwrap_or((0, 0));
     let (spatial, peak, spikes, direction, speed, speed_dwell) = match pos {
         Some(p) => {
-            let samples = p.spike_samples(&times, tb);
+            let samples = p.spike_samples(&times, tb).samples;
             let (spatial, peak) = p.rate_map(&samples, &p.spatial_occupancy(w, h), w, h, smoothing);
             let dwell = p.speed_dwell(speed_bin, speed_max, ns);
             (

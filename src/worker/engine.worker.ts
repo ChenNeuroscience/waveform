@@ -305,9 +305,18 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
       };
       // Tile charts omit per-spike overlays; path copies keep selected dots and need the
       // speed dwell, falling back on cell 0 for it.
+      const drift = m.settings.renderMode === "drift";
       const parts: AnalysisPart[] = m.path
-        ? ["stats", "spikes", "speedDwell"]
-        : ["stats", "spatial", "direction", "speed", "ac", ...(m.spatialAc ? ["sc" as const] : [])];
+        ? ["stats", "spikes", "speedDwell", ...(drift ? ["spikeDrift" as const] : [])]
+        : [
+            "stats",
+            "spatial",
+            "direction",
+            "speed",
+            "ac",
+            ...(m.spatialAc ? ["sc" as const] : []),
+            ...(drift ? ["spatialDrift" as const] : []),
+          ];
       const found = new Map<number, AnalysisData>();
       for (const cell of new Set(m.path ? [...m.cells, 0] : m.cells)) {
         found.set(cell, await analysis(w, copied, cell, parts));

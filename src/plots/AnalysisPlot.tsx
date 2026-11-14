@@ -12,6 +12,15 @@ export interface AnalysisDrawing {
   compact?: boolean;
   speedAlignment?: "left" | "right";
   positionSpeed?: boolean;
+  /** Drift colouring for the rate map: opacity for rate, red (early) to green (late) for
+   * each bin's mean spike time, as drift colours waveforms and features. Needs
+   * `data.spatialDrift`. */
+  drift?: boolean;
+}
+/** A drift colour: red at the recording's start to green at its end, at `alpha`. */
+export function driftColour(t: number, alpha = 1) {
+  const c = (v: number) => Math.round(255 * Math.min(1, Math.max(0, v)));
+  return `rgba(${c(1 - t)},${c(t)},0,${alpha})`;
 }
 
 /** Draw an analysis plot into a canvas of the given CSS size (also used off-screen). */
@@ -27,6 +36,7 @@ export function drawAnalysis(
     compact = false,
     speedAlignment = "right",
     positionSpeed = false,
+    ...options
   }: AnalysisDrawing,
 ) {
   const dpr = Math.min(2, devicePixelRatio || 1);
@@ -63,9 +73,18 @@ export function drawAnalysis(
       { length: rows + 1 },
       (_, y) => Math.round((box.y + y * box.unit) * dpr) / dpr,
     );
+    const drift = mode === "spatial" && options.drift ? data.spatialDrift : undefined;
     for (let i = 0; i < values.length; i++) {
       const v = values[i];
-      ctx.fillStyle = mode === "sc" ? correlationColour(v) : rateMapColour(v, scale, palette);
+      if (drift) {
+        // Over the white background: unvisited and silent bins stay white.
+        if (!Number.isFinite(v) || !Number.isFinite(drift[i])) {
+          continue;
+        }
+        ctx.fillStyle = driftColour(drift[i], Math.min(1, v / scale));
+      } else {
+        ctx.fillStyle = mode === "sc" ? correlationColour(v) : rateMapColour(v, scale, palette);
+      }
       const x = i % columns;
       const y = Math.floor(i / columns);
       ctx.fillRect(xs[x], ys[y], xs[x + 1] - xs[x], ys[y + 1] - ys[y]);
@@ -148,7 +167,9 @@ export function drawAnalysis(
 
 export function AnalysisPlot(props: AnalysisDrawing) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const { data, mode, maxRate, rateMapSteps, compact, speedAlignment, positionSpeed } = props;
+  const { data, mode, maxRate, rateMapSteps, compact, speedAlignment, positionSpeed, drift } =
+    props;
+  const driftValues = mode === "spatial" && drift ? data.spatialDrift : undefined;
   // Redrawn when this plot's own values change, not the rest of the cell's analysis: parts
   // whose cache keys are unchanged keep their arrays (see reuseParts).
   const values =
@@ -165,7 +186,16 @@ export function AnalysisPlot(props: AnalysisDrawing) {
               : data.speed;
   useEffect(() => {
     const c = canvas.current!;
-    const drawing = { data, mode, maxRate, rateMapSteps, compact, speedAlignment, positionSpeed };
+    const drawing = {
+      data,
+      mode,
+      maxRate,
+      rateMapSteps,
+      compact,
+      speedAlignment,
+      positionSpeed,
+      drift,
+    };
     const draw = () => drawAnalysis(c, c.clientWidth, c.clientHeight, drawing);
     draw();
     const ro = new ResizeObserver(draw);
@@ -174,6 +204,8 @@ export function AnalysisPlot(props: AnalysisDrawing) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- values (with the map's shape) stand for data
   }, [
     values,
+    driftValues,
+    drift,
     data.width,
     data.height,
     data.peak,

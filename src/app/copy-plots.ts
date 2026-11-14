@@ -82,6 +82,7 @@ export function captureAnalysisPlots(
         mode,
         maxRate: mode === "spatial" ? settings.maxRate : 0,
         rateMapSteps: settings.rateMapSteps,
+        drift: settings.renderMode === "drift",
         compact: true,
       });
     }

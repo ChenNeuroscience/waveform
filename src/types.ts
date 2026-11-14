@@ -160,6 +160,8 @@ export const ANALYSIS_PARTS = [
   "speedDwell",
   "ac",
   "spikes",
+  "spatialDrift",
+  "spikeDrift",
 ] as const;
 export type AnalysisPart = (typeof ANALYSIS_PARTS)[number];
 /** A cell's analysis. Parts that weren't asked for are empty, with no key. */
@@ -189,6 +191,10 @@ export interface AnalysisData {
   ac: Float32Array;
   /** Normalised (x, y) of each spike on the path. */
   spikes: Float32Array;
+  /** For drift colouring: each rate-map bin's mean spike time, and each path spike's time,
+   * from 0 (the recording's start) to 1 (its last spike); NaN where a bin has no spikes. */
+  spatialDrift?: Float32Array;
+  spikeDrift?: Float32Array;
 }
 /** The fields each part fills. */
 const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
@@ -200,6 +206,8 @@ const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
   speedDwell: ["speedDwell"],
   ac: ["ac"],
   spikes: ["spikes"],
+  spatialDrift: ["spatialDrift"],
+  spikeDrift: ["spikeDrift"],
 };
 /**
  * `next`, keeping `held`'s values for every part whose key is unchanged, so plots of those
