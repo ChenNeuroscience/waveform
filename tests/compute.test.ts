@@ -86,9 +86,10 @@ describe("the worker's compute graph", () => {
       const binned = (await at({ ...inputs, settings: { ...inputs.settings, binCm: 2 } }))!;
       expect(binned.keys.spatial).not.toBe(first.keys.spatial);
       expect({ ...binned.keys, spatial: "" }).toEqual({ ...first.keys, spatial: "" });
-      // Another trial's identical file is a different position.
-      const other = { ...inputs, posFile: "other|trial.pos" };
-      expect(await at(other)).toBeUndefined();
+      // Another trial's identical file is a different position, though its stats aren't.
+      const other = (await at({ ...inputs, posFile: "other|trial.pos" }))!;
+      expect(other.keys.spatial).not.toBe(first.keys.spatial);
+      expect(other.keys.stats).toBe(first.keys.stats);
 
       // Held parts with unchanged keys keep their arrays, so their plots needn't redraw.
       const kept = reuseParts(first, binned);
