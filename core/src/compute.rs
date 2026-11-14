@@ -1,7 +1,7 @@
 //! The compute graph: positions and cell analyses as a lazy graph of handlers.
 //!
 //! Every value is computed by a `Handler` (see compute_handlers.rs): a plain function of the inputs
-//! that gets what it needs by calling other handlers through `Context::call`. That call
+//! that gets what it needs by calling other handlers through `Request::call`. That call
 //! memoises (cache.rs, an implementation detail): it looks the value up by key and runs the
 //! handler only when it isn't there. Without it the handlers would still be correct, just
 //! slower; they never see keys or the memo.
@@ -15,7 +15,7 @@
 //! a handler by name (`compute_request`). The answer is a table of named buffers to copy
 //! out, or what is missing for JavaScript to supply (a recording's spikes, or a position
 //! file).
-use crate::cache::Cache;
+use crate::cache;
 use std::{
     any::Any,
     cell::RefCell,
@@ -173,7 +173,7 @@ impl Key {
     }
 }
 
-/// The current inputs, written by JavaScript before each request.
+/// A request's inputs.
 #[derive(Clone)]
 pub(crate) struct Inputs {
     pub(crate) numbers: [f64; NUMBERS.len()],
@@ -181,6 +181,15 @@ pub(crate) struct Inputs {
     pub(crate) recording: Rc<str>,
     /// Set for a recording whose spikes are named by cut and revision rather than hashed.
     pub(crate) cell_prefix: Rc<str>,
+    /// The cell asked about.
+    pub(crate) cell: u16,
+    /// The cell's spike set (the `Cell` leaf), worked out when a request starts: None if it
+    /// needs the recording's spikes and they weren't lent.
+    pub(crate) cell_id: Option<Rc<str>>,
+    /// The recording's timebase (ticks per second) and duration (s). Not leaves: they are
+    /// fixed for a recording, which is.
+    pub(crate) tb: f64,
+    pub(crate) duration: f64,
 }
 impl Default for Inputs {
     fn default() -> Self {
@@ -189,6 +198,10 @@ impl Default for Inputs {
             pos_file: "".into(),
             recording: "".into(),
             cell_prefix: "".into(),
+            cell: 0,
+            cell_id: None,
+            tb: f64::NAN,
+            duration: 0.,
         }
     }
 }
@@ -245,18 +258,11 @@ impl Inputs {
     }
 }
 
-/// The session: the current inputs, and the memo of values handlers have computed.
-#[derive(Default)]
-pub(crate) struct Session {
-    pub(crate) inputs: Inputs,
-    pub(crate) cache: Cache,
-}
-
 /// What a handler needs that only JavaScript can supply.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Missing {
-    /// The recording's spikes, as an engine.
-    Engine,
+    /// The loaded recording's spikes.
+    Recording,
     /// The position file, read (`compute_supply_position`).
     Position,
 }
@@ -269,47 +275,41 @@ pub(crate) trait Handler: 'static {
     const IGNORE: &'static [Part] = &[];
     /// How many values of this node to keep.
     const LIMIT: usize;
-    fn compute(cx: &mut Context) -> Result<Self::Value, Missing>;
+    fn compute(cx: &mut Request) -> Result<Self::Value, Missing>;
 }
 
-/// A request in progress: the inputs, the cell asked about, and its spikes if loaded.
-pub(crate) struct Context<'a> {
-    session: &'a mut Session,
-    engine: Option<&'a mut crate::Engine>,
-    spikes: Option<String>,
-    pub(crate) cell: u16,
-    /// The recording's timebase (ticks per second) and duration (s).
-    pub(crate) tb: f64,
-    pub(crate) duration: f64,
+/// What handlers are asked to compute for: the inputs, and the loaded recording if JavaScript
+/// lent it (the only thing that can't be copied into a request or kept, as edits change it).
+pub(crate) struct Request<'a> {
+    inputs: Inputs,
+    recording: Option<&'a mut crate::Engine>,
 }
-impl<'a> Context<'a> {
-    pub(crate) fn new(
-        session: &'a mut Session,
-        engine: Option<&'a mut crate::Engine>,
-        cell: u16,
-        tb: f64,
-        duration: f64,
-    ) -> Self {
-        Self {
-            session,
-            engine,
-            spikes: None,
-            cell,
-            tb,
-            duration,
-        }
+impl<'a> Request<'a> {
+    pub(crate) fn new(mut inputs: Inputs, mut recording: Option<&'a mut crate::Engine>) -> Self {
+        let cell = inputs.cell;
+        inputs.cell_id = if !inputs.cell_prefix.is_empty() {
+            Some(format!("{}:{cell}", inputs.cell_prefix).into())
+        } else {
+            recording.as_deref_mut().map(|e| {
+                let count = e.counts[cell as usize];
+                let hashes = e.cell_hashes();
+                let i = cell as usize * 2;
+                format!("{count}:{}:{}", hashes[i], hashes[i + 1]).into()
+            })
+        };
+        Self { inputs, recording }
     }
     /// `H`'s value: from the memo, or computed by `H` and kept.
     pub(crate) fn call<H: Handler>(&mut self) -> Result<Rc<H::Value>, Missing> {
         let key = self.key::<H>()?;
-        if let Some(value) = self.session.cache.get(&key) {
+        if let Some(value) = cache::get(&key) {
             return Ok(value);
         }
         let value = H::compute(self)?;
-        Ok(self.session.cache.put(key, value, H::LIMIT))
+        Ok(cache::put(key, value, H::LIMIT))
     }
-    /// `H`'s key for the current inputs.
-    pub(crate) fn key<H: Handler>(&mut self) -> Result<Key, Missing> {
+    /// `H`'s key for these inputs.
+    pub(crate) fn key<H: Handler>(&self) -> Result<Key, Missing> {
         let mut parts = vec![];
         beneath(N(H::NODE), &mut parts);
         let mut ignored = vec![];
@@ -317,37 +317,27 @@ impl<'a> Context<'a> {
             beneath(part, &mut ignored);
         }
         let cell = if parts.contains(&L(Cell)) && !ignored.contains(&L(Cell)) {
-            self.spikes()?
+            self.inputs.cell_id.clone().ok_or(Missing::Recording)?
         } else {
-            String::new()
+            "".into()
         };
-        Ok(self.session.inputs.key(H::NODE, &cell, H::IGNORE))
+        Ok(self.inputs.key(H::NODE, &cell, H::IGNORE))
     }
-    /// The cell's spike set: named by cut and revision if the inputs give one, else its
-    /// membership hash, which needs the engine.
-    fn spikes(&mut self) -> Result<String, Missing> {
-        if self.spikes.is_none() {
-            let prefix = &self.session.inputs.cell_prefix;
-            self.spikes = Some(if !prefix.is_empty() {
-                format!("{prefix}:{}", self.cell)
-            } else {
-                let e = self.engine.as_deref_mut().ok_or(Missing::Engine)?;
-                let count = e.counts[self.cell as usize];
-                let hashes = e.cell_hashes();
-                let i = self.cell as usize * 2;
-                format!("{count}:{}:{}", hashes[i], hashes[i + 1])
-            });
-        }
-        Ok(self.spikes.clone().unwrap())
+    pub(crate) fn input(&self, leaf: Leaf) -> f64 {
+        self.inputs.number(leaf)
     }
-    pub(crate) fn number(&self, leaf: Leaf) -> f64 {
-        self.session.inputs.number(leaf)
+    pub(crate) fn cell(&self) -> u16 {
+        self.inputs.cell
     }
-    /// The recording's spike times and the cell's spike indices.
-    pub(crate) fn spike_times(&mut self) -> Result<(&[u32], &[u32]), Missing> {
-        let e = self.engine.as_deref_mut().ok_or(Missing::Engine)?;
-        e.ensure_groups();
-        Ok((&e.times, &e.groups[self.cell as usize]))
+    pub(crate) fn tb(&self) -> f64 {
+        self.inputs.tb
+    }
+    pub(crate) fn duration(&self) -> f64 {
+        self.inputs.duration
+    }
+    /// The loaded recording, for the handler that reads spikes from it.
+    pub(crate) fn recording(&mut self) -> Result<&mut crate::Engine, Missing> {
+        self.recording.as_deref_mut().ok_or(Missing::Recording)
     }
 }
 
@@ -364,7 +354,7 @@ pub(crate) trait Answer {
     fn buffers(&self) -> Vec<(&'static str, Buffer)>;
 }
 /// A handler JavaScript can ask for by name.
-pub(crate) type Route = (&'static str, fn(&mut Context) -> Result<Answered, Missing>);
+pub(crate) type Route = (&'static str, fn(&mut Request) -> Result<Answered, Missing>);
 /// The last answer: its key's digest, its buffers, and the value they borrow from.
 #[derive(Default)]
 pub(crate) struct Answered {
@@ -373,7 +363,7 @@ pub(crate) struct Answered {
     _value: Option<Rc<dyn Any>>,
 }
 /// Answers with `H`'s value.
-pub(crate) fn answer<H: Handler>(cx: &mut Context) -> Result<Answered, Missing>
+pub(crate) fn answer<H: Handler>(cx: &mut Request) -> Result<Answered, Missing>
 where
     H::Value: Answer,
 {
@@ -387,21 +377,18 @@ where
 }
 
 thread_local! {
-    static SESSION: RefCell<Session> = RefCell::new(Session::default());
+    /// The inputs JavaScript is writing for its next request.
+    static STAGED: RefCell<Inputs> = RefCell::new(Inputs::default());
     static ANSWER: RefCell<Answered> = RefCell::new(Answered::default());
 }
-/// Stores a value JavaScript supplied for `H` (one `H` can't compute) under the current inputs.
-pub(crate) fn supply<H: Handler>(value: H::Value) {
-    with(|c| {
-        let mut cx = Context::new(c, None, 0, 0., 0.);
-        if let Ok(key) = cx.key::<H>() {
-            c.cache.put(key, value, H::LIMIT);
-        }
-    })
+fn staged<T>(f: impl FnOnce(&mut Inputs) -> T) -> T {
+    STAGED.with(|i| f(&mut i.borrow_mut()))
 }
-/// The session.
-pub(crate) fn with<T>(f: impl FnOnce(&mut Session) -> T) -> T {
-    SESSION.with(|c| f(&mut c.borrow_mut()))
+/// Keeps a value JavaScript supplied for `H` (one `H` can't compute) under the staged inputs.
+pub(crate) fn supply<H: Handler>(value: H::Value) {
+    if let Ok(key) = Request::new(staged(|i| i.clone()), None).key::<H>() {
+        cache::put(key, value, H::LIMIT);
+    }
 }
 fn answered<T>(f: impl FnOnce(&Answered) -> T) -> T {
     ANSWER.with(|a| f(&a.borrow()))
@@ -432,13 +419,15 @@ pub unsafe extern "C" fn compute_request(
     duration: f64,
 ) -> u32 {
     let route = crate::compute_handlers::ROUTES[handler].1;
-    let result = with(|c| route(&mut Context::new(c, e.as_mut(), cell, tb, duration)));
+    let mut inputs = staged(|i| i.clone());
+    (inputs.cell, inputs.tb, inputs.duration) = (cell, tb, duration);
+    let result = route(&mut Request::new(inputs, e.as_mut()));
     match result {
         Ok(answer) => {
             ANSWER.with(|a| *a.borrow_mut() = answer);
             0
         }
-        Err(Missing::Engine) => 1,
+        Err(Missing::Recording) => 1,
         Err(Missing::Position) => 2,
     }
 }
@@ -482,7 +471,7 @@ pub extern "C" fn answer_len(i: usize) -> usize {
 /// Where JavaScript writes the numeric inputs, in `NUMBERS` order.
 #[no_mangle]
 pub extern "C" fn compute_inputs() -> *mut f64 {
-    with(|c| c.inputs.numbers.as_mut_ptr())
+    staged(|i| i.numbers.as_mut_ptr())
 }
 #[no_mangle]
 pub extern "C" fn compute_input_count() -> usize {
@@ -501,10 +490,10 @@ pub extern "C" fn compute_input_name_len(i: usize) -> usize {
 #[no_mangle]
 pub unsafe extern "C" fn compute_set_text(field: u32, text: *const u8, len: usize) {
     let text: Rc<str> = String::from_utf8_lossy(std::slice::from_raw_parts(text, len)).into();
-    with(|c| match field {
-        0 => c.inputs.pos_file = text,
-        1 => c.inputs.recording = text,
-        _ => c.inputs.cell_prefix = text,
+    staged(|i| match field {
+        0 => i.pos_file = text,
+        1 => i.recording = text,
+        _ => i.cell_prefix = text,
     })
 }
 

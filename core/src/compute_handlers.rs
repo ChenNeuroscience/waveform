@@ -4,7 +4,7 @@
 //! many to keep. A value may carry by-products of its work (a rate map's peak) for other
 //! handlers to take from it, rather than computing them again.
 use crate::compute::{
-    answer, f32s, supply, Answer, Buffer, Context, Handler, Leaf::*, Missing, Node, Part, Route, L,
+    answer, f32s, supply, Answer, Buffer, Handler, Leaf::*, Missing, Node, Part, Request, Route, L,
 };
 use crate::position::{direction_bins, refractory, speed_bins, temporal_ac, Position};
 use crate::spatial_ac::autocorrelation;
@@ -38,7 +38,7 @@ impl Handler for RawPosition {
     type Value = Position;
     const NODE: Node = Node::PosRaw;
     const LIMIT: usize = RAW_POSITIONS;
-    fn compute(_: &mut Context) -> Result<Position, Missing> {
+    fn compute(_: &mut Request) -> Result<Position, Missing> {
         Err(Missing::Position)
     }
 }
@@ -54,13 +54,13 @@ impl Handler for ProcessedPosition {
     type Value = Position;
     const NODE: Node = Node::Position;
     const LIMIT: usize = POSITIONS;
-    fn compute(cx: &mut Context) -> Result<Position, Missing> {
+    fn compute(cx: &mut Request) -> Result<Position, Missing> {
         let raw = cx.call::<RawPosition>()?;
         Ok(raw.variant(
-            cx.number(Leds) as u32,
-            cx.number(MaxSpeed) as f32,
-            cx.number(PosSmooth),
-            cx.number(Sync),
+            cx.input(Leds) as u32,
+            cx.input(MaxSpeed) as f32,
+            cx.input(PosSmooth),
+            cx.input(Sync),
         ))
     }
 }
@@ -80,7 +80,7 @@ impl Handler for Path {
     const NODE: Node = Node::Path;
     const IGNORE: &'static [Part] = &[L(Sync)];
     const LIMIT: usize = PER_POSITION;
-    fn compute(cx: &mut Context) -> Result<Values, Missing> {
+    fn compute(cx: &mut Request) -> Result<Values, Missing> {
         Ok(Values(cx.call::<ProcessedPosition>()?.path()))
     }
 }
@@ -93,7 +93,7 @@ impl Handler for PositionInfo {
     const NODE: Node = Node::PositionInfo;
     const IGNORE: &'static [Part] = &[L(Sync)];
     const LIMIT: usize = PER_POSITION;
-    fn compute(cx: &mut Context) -> Result<Info, Missing> {
+    fn compute(cx: &mut Request) -> Result<Info, Missing> {
         let p = cx.call::<ProcessedPosition>()?;
         let [w, h] = p.arena();
         Ok(Info([
@@ -110,6 +110,23 @@ impl Answer for Info {
     }
 }
 
+/// A cell's spike times: the one handler that reads the loaded recording.
+pub(crate) struct CellSpikes;
+impl Handler for CellSpikes {
+    type Value = Vec<u32>;
+    const NODE: Node = Node::Spikes;
+    const LIMIT: usize = PER_CELL;
+    fn compute(cx: &mut Request) -> Result<Vec<u32>, Missing> {
+        let cell = cx.cell() as usize;
+        let e = cx.recording()?;
+        e.ensure_groups();
+        Ok(e.groups[cell]
+            .iter()
+            .map(|&i| e.times[i as usize])
+            .collect())
+    }
+}
+
 /// A cell's spike count, refractory violations (%) and rate (Hz).
 pub(crate) struct CellStats;
 pub(crate) struct Stats([f64; 3]);
@@ -117,15 +134,15 @@ impl Handler for CellStats {
     type Value = Stats;
     const NODE: Node = Node::CellStats;
     const LIMIT: usize = PER_CELL;
-    fn compute(cx: &mut Context) -> Result<Stats, Missing> {
-        let (tb, duration) = (cx.tb, cx.duration);
-        let (times, ids) = cx.spike_times()?;
+    fn compute(cx: &mut Request) -> Result<Stats, Missing> {
+        let (tb, duration) = (cx.tb(), cx.duration());
+        let times = cx.call::<CellSpikes>()?;
         let rate = if duration > 0. {
-            ids.len() as f64 / duration
+            times.len() as f64 / duration
         } else {
             0.
         };
-        Ok(Stats([ids.len() as f64, refractory(times, ids, tb), rate]))
+        Ok(Stats([times.len() as f64, refractory(&times, tb), rate]))
     }
 }
 impl Answer for Stats {
@@ -140,11 +157,10 @@ impl Handler for SpikeSamples {
     type Value = Vec<u32>;
     const NODE: Node = Node::SpikeSamples;
     const LIMIT: usize = PER_CELL;
-    fn compute(cx: &mut Context) -> Result<Vec<u32>, Missing> {
+    fn compute(cx: &mut Request) -> Result<Vec<u32>, Missing> {
         let p = cx.call::<ProcessedPosition>()?;
-        let tb = cx.tb;
-        let (times, ids) = cx.spike_times()?;
-        Ok(p.spike_samples(times, ids, tb))
+        let times = cx.call::<CellSpikes>()?;
+        Ok(p.spike_samples(&times, cx.tb()))
     }
 }
 /// Where each of a cell's spikes was, normalised, for the path plot. As many as the spikes,
@@ -154,7 +170,7 @@ impl Handler for SpikePositions {
     type Value = Values;
     const NODE: Node = Node::SpikePositions;
     const LIMIT: usize = 16;
-    fn compute(cx: &mut Context) -> Result<Values, Missing> {
+    fn compute(cx: &mut Request) -> Result<Values, Missing> {
         let samples = cx.call::<SpikeSamples>()?;
         Ok(Values(
             cx.call::<ProcessedPosition>()?.spike_positions(&samples),
@@ -176,9 +192,9 @@ impl Handler for SpatialOccupancy {
     const NODE: Node = Node::SpatialOccupancy;
     const IGNORE: &'static [Part] = &[L(Sync), L(Smooth), COLOURS[0], COLOURS[1]];
     const LIMIT: usize = PER_POSITION;
-    fn compute(cx: &mut Context) -> Result<Grid, Missing> {
+    fn compute(cx: &mut Request) -> Result<Grid, Missing> {
         let p = cx.call::<ProcessedPosition>()?;
-        let (w, h) = p.grid(cx.number(BinCm) as f32);
+        let (w, h) = p.grid(cx.input(BinCm) as f32);
         Ok(Grid {
             w,
             h,
@@ -197,18 +213,13 @@ impl Handler for Ratemap {
     const NODE: Node = Node::Ratemap;
     const IGNORE: &'static [Part] = &COLOURS;
     const LIMIT: usize = PER_CELL;
-    fn compute(cx: &mut Context) -> Result<Rates, Missing> {
+    fn compute(cx: &mut Request) -> Result<Rates, Missing> {
         let samples = cx.call::<SpikeSamples>()?;
         let occupancy = cx.call::<SpatialOccupancy>()?;
         let p = cx.call::<ProcessedPosition>()?;
         let (w, h) = (occupancy.w, occupancy.h);
-        let (values, peak) = p.rate_map(
-            &samples,
-            &occupancy.values,
-            w,
-            h,
-            cx.number(Smooth) as usize,
-        );
+        let (values, peak) =
+            p.rate_map(&samples, &occupancy.values, w, h, cx.input(Smooth) as usize);
         Ok(Rates {
             grid: Grid { w, h, values },
             peak,
@@ -240,11 +251,11 @@ impl Handler for SpatialAc {
     const NODE: Node = Node::SpatialAc;
     const IGNORE: &'static [Part] = &COLOURS;
     const LIMIT: usize = PER_CELL;
-    fn compute(cx: &mut Context) -> Result<Correlation, Missing> {
+    fn compute(cx: &mut Request) -> Result<Correlation, Missing> {
         let rates = cx.call::<Ratemap>()?;
         let g = &rates.grid;
         Ok(Correlation {
-            values: autocorrelation(&g.values, g.w, g.h, cx.number(ScMinOverlap) as usize),
+            values: autocorrelation(&g.values, g.w, g.h, cx.input(ScMinOverlap) as usize),
             w: g.w,
             h: g.h,
         })
@@ -267,8 +278,8 @@ impl Handler for DirectionOccupancy {
     const NODE: Node = Node::DirectionOccupancy;
     const IGNORE: &'static [Part] = &[L(Sync), L(DirSmooth)];
     const LIMIT: usize = PER_POSITION;
-    fn compute(cx: &mut Context) -> Result<Vec<f32>, Missing> {
-        let nd = direction_bins(cx.number(DirBin) as f32);
+    fn compute(cx: &mut Request) -> Result<Vec<f32>, Missing> {
+        let nd = direction_bins(cx.input(DirBin) as f32);
         Ok(cx.call::<ProcessedPosition>()?.direction_occupancy(nd))
     }
 }
@@ -278,7 +289,7 @@ impl Handler for Direction {
     type Value = Values;
     const NODE: Node = Node::Direction;
     const LIMIT: usize = PER_CELL;
-    fn compute(cx: &mut Context) -> Result<Values, Missing> {
+    fn compute(cx: &mut Request) -> Result<Values, Missing> {
         let samples = cx.call::<SpikeSamples>()?;
         let occupancy = cx.call::<DirectionOccupancy>()?;
         let p = cx.call::<ProcessedPosition>()?;
@@ -287,7 +298,7 @@ impl Handler for Direction {
             &samples,
             &occupancy,
             nd,
-            cx.number(DirSmooth) as usize,
+            cx.input(DirSmooth) as usize,
         )))
     }
 }
@@ -299,8 +310,8 @@ impl Handler for SpeedDwell {
     const NODE: Node = Node::SpeedDwell;
     const IGNORE: &'static [Part] = &[L(Sync)];
     const LIMIT: usize = PER_POSITION;
-    fn compute(cx: &mut Context) -> Result<Values, Missing> {
-        let (bin, max, ns) = speed_bins(cx.number(SpeedBin) as f32, cx.number(SpeedMax) as f32);
+    fn compute(cx: &mut Request) -> Result<Values, Missing> {
+        let (bin, max, ns) = speed_bins(cx.input(SpeedBin) as f32, cx.input(SpeedMax) as f32);
         Ok(Values(
             cx.call::<ProcessedPosition>()?.speed_dwell(bin, max, ns),
         ))
@@ -312,11 +323,11 @@ impl Handler for Speed {
     type Value = Values;
     const NODE: Node = Node::Speed;
     const LIMIT: usize = PER_CELL;
-    fn compute(cx: &mut Context) -> Result<Values, Missing> {
+    fn compute(cx: &mut Request) -> Result<Values, Missing> {
         let samples = cx.call::<SpikeSamples>()?;
         let dwell = cx.call::<SpeedDwell>()?;
         let p = cx.call::<ProcessedPosition>()?;
-        let (bin, max, _) = speed_bins(cx.number(SpeedBin) as f32, cx.number(SpeedMax) as f32);
+        let (bin, max, _) = speed_bins(cx.input(SpeedBin) as f32, cx.input(SpeedMax) as f32);
         Ok(Values(p.speed_map(&samples, &dwell.0, bin, max)))
     }
 }
@@ -327,24 +338,24 @@ impl Handler for TemporalAc {
     type Value = Values;
     const NODE: Node = Node::TemporalAc;
     const LIMIT: usize = PER_CELL;
-    fn compute(cx: &mut Context) -> Result<Values, Missing> {
-        let (window, bin, tb) = (cx.number(AcWindow), cx.number(AcBinMs), cx.tb);
-        let (times, ids) = cx.spike_times()?;
-        Ok(Values(temporal_ac(times, ids, tb, window, bin)))
+    fn compute(cx: &mut Request) -> Result<Values, Missing> {
+        let times = cx.call::<CellSpikes>()?;
+        let (window, bin) = (cx.input(AcWindow), cx.input(AcBinMs));
+        Ok(Values(temporal_ac(&times, cx.tb(), window, bin)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compute::{Session, NUMBERS};
+    use crate::compute::{Inputs, NUMBERS};
     use crate::position::tests::recording;
     use crate::Engine;
 
-    fn set(c: &mut Session, values: &[(crate::compute::Leaf, f64)]) {
+    fn set(i: &mut Inputs, values: &[(crate::compute::Leaf, f64)]) {
         for &(leaf, value) in values {
             let j = NUMBERS.iter().position(|(l, _)| *l == leaf).unwrap();
-            c.inputs.numbers[j] = value;
+            i.numbers[j] = value;
         }
     }
     fn same(a: &[f32], b: &[f32]) -> bool {
@@ -353,12 +364,17 @@ mod tests {
                 .zip(b)
                 .all(|(x, y)| x == y || (x.is_nan() && y.is_nan()))
     }
-    fn session() -> Session {
-        let mut c = Session::default();
-        c.inputs.pos_file = "trial|a.pos".into();
-        c.inputs.recording = "t1".into();
+    fn inputs() -> Inputs {
+        let mut i = Inputs {
+            pos_file: "trial|a.pos".into(),
+            recording: "t1".into(),
+            cell: 1,
+            tb: 1000.,
+            duration: 1.,
+            ..Default::default()
+        };
         set(
-            &mut c,
+            &mut i,
             &[
                 (Leds, 1.),
                 (MaxSpeed, 0.),
@@ -378,7 +394,7 @@ mod tests {
                 (Sync, 20.),
             ],
         );
-        c
+        i
     }
     /// A walk over a 10 by 5 grid, unprocessed, and 30 spikes in two cells spread through it.
     fn data() -> (Position, Engine) {
@@ -390,21 +406,19 @@ mod tests {
         e.labels = (0..30).map(|i| 1 + (i % 2) as u16).collect();
         (recording(&rows, 100., 50.), e)
     }
-    fn supply_raw(c: &mut Session, raw: Position) {
-        let key = Context::new(c, None, 0, 0., 0.)
-            .key::<RawPosition>()
-            .unwrap();
-        c.cache.put(key, raw, RAW_POSITIONS);
+    fn supply_raw(i: &Inputs, raw: Position) {
+        let key = Request::new(i.clone(), None).key::<RawPosition>().unwrap();
+        crate::cache::put(key, raw, RAW_POSITIONS);
     }
 
     #[test]
     fn handlers_give_what_computing_everything_together_gives() {
         let (raw, mut e) = data();
-        let mut c = session();
-        supply_raw(&mut c, raw.variant(1, 0., 0., 0.));
+        let i = inputs();
+        supply_raw(&i, raw.variant(1, 0., 0., 0.));
         let processed = raw.variant(1, 0., 0., 20.);
         for cell in [1, 2] {
-            let mut cx = Context::new(&mut c, Some(&mut e), cell, 1000., 1.);
+            let mut cx = Request::new(Inputs { cell, ..i.clone() }, Some(&mut e));
             let stats = cx.call::<CellStats>().unwrap();
             let rates = cx.call::<Ratemap>().unwrap();
             let sc = cx.call::<SpatialAc>().unwrap();
@@ -454,21 +468,21 @@ mod tests {
     #[test]
     fn handlers_say_what_they_miss_and_reuse_what_they_computed() {
         let (raw, mut e) = data();
-        let mut c = session();
+        let mut c = inputs();
         // Named by cut, so a cell can be found without its spikes once computed.
-        c.inputs.cell_prefix = "cut|0".into();
-        fn ask<H: Handler>(c: &mut Session, e: Option<&mut Engine>) -> Result<u64, Missing> {
-            let mut cx = Context::new(c, e, 1, 1000., 1.);
+        c.cell_prefix = "cut|0".into();
+        fn ask<H: Handler>(i: &mut Inputs, e: Option<&mut Engine>) -> Result<u64, Missing> {
+            let mut cx = Request::new(i.clone(), e);
             cx.call::<H>()?;
             Ok(cx.key::<H>()?.digest())
         }
         assert_eq!(ask::<Ratemap>(&mut c, Some(&mut e)), Err(Missing::Position));
-        supply_raw(&mut c, raw.variant(1, 0., 0., 0.));
-        assert_eq!(ask::<Ratemap>(&mut c, None), Err(Missing::Engine));
+        supply_raw(&c, raw.variant(1, 0., 0., 0.));
+        assert_eq!(ask::<Ratemap>(&mut c, None), Err(Missing::Recording));
         let first = ask::<Ratemap>(&mut c, Some(&mut e)).unwrap();
         assert_eq!(ask::<Ratemap>(&mut c, None), Ok(first));
         // Colours never change the key. A bin width does, and that rate map is made from the
-        // spike samples already computed, so it still needs no engine; the speed dwell is unchanged.
+        // spike samples already computed, so it still needs no recording; the speed dwell is unchanged.
         let dwell = ask::<SpeedDwell>(&mut c, None).unwrap();
         set(&mut c, &[(MaxRate, 9.)]);
         assert_eq!(ask::<Ratemap>(&mut c, None), Ok(first));
@@ -477,7 +491,7 @@ mod tests {
         assert_ne!(binned, first);
         assert_eq!(ask::<SpeedDwell>(&mut c, None), Ok(dwell));
         // Another trial's position hasn't been read.
-        c.inputs.pos_file = "other|a.pos".into();
+        c.pos_file = "other|a.pos".into();
         assert_eq!(ask::<Ratemap>(&mut c, Some(&mut e)), Err(Missing::Position));
     }
 }

@@ -465,14 +465,15 @@ impl Position {
         }
         dwell
     }
-    /// The position sample of each of `ids`' spikes that falls in the arena.
-    pub(crate) fn spike_samples(&self, times: &[u32], ids: &[u32], tb: f64) -> Vec<u32> {
+    /// The position sample of each spike (at `times`, in ticks of `tb`) that falls in the arena.
+    pub(crate) fn spike_samples(&self, times: &[u32], tb: f64) -> Vec<u32> {
         // Spike times are the reference clock; the position track was moved by
         // `sync`, so a spike at time t takes the sample recorded at t - sync.
         let shift = self.sync * tb;
-        ids.iter()
-            .filter_map(|&id| {
-                let at = (times[id as usize] as f64 - shift) * self.rate / tb;
+        times
+            .iter()
+            .filter_map(|&t| {
+                let at = (t as f64 - shift) * self.rate / tb;
                 let cursor = at.floor() as usize;
                 (at >= 0. && cursor < self.x.len() && self.dwell(cursor).is_some())
                     .then_some(cursor as u32)
@@ -577,14 +578,9 @@ impl Position {
             .collect()
     }
 }
-/// Counts of spike pairs by lag, up to `window` ms in bins of `ac_bin_ms`.
-pub(crate) fn temporal_ac(
-    times: &[u32],
-    ids: &[u32],
-    tb: f64,
-    window: f64,
-    ac_bin_ms: f64,
-) -> Vec<f32> {
+/// Counts of spike pairs by lag, up to `window` ms in bins of `ac_bin_ms`, for a cell's
+/// ascending spike `times`.
+pub(crate) fn temporal_ac(times: &[u32], tb: f64, window: f64, ac_bin_ms: f64) -> Vec<f32> {
     let window = if window.is_finite() {
         window.clamp(1., 10000.)
     } else {
@@ -597,10 +593,9 @@ pub(crate) fn temporal_ac(
     };
     let mut ac = vec![0.; (window / ac_bin_ms).ceil() as usize];
     // Every spike pair within the window; the cost scales with those pairs only.
-    for j in 0..ids.len() {
-        let t = times[ids[j] as usize];
-        for &k in &ids[j + 1..] {
-            let dt = times[k as usize].saturating_sub(t) as f64 / tb * 1000.;
+    for (j, &t) in times.iter().enumerate() {
+        for &u in &times[j + 1..] {
+            let dt = u.saturating_sub(t) as f64 / tb * 1000.;
             if dt >= window {
                 break;
             }
@@ -610,16 +605,14 @@ pub(crate) fn temporal_ac(
     }
     ac
 }
-/// The percentage of interspike intervals under 2 ms.
-pub(crate) fn refractory(times: &[u32], ids: &[u32], tb: f64) -> f64 {
-    let violations = ids
+/// The percentage of a cell's interspike intervals under 2 ms.
+pub(crate) fn refractory(times: &[u32], tb: f64) -> f64 {
+    let violations = times
         .windows(2)
-        .filter(|pair| {
-            times[pair[1] as usize].saturating_sub(times[pair[0] as usize]) as f64 / tb < 0.002
-        })
+        .filter(|pair| pair[1].saturating_sub(pair[0]) as f64 / tb < 0.002)
         .count();
-    if ids.len() > 1 {
-        violations as f64 / (ids.len() - 1) as f64 * 100.
+    if times.len() > 1 {
+        violations as f64 / (times.len() - 1) as f64 * 100.
     } else {
         0.
     }
@@ -646,13 +639,16 @@ pub(crate) fn analyse(
     let (speed_bin, speed_max, ns) = speed_bins(speed_bin, speed_max);
     let nd = direction_bins(dir_bin);
     e.ensure_groups();
-    let ids = &e.groups[cell as usize];
-    let n = ids.len();
-    let ac = temporal_ac(&e.times, ids, tb, window, ac_bin_ms);
+    let times: Vec<u32> = e.groups[cell as usize]
+        .iter()
+        .map(|&i| e.times[i as usize])
+        .collect();
+    let n = times.len();
+    let ac = temporal_ac(&times, tb, window, ac_bin_ms);
     let (w, h) = pos.map(|p| p.grid(bin)).unwrap_or((0, 0));
     let (spatial, peak, spikes, direction, speed, speed_dwell) = match pos {
         Some(p) => {
-            let samples = p.spike_samples(&e.times, ids, tb);
+            let samples = p.spike_samples(&times, tb);
             let (spatial, peak) = p.rate_map(&samples, &p.spatial_occupancy(w, h), w, h, smoothing);
             let dwell = p.speed_dwell(speed_bin, speed_max, ns);
             (
@@ -673,7 +669,7 @@ pub(crate) fn analyse(
             w as f64,
             h as f64,
             peak as f64,
-            refractory(&e.times, ids, tb),
+            refractory(&times, tb),
             if duration > 0. {
                 n as f64 / duration
             } else {

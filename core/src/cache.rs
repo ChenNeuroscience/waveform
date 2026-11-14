@@ -1,8 +1,8 @@
-//! The memo behind `Context::call` in compute.rs: an implementation detail of the compute
+//! The memo behind `Request::call` in compute.rs: an implementation detail of the compute
 //! graph. It stores each handler's values by key, keeping at most the number its handler
 //! sets per node, least recently used out.
 use crate::compute::{Key, Node};
-use std::{any::Any, collections::HashMap, rc::Rc};
+use std::{any::Any, cell::RefCell, collections::HashMap, rc::Rc};
 
 /// One node's values, least recently used first out beyond the limit its writer set.
 #[derive(Default)]
@@ -14,12 +14,12 @@ struct Store {
 /// Values of any type, by key. Shared: a value dropped from the memo is freed once nothing
 /// else holds it.
 #[derive(Default)]
-pub(crate) struct Cache {
+struct Cache {
     nodes: HashMap<Node, Store>,
     tick: u64,
 }
 impl Cache {
-    pub(crate) fn get<T: 'static>(&mut self, key: &Key) -> Option<Rc<T>> {
+    fn get<T: 'static>(&mut self, key: &Key) -> Option<Rc<T>> {
         self.tick += 1;
         let tick = self.tick;
         let (used, value) = self.nodes.get_mut(&key.node)?.entries.get_mut(key)?;
@@ -27,7 +27,7 @@ impl Cache {
         value.clone().downcast().ok()
     }
     /// Stores `value`, keeping at most `limit` values for its node.
-    pub(crate) fn put<T: 'static>(&mut self, key: Key, value: T, limit: usize) -> Rc<T> {
+    fn put<T: 'static>(&mut self, key: Key, value: T, limit: usize) -> Rc<T> {
         self.tick += 1;
         let value = Rc::new(value);
         let store = self.nodes.entry(key.node).or_default();
@@ -44,6 +44,20 @@ impl Cache {
         }
         value
     }
+}
+
+thread_local! {
+    /// The memo for the session (as long as the page is open).
+    static MEMO: RefCell<Cache> = RefCell::new(Cache::default());
+}
+/// The kept value for `key`. The memo is borrowed only for this, never while a handler runs,
+/// so handlers can call handlers.
+pub(crate) fn get<T: 'static>(key: &Key) -> Option<Rc<T>> {
+    MEMO.with(|m| m.borrow_mut().get(key))
+}
+/// Keeps `value`, with at most `limit` values for its node.
+pub(crate) fn put<T: 'static>(key: Key, value: T, limit: usize) -> Rc<T> {
+    MEMO.with(|m| m.borrow_mut().put(key, value, limit))
 }
 
 #[cfg(test)]
