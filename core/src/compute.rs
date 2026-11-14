@@ -1,6 +1,6 @@
 //! The compute graph: positions and cell analyses as a lazy graph of handlers.
 //!
-//! Every value is computed by a `Handler` (see analysis.rs): a plain function of the inputs
+//! Every value is computed by a `Handler` (see compute_handlers.rs): a plain function of the inputs
 //! that gets what it needs by calling other handlers through `Context::call`. That call
 //! memoises (cache.rs, an implementation detail): it looks the value up by key and runs the
 //! handler only when it isn't there. Without it the handlers would still be correct, just
@@ -410,15 +410,15 @@ fn answered<T>(f: impl FnOnce(&Answered) -> T) -> T {
 /// The handlers JavaScript can ask for, in this order (see `compute_handler_name`).
 #[no_mangle]
 pub extern "C" fn compute_handler_count() -> usize {
-    crate::analysis::ROUTES.len()
+    crate::compute_handlers::ROUTES.len()
 }
 #[no_mangle]
 pub extern "C" fn compute_handler_name(i: usize) -> *const u8 {
-    crate::analysis::ROUTES[i].0.as_ptr()
+    crate::compute_handlers::ROUTES[i].0.as_ptr()
 }
 #[no_mangle]
 pub extern "C" fn compute_handler_name_len(i: usize) -> usize {
-    crate::analysis::ROUTES[i].0.len()
+    crate::compute_handlers::ROUTES[i].0.len()
 }
 /// Asks handler `handler` for the current inputs and cell `cell` of engine `e` (null if
 /// the recording isn't loaded). 0: answered (see `answer_*`); 1: the engine is needed;
@@ -431,7 +431,7 @@ pub unsafe extern "C" fn compute_request(
     tb: f64,
     duration: f64,
 ) -> u32 {
-    let route = crate::analysis::ROUTES[handler].1;
+    let route = crate::compute_handlers::ROUTES[handler].1;
     let result = with(|c| route(&mut Context::new(c, e.as_mut(), cell, tb, duration)));
     match result {
         Ok(answer) => {

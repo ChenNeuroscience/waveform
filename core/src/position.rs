@@ -625,7 +625,7 @@ pub(crate) fn refractory(times: &[u32], ids: &[u32], tb: f64) -> f64 {
     }
 }
 /// Every analysis of a cell at once, in one function: the reference that the handlers in
-/// analysis.rs, which compute each separately through the cache, are tested against.
+/// compute_handlers.rs, which compute each separately through the cache, are tested against.
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn analyse(

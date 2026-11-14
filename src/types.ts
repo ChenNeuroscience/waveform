@@ -150,7 +150,7 @@ export interface Trajectory {
 export const membershipKey = (data: ViewData, cell: number) =>
   `${data.counts[cell]}:${data.cellHashes[cell * 2]}:${data.cellHashes[cell * 2 + 1]}`;
 /** The parts of a cell's analysis, each from its own handler in the worker's compute graph
- * (core/src/analysis.rs), and asked for only where they're shown. */
+ * (core/src/compute_handlers.rs), and asked for only where they're shown. */
 export const ANALYSIS_PARTS = [
   "stats",
   "spatial",

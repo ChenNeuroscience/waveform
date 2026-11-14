@@ -1,5 +1,5 @@
 // Browser I/O and ABI bridge. Positions and analyses are computed by handlers in Rust
-// (core/src/analysis.rs), a compute graph (core/src/compute.rs); this writes their inputs,
+// (core/src/compute_handlers.rs), a compute graph (core/src/compute.rs); this writes their inputs,
 // supplies files they say they need, and copies their answers out.
 import { parseHeader } from "../files";
 import { streamFile, copyF32, type Core } from "./wasm";

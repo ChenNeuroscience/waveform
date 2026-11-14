@@ -98,8 +98,7 @@ test("position bases survive tetrode changes and invalidate for trials and speed
   await expect
     .poll(() => page.evaluate(() => (window as any).speedBinningRequests.includes(8)))
     .toBe(true);
-  await expect
-    .poll(() => speed.evaluate((c) => c !== (window as any).watchedSpeedCanvas))
-    .toBe(true);
+  // The held dwell stays up until the new binning's arrives, then is redrawn in place.
+  await expect.poll(() => page.evaluate(() => (window as any).speedDraws)).toBeGreaterThan(0);
   await expect.poll(() => speed.evaluate((c) => c === (window as any).drawnSpeedCanvas)).toBe(true);
 });

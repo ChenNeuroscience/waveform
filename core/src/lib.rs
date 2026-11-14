@@ -9,9 +9,9 @@ macro_rules! getter{($ptr:ident,$len:ident,[$($field:ident).+],$typ:ty)=>{
  #[no_mangle]pub unsafe extern "C" fn $ptr(e:*mut Engine)->*const $typ{let e=&*e;e.$($field).+.as_ptr()}
  #[no_mangle]pub unsafe extern "C" fn $len(e:*mut Engine)->usize{let e=&*e;e.$($field).+.len()}
 };}
-mod analysis;
 mod cache;
 mod compute;
+mod compute_handlers;
 mod dsp;
 mod pca;
 mod position;
