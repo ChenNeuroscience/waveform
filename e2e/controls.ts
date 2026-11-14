@@ -96,3 +96,31 @@ export async function projectionAction(page: Page, name: string) {
   await page.getByRole("button", { name: "3D settings", exact: true }).click();
   await page.getByRole("menuitem", { name, exact: true }).click();
 }
+/**
+ * The clipboard's HTML, plain text and types; empty while a copy is still being written.
+ * The app writes both formats in one item, but the platform clipboard isn't written
+ * atomically: a read can land between the two formats (HTML not there yet) or as the
+ * clipboard changes. Poll for the content a test wants rather than reading once mid-copy.
+ */
+export async function readClipboard(page: Page) {
+  return page.evaluate(async () => {
+    const empty = { html: "", text: "", types: [] as readonly string[] };
+    try {
+      const [item] = await navigator.clipboard.read();
+      if (!item?.types.includes("text/html") || !item.types.includes("text/plain")) {
+        return empty;
+      }
+      const html = await (await item.getType("text/html")).text();
+      const text = await (await item.getType("text/plain")).text();
+      return { html, text, types: item.types };
+    } catch (error) {
+      if (
+        error instanceof DOMException &&
+        (error.name === "InvalidStateError" || error.name === "NotFoundError")
+      ) {
+        return empty;
+      }
+      throw error;
+    }
+  });
+}

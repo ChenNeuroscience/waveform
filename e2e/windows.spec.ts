@@ -1,15 +1,5 @@
-import { ready } from "./controls";
-import { test, expect, type Page } from "@playwright/test";
-
-/** The clipboard's HTML and plain text. */
-async function readClipboard(page: Page) {
-  return page.evaluate(async () => {
-    const [item] = await navigator.clipboard.read();
-    const html = await (await item.getType("text/html")).text();
-    const text = await (await item.getType("text/plain")).text();
-    return { html, text, types: item.types };
-  });
-}
+import { readClipboard, ready } from "./controls";
+import { test, expect } from "@playwright/test";
 
 test("Pane shortcuts, frozen Space captures, cell clipboard and virtualised drag cancellation", async ({
   page,
@@ -144,9 +134,7 @@ test("Pane shortcuts, frozen Space captures, cell clipboard and virtualised drag
     await ready(page);
     await page.locator('.cell-tile[data-cell="1"] .tile-badge button').click();
     await page.keyboard.press("ControlOrMeta+c");
-    await expect
-      .poll(async () => (await readClipboard(page).catch(() => ({ text: "" }))).text)
-      .toMatch(/t1 c1 · /);
+    await expect.poll(async () => (await readClipboard(page)).text).toMatch(/t1 c1 · /);
     const clipboard = await readClipboard(page);
     expect(clipboard.types).not.toContain("image/png");
     expect(clipboard.text).toMatch(/t\d+ c1 · [\d,]+ spikes/);

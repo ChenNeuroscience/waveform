@@ -1,19 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { ready } from "./controls";
-
-async function clipboard(page: Page) {
-  try {
-    return await page.evaluate(async () => {
-      const [item] = await navigator.clipboard.read();
-      return {
-        html: await (await item.getType("text/html")).text(),
-        text: await (await item.getType("text/plain")).text(),
-      };
-    });
-  } catch {
-    return { html: "", text: "" };
-  }
-}
+import { test, expect } from "@playwright/test";
+import { readClipboard as clipboard, ready } from "./controls";
 
 test("Position and spatial-autocorrelation plots, multi-trial path clipboard and legends", async ({
   page,
