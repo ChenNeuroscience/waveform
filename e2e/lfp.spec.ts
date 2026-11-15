@@ -46,6 +46,21 @@ test(".egf files: the selected number is kept across trials, shown missing where
   await page.mouse.move(600, 10);
   await expect(page.locator(".axis-label")).toHaveCount(0);
 
+  // The selected .egf file's header is in the headers panel.
+  await page.getByRole("button", { name: "File headers", exact: true }).click();
+  const headers = page.getByRole("dialog", { name: "File headers", exact: true });
+  await expect(headers.locator(".headers-section", { hasText: "lfp" })).toBeVisible();
+  // Read-only: only the position's headers can be edited.
+  const channel = headers.locator(".headers-list > div", {
+    has: page.locator("dt", { hasText: /^chan_name$/ }),
+  });
+  await expect(channel.locator("dd")).toHaveText("CH1");
+  const section = headers.locator("[data-text-selectable]", {
+    has: page.locator(".headers-section", { hasText: /^lfp$/ }),
+  });
+  await expect(section.locator("input")).toHaveCount(0);
+  await headers.getByRole("button", { name: "Close panel" }).click();
+
   // The speed dwell goes with the tiles' speed plots.
   const speed = page.getByRole("button", { name: "Speed", exact: true });
   await speed.click({ modifiers: ["Shift"] });
@@ -68,6 +83,10 @@ test(".egf files: the selected number is kept across trials, shown missing where
   await ready(page);
   await expect(chip("demo_box-b", "~.egf2")).toHaveAttribute("aria-pressed", "true");
   await expect(plot).toBeVisible();
+  // The headers follow it: ~.egf2 is channel 2.
+  await page.getByRole("button", { name: "File headers", exact: true }).click();
+  await expect(channel.locator("dd")).toHaveText("CH2");
+  await headers.getByRole("button", { name: "Close panel" }).click();
 
   // A trial with only ~.egf shows ~.egf2 as missing rather than falling back.
   const tetrode = Buffer.concat([

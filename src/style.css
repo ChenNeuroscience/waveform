@@ -1490,6 +1490,10 @@ kbd {
 .header-editable em {
   color: #a15c00;
   font-style: normal;
+  /* A note about the value, not data: the interface's font, not the values' monospace. */
+  font:
+    10px Arial,
+    sans-serif;
 }
 .header-editable button {
   display: inline-flex;

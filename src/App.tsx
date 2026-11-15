@@ -51,7 +51,7 @@ import { useFeatureSpace } from "./app/features";
 import { useSplit } from "./app/split";
 import { CopyWindow } from "./shell/CopyWindow";
 import { GrabOutline } from "./shell/GrabOutline";
-import { downloadBlob, organiseFiles } from "./files";
+import { downloadBlob, organiseFiles, parseHeader } from "./files";
 function readSettings(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem("waveform-desktop-settings") || "{}");
@@ -429,6 +429,27 @@ export default function App() {
     speedDwell: shown.speed,
     onError: setError,
   });
+  // The selected .egf file's header, for the headers panel: read here, as it's needed whether
+  // or not its plots are on (a synthetic file is just its header until read in the worker).
+  const egf = trial?.egfs?.find((e) => e.number === egfNum)?.file;
+  const [lfpHeader, setLfpHeader] = useState<{ file: File; header: Header } | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (egf) {
+      egf
+        .slice(0, 65536)
+        .arrayBuffer()
+        .then((bytes) => {
+          if (live) {
+            setLfpHeader({ file: egf, header: parseHeader(new Uint8Array(bytes)).header });
+          }
+        })
+        .catch(() => live && setLfpHeader(null));
+    }
+    return () => {
+      live = false;
+    };
+  }, [egf]);
   const lfp = useLfp({
     trial,
     egfNum,
@@ -864,6 +885,7 @@ export default function App() {
     cut: cut?.file && fileId(cut.file),
     set: trial?.set && fileId(trial.set),
     position: trial?.pos && fileId(trial.pos),
+    lfp: egf && fileId(egf),
   };
   const estimatedHeaders: Record<string, Header> = trajectory?.ppmEstimated
     ? { position: { pixels_per_metre: trajectory.ppm.toFixed(1) } }
@@ -877,7 +899,10 @@ export default function App() {
     ready,
     operation: (type) => operation(type),
     history: data,
-    headers: data?.headers || {},
+    headers: {
+      ...data?.headers,
+      ...(egf && lfpHeader?.file === egf ? { lfp: lfpHeader.header } : {}),
+    },
     headerFiles,
     headerEdits,
     estimatedHeaders,
