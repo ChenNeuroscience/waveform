@@ -8,6 +8,7 @@ export const TILE_PLOTS = [
   { mode: "direction", selector: ".tile-direction", name: "Head direction" },
   { mode: "speed", selector: ".tile-speed", name: "Speed" },
   { mode: "ac", selector: ".tile-ac", name: "Autocorrelation" },
+  { mode: "phase", selector: ".tile-phase", name: "LFP phase" },
 ] as const;
 export interface PlotCapture {
   mode: PlotMode;
@@ -28,12 +29,15 @@ export interface AnalysisFrame {
   height: number;
 }
 
+/** A phase (radians) as a multiple of π, e.g. "1.25π". */
+export const phaseText = (radians: number) => `${(radians / Math.PI).toFixed(2)}π`;
+
 /** A cell's stats line: the peak of each shown map, then its spike count. */
 export function cellStatEntries(
   a: AnalysisData | undefined | null,
   hasPos: boolean,
   spikes: number,
-  shown: { spatial: boolean; direction: boolean },
+  shown: { spatial: boolean; direction: boolean; phase?: boolean },
 ) {
   const entries = [];
   if (a && hasPos && shown.spatial && a.peak > 0) {
@@ -42,6 +46,9 @@ export function cellStatEntries(
   const direction = a && hasPos && shown.direction ? Math.max(...a.direction) : 0;
   if (direction > 0) {
     entries.push({ label: "dir max", value: `${direction.toFixed(1)}Hz` });
+  }
+  if (a?.phase?.some((n) => n > 0) && shown.phase && a.phaseMean !== undefined) {
+    entries.push({ label: "av. phase", value: phaseText(a.phaseMean) });
   }
   entries.push({ label: "n spikes", value: spikes.toLocaleString() });
   return entries;
@@ -60,7 +67,15 @@ export function captureAnalysisPlots(
   return frames.map(({ mode, name, width, height }) => {
     const canvas = document.createElement("canvas");
     const missing =
-      !spikes || !data ? unavailable : mode !== "ac" && !hasPos ? "No position data" : undefined;
+      !spikes || !data
+        ? unavailable
+        : mode === "phase"
+          ? data.phase?.length
+            ? undefined
+            : "No LFP data"
+          : mode !== "ac" && !hasPos
+            ? "No position data"
+            : undefined;
     if (missing) {
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);

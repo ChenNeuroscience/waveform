@@ -98,45 +98,50 @@ export function Toolbar(p: {
         <SettingsIcon size={17} />
       </button>
       <span className="tool-separator" />
-      {(["waveforms", "spatial", "sc", "direction", "speed", "ac"] as PlotMode[]).map((m) => (
-        <ToggleButton
-          key={m}
-          className="plot-toggle"
-          aria-label={
+      {(["waveforms", "spatial", "sc", "direction", "speed", "ac", "phase"] as PlotMode[]).map(
+        (m) => (
+          <ToggleButton
+            key={m}
+            className="plot-toggle"
+            aria-label={
+              {
+                waveforms: "Waveforms",
+                spatial: "Spatial rate",
+                direction: "Head direction",
+                speed: "Speed",
+                ac: "Autocorrelation",
+                sc: "Spatial autocorrelation",
+                phase: "LFP phase",
+              }[m]
+            }
+            pressed={p.shown[m]}
+            title={
+              {
+                waveforms: "Waveforms [W]",
+                spatial: "Spatial rate maps [R]",
+                direction: "Head direction [C]",
+                speed: "Speed tuning [V]",
+                ac: "Autocorrelation [T]",
+                sc: "Spatial autocorrelogram [A]",
+                phase: "LFP phase of each cell's spikes [B]",
+              }[m] + " · Shift-click to show several"
+            }
+            onClick={(e) => p.onToggle(m, e.shiftKey)}
+          >
             {
-              waveforms: "Waveforms",
-              spatial: "Spatial rate",
-              direction: "Head direction",
-              speed: "Speed",
-              ac: "Autocorrelation",
-              sc: "Spatial autocorrelation",
-            }[m]
-          }
-          pressed={p.shown[m]}
-          title={
-            {
-              waveforms: "Waveforms [W]",
-              spatial: "Spatial rate maps [R]",
-              direction: "Head direction [C]",
-              speed: "Speed tuning [V]",
-              ac: "Autocorrelation [T]",
-              sc: "Spatial autocorrelogram [A]",
-            }[m] + " · Shift-click to show several"
-          }
-          onClick={(e) => p.onToggle(m, e.shiftKey)}
-        >
-          {
-            {
-              waveforms: "WAV",
-              spatial: "RM",
-              direction: "DIR",
-              speed: "SPD",
-              ac: "TC",
-              sc: "SC",
-            }[m]
-          }
-        </ToggleButton>
-      ))}
+              {
+                waveforms: "WAV",
+                spatial: "RM",
+                direction: "DIR",
+                speed: "SPD",
+                ac: "TC",
+                sc: "SC",
+                phase: "θ",
+              }[m]
+            }
+          </ToggleButton>
+        ),
+      )}
       {p.children && (
         <>
           <span className="tool-separator" />

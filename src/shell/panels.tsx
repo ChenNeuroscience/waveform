@@ -363,6 +363,60 @@ export function SettingsPanel({
       ),
     },
     {
+      title: "LFP plots",
+      content: (
+        <>
+          <p className="muted">Butterworth (zero phase, order 4, forward/backward)</p>
+          <Slider
+            label="Band-pass low edge"
+            value={settings.lfpLow}
+            min={1}
+            max={30}
+            step={0.5}
+            unit="Hz"
+            onChange={(v) => {
+              update("lfpLow", v);
+              if (settings.lfpHigh < v + 0.5) {
+                update("lfpHigh", v + 0.5);
+              }
+            }}
+          />
+          <Slider
+            label="Band-pass high edge"
+            value={settings.lfpHigh}
+            min={2}
+            max={60}
+            step={0.5}
+            unit="Hz"
+            onChange={(v) => {
+              update("lfpHigh", v);
+              if (settings.lfpLow > v - 0.5) {
+                update("lfpLow", Math.max(1, v - 0.5));
+              }
+            }}
+          />
+          <Slider
+            label="Freq plot, bin width"
+            value={settings.lfpFreqBin}
+            min={0.05}
+            max={2}
+            step={0.05}
+            unit="Hz"
+            onChange={(v) => update("lfpFreqBin", v)}
+          />
+          <Slider
+            label="Cell phase plot, phase bin width"
+            value={settings.lfpPhaseBin}
+            min={5}
+            max={90}
+            step={5}
+            unit="°"
+            onChange={(v) => update("lfpPhaseBin", v)}
+          />
+        </>
+      ),
+    },
+    {
       title: "Temporal autocorrelogram",
       content: (
         <>
@@ -480,8 +534,8 @@ export function HelpPanel() {
       </p>
       <Shortcut keys="Space + click" text="Copy a plot / close a floating window" />
       <Shortcut
-        keys="W / R / A / C / V / T"
-        text="Show only waves / spatial / spatial autocorrelation / direction / speed / temporal autocorrelation; Shift adds or removes"
+        keys="W / R / A / C / V / T / B"
+        text="Show only waves / spatial / spatial autocorrelation / direction / speed / temporal autocorrelation / LFP phase; Shift adds or removes"
       />
       <Shortcut keys="P / ⇧ P" text="Cycle fixed colours / density / drift (forward / back)" />
       <Shortcut

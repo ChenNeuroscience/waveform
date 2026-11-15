@@ -15,6 +15,7 @@ mod commands;
 mod compute;
 mod compute_handlers;
 mod dsp;
+mod lfp;
 mod pca;
 mod position;
 mod processing;

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { fitGrid } from "./plot-geometry";
 import { drawSpeedBars } from "./SpeedPlot";
+import { PHASE_BLUE } from "./LfpPlot";
 import { type AnalysisData, type PlotMode } from "../types";
 import { correlationColour, rateMapColour, rateMapPalette } from "../palette";
 
@@ -50,7 +51,7 @@ export function drawAnalysis(
   if (!positionSpeed) {
     ctx.fillRect(0, 0, w, h);
   }
-  if (compact && (mode === "ac" || mode === "speed")) {
+  if (compact && (mode === "ac" || mode === "speed" || mode === "phase")) {
     const box = fitGrid(w, h, mode === "ac" ? 128 : 24, mode === "ac" ? 32 : 80);
     ctx.translate(mode === "speed" && speedAlignment === "left" ? 0 : box.x, box.y);
     ctx.scale(box.unit, box.unit);
@@ -120,6 +121,10 @@ export function drawAnalysis(
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+  } else if (compact && mode === "phase") {
+    // Like the speed tuning beside it (bars from the right, no axis), in the LFP plots' blue:
+    // phase down from 0 (the band's peaks).
+    drawSpeedBars(ctx, w, h, data.phase || new Float32Array(), "right", false, { bar: PHASE_BLUE });
   } else if (compact) {
     const a = mode === "ac" ? data.ac : positionSpeed ? data.speedDwell : data.speed;
     const max = Math.max(...a, 1);
@@ -181,9 +186,11 @@ export function AnalysisPlot(props: AnalysisDrawing) {
           ? data.direction
           : mode === "ac"
             ? data.ac
-            : positionSpeed
-              ? data.speedDwell
-              : data.speed;
+            : mode === "phase"
+              ? data.phase
+              : positionSpeed
+                ? data.speedDwell
+                : data.speed;
   useEffect(() => {
     const c = canvas.current!;
     const drawing = {
@@ -225,7 +232,9 @@ export function AnalysisPlot(props: AnalysisDrawing) {
           ? "Temporal autocorrelogram"
           : mode === "sc"
             ? "Spatial autocorrelogram"
-            : `${mode} plot`
+            : mode === "phase"
+              ? "Spike LFP phase"
+              : `${mode} plot`
       }
     />
   );

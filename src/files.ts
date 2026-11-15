@@ -1,4 +1,4 @@
-import { fileId, type Trial, type Header } from "./types";
+import { fileId, MAX_EGFS, type Trial, type Header } from "./types";
 export function textHeader(text: string): Header {
   return Object.fromEntries(
     text
@@ -29,7 +29,11 @@ export function parseHeader(bytes: Uint8Array): {
   if (offset < 0) {
     // Markers are only written along with data, so a file with nothing in it is all header.
     const header = textHeader(new TextDecoder("latin1").decode(bytes));
-    if (parseInt(header.num_spikes) === 0 || parseInt(header.num_pos_samples) === 0) {
+    if (
+      parseInt(header.num_spikes) === 0 ||
+      parseInt(header.num_pos_samples) === 0 ||
+      parseInt(header.num_EEG_samples) === 0
+    ) {
       return { header, offset: bytes.length };
     }
     throw new Error("Missing data_start marker in LTX header.");
@@ -48,6 +52,8 @@ export async function organiseFiles(
   const trials: Trial[] = previous.map((t) => ({
     ...t,
     otherFiles: [...(t.otherFiles || [])],
+    egfs: [...(t.egfs || [])],
+    ignoredEgfs: [...(t.ignoredEgfs || [])],
     tetrodes: t.tetrodes.map((e) => ({ ...e, cuts: [...e.cuts] })),
   }));
   const map = new Map(trials.map((t) => [t.id, t]));
@@ -93,8 +99,13 @@ export async function organiseFiles(
       }
       continue;
     }
+    const egf = ext.match(/^egf(\d*)$/);
     if (ext === "pos" || ext === "set") {
       ensure(base, folder)[ext] = f;
+    } else if (egf && (egf[1] === "" || +egf[1] > 0)) {
+      const t = ensure(base, folder);
+      const number = egf[1] === "" ? 1 : +egf[1];
+      t.egfs = [...(t.egfs || []).filter((e) => e.number !== number), { number, file: f }];
     } else if (/^\d+$/.test(ext) && +ext > 0 && !/\.(fet|fmask|klg|res|spk|temp)$/i.test(base)) {
       tet(ensure(base, folder), +ext).file = f;
     } else {
@@ -160,6 +171,12 @@ export async function organiseFiles(
   }
   trials.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
   for (const t of trials) {
+    // Only the lowest numbered .egf files are used; the rest are named, not kept.
+    const egfs = [...(t.egfs || [])].sort((a, b) => a.number - b.number);
+    t.egfs = egfs.slice(0, MAX_EGFS);
+    t.ignoredEgfs = [
+      ...new Set([...(t.ignoredEgfs || []), ...egfs.slice(MAX_EGFS).map((e) => e.file.name)]),
+    ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     t.tetrodes.sort((a, b) => a.number - b.number);
     for (const e of t.tetrodes) {
       e.cuts.sort((a, b) => b.file.lastModified - a.file.lastModified);

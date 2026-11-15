@@ -98,6 +98,7 @@ const plotKeys: Record<string, PlotMode> = {
   c: "direction",
   v: "speed",
   t: "ac",
+  b: "phase",
 };
 /** How long Cmd/Ctrl C is held (through key repeats) to open copy mode. */
 const COPY_HOLD_MS = 500;

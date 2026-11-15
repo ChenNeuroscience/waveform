@@ -1,7 +1,7 @@
 //! Seeded virtual LTX recordings. Any record can be regenerated independently.
 //!
-//! [`Dataset`] lays them out as a dataset: trials of tetrode recordings with .set, .pos, raw tetrode
-//! and .cut files. Every file is a random-access byte range, so the browser can
+//! [`Dataset`] lays them out as a dataset: trials of tetrode recordings with .set, .pos, .egf,
+//! raw tetrode and .cut files. Every file is a random-access byte range, so the browser can
 //! synthesise multi-GB recordings only when read and the `synthetic` CLI (core/cli)
 //! can write the same bytes to disk.
 use std::{
@@ -613,6 +613,66 @@ impl Synthetic {
             ]);
         });
     }
+    /// One `.egf` byte per sample for samples `first..` of LFP channel `channel` (1 or 2), at
+    /// `EGF_RATE`: the theta rhythm that modulates the spikes, larger when running faster,
+    /// with slow delta waves, theta-nested gamma and noise. Channel 2 is smaller and a little
+    /// later in phase, as from a nearby site.
+    pub(crate) fn egf(&self, first: usize, output: &mut [u8], channel: u32) {
+        let tau = std::f64::consts::TAU;
+        let (scale, lag) = if channel == 1 { (1., 0.) } else { (0.75, 0.35) };
+        let offset = hash(self.seed ^ 0xe6f0 ^ channel) as usize;
+        let noise = noise_table();
+        let per_tick = EGF_RATE / 50;
+        let dt = 1. / EGF_RATE as f64;
+        let last = self.positions.len() - 1;
+        // A unit phasor and its per-sample rotation.
+        let phasor = |phase: f64| (phase.cos(), phase.sin());
+        let rotate = |(re, im): (f64, f64), (c, s): (f64, f64)| (re * c - im * s, re * s + im * c);
+        // Each 20 ms position tick starts from exact phases and rotates them sample by sample
+        // (theta's frequency taken as constant over the tick), so any range reads the same.
+        let end = first + output.len();
+        for tick in first / per_tick..end.div_ceil(per_tick) {
+            let s0 = tick * per_tick;
+            let t0 = s0 as f64 * dt;
+            // Speed (cm/s at 300 px/m) over the surrounding 200 ms of the walk.
+            let (a, b) = (
+                self.positions[tick.min(last).saturating_sub(5)],
+                self.positions[(tick + 5).min(last)],
+            );
+            let distance = (a[0] as f64 - b[0] as f64).hypot(a[1] as f64 - b[1] as f64);
+            let speed = (distance / 3. / 0.2).min(40.);
+            let amplitude = scale * (20. + 1.2 * speed);
+            let theta0 = theta(t0) - lag;
+            let step = (theta(t0 + per_tick as f64 * dt) - lag - theta0) / per_tick as f64;
+            let mut th = phasor(theta0);
+            let mut slow = phasor(tau * 1.3 * t0 + channel as f64);
+            let mut slower = phasor(tau * 2.9 * t0);
+            let mut gamma = phasor(tau * 55. * t0);
+            let (r_th, r_slow, r_slower, r_gamma) = (
+                phasor(step),
+                phasor(tau * 1.3 * dt),
+                phasor(tau * 2.9 * dt),
+                phasor(tau * 55. * dt),
+            );
+            let harmonic = phasor(0.6);
+            for i in s0..s0 + per_tick {
+                if i >= first && i < end {
+                    // sin(2θ + 0.6) from θ's phasor squared, turned by 0.6.
+                    let double = rotate(rotate(th, th), harmonic);
+                    let value = amplitude * (th.1 + 0.2 * double.1)
+                        + 14. * slow.1
+                        + 7. * slower.1
+                        + 5. * (1. + th.0) * gamma.1
+                        + 4. * noise[(offset + i) % NOISE] as f64;
+                    output[i - first] = value.round().clamp(-128., 127.) as i8 as u8;
+                }
+                th = rotate(th, r_th);
+                slow = rotate(slow, r_slow);
+                slower = rotate(slower, r_slower);
+                gamma = rotate(gamma, r_gamma);
+            }
+        }
+    }
     /// 20-byte position records for ticks `first..`.
     pub(crate) fn position(&self, first: usize, output: &mut [u8]) {
         output.fill(0);
@@ -629,6 +689,10 @@ impl Synthetic {
     }
 }
 const TAIL: &[u8] = b"\r\ndata_end";
+/// `.egf` samples per second.
+const EGF_RATE: usize = 5000;
+/// `.egf` files per trial.
+const EGF_CHANNELS: u32 = 2;
 
 /// What to simulate. Files are named `{name}-a.set`, `{name}-a.1`, `{name}-a_1.cut`, ...
 pub struct Params {
@@ -674,6 +738,7 @@ enum Body {
     Tetrode(Rc<Synthetic>),
     Position(Rc<Synthetic>),
     Cut(Rc<Synthetic>, usize),
+    Egf(Rc<Synthetic>, u32),
 }
 
 pub struct SyntheticFile {
@@ -682,9 +747,10 @@ pub struct SyntheticFile {
     body: Body,
 }
 impl SyntheticFile {
-    /// Raw tetrode recordings, which are too large to materialise up front.
-    pub fn is_recording(&self) -> bool {
-        matches!(self.body, Body::Tetrode(_))
+    /// Raw tetrode recordings and continuous signals, which are too large to materialise up
+    /// front.
+    pub fn is_lazy(&self) -> bool {
+        matches!(self.body, Body::Tetrode(_) | Body::Egf(..))
     }
     fn record(&self) -> usize {
         match self.body {
@@ -692,6 +758,7 @@ impl SyntheticFile {
             Body::Tetrode(_) => 216,
             Body::Position(_) => 20,
             Body::Cut(..) => 4,
+            Body::Egf(..) => 1,
         }
     }
     fn body_len(&self) -> usize {
@@ -700,11 +767,12 @@ impl SyntheticFile {
             Body::Tetrode(s) => s.spikes() * 216,
             Body::Position(s) => s.ticks() * 20,
             Body::Cut(s, _) => s.spikes() * 4,
+            Body::Egf(s, _) => s.ticks() * (EGF_RATE / 50),
         }
     }
     fn tail(&self) -> &'static [u8] {
         match self.body {
-            Body::Tetrode(_) | Body::Position(_) => TAIL,
+            Body::Tetrode(_) | Body::Position(_) | Body::Egf(..) => TAIL,
             _ => b"",
         }
     }
@@ -747,6 +815,7 @@ impl SyntheticFile {
             Body::Tetrode(s) => s.tetrode(first, &mut buf),
             Body::Position(s) => s.position(first, &mut buf),
             Body::Cut(s, keep) => s.cut(first, &mut buf, *keep),
+            Body::Egf(s, channel) => s.egf(first, &mut buf, *channel),
         }
         out.copy_from_slice(&buf[offset - first * size..][..out.len()]);
     }
@@ -795,6 +864,18 @@ impl Dataset {
                         header: format!("duration {duration}\nnum_pos_samples {}\nsample_rate 50 hz\ntimestamp_timebase 96000 hz\npixels_per_metre 300\nwindow_min_x 0\nwindow_min_y 0\nwindow_max_x 300\nwindow_max_y 300\npos_format t,x1,y1,x2,y2,numpix1,numpix2\r\ndata_start", duration * 50).into(),
                         body: Body::Position(s.clone()),
                     });
+                    for channel in 1..=EGF_CHANNELS {
+                        let suffix = if channel == 1 {
+                            String::new()
+                        } else {
+                            channel.to_string()
+                        };
+                        files.push(SyntheticFile {
+                            name: format!("{name}.egf{suffix}"),
+                            header: format!("duration {duration}\nnum_chans 1\nsample_rate 5000 hz\nstream_name eeg\nchan_name CH{channel}\nnum_EEG_samples {}\nrange_uv 1000.0\r\ndata_start", s.ticks() * (EGF_RATE / 50)).into(),
+                            body: Body::Egf(s.clone(), channel),
+                        });
+                    }
                 }
                 // Like data you come to yourself: the last tetrode is uncut and the
                 // one before has only two cells sorted, the rest left in noise group 0.
@@ -881,8 +962,8 @@ pub unsafe extern "C" fn synthetic_dataset_header_len(d: *const Dataset, i: usiz
     (&(*d).files)[i].header.len()
 }
 #[no_mangle]
-pub unsafe extern "C" fn synthetic_dataset_is_recording(d: *const Dataset, i: usize) -> u32 {
-    (&(*d).files)[i].is_recording() as u32
+pub unsafe extern "C" fn synthetic_dataset_is_lazy(d: *const Dataset, i: usize) -> u32 {
+    (&(*d).files)[i].is_lazy() as u32
 }
 #[no_mangle]
 pub unsafe extern "C" fn synthetic_dataset_read(
@@ -1236,6 +1317,70 @@ mod tests {
         }
     }
     #[test]
+    fn egf_theta_is_the_spikes_theta_and_grows_with_running_speed() {
+        use crate::lfp::{analytic, instantaneous_frequency, EgfBuilder};
+        let s = Synthetic::new(4271, 4, 2000, 300, 1);
+        let n = s.ticks() * 100;
+        let mut bytes = vec![0; n];
+        s.egf(0, &mut bytes, 1);
+        let mut b = EgfBuilder::new(n, 5000.);
+        b.push(&bytes);
+        let signal = b.finish();
+        let z = analytic(&signal, 6., 12.);
+        let f = instantaneous_frequency(&z, signal.rate);
+        // The time-weighted distribution peaks within theta's 6.9-7.7 Hz wander.
+        let mut d = vec![0f32; 60];
+        for &f in &f {
+            let i = ((f - 6.) / 0.1).floor();
+            if (0. ..60.).contains(&i) {
+                d[i as usize] += 1.;
+            }
+        }
+        let peak = d
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap()
+            .0;
+        assert!(
+            (9..17).contains(&peak),
+            "peak at {} Hz",
+            6. + peak as f64 * 0.1
+        );
+        let inside: f32 = d[9..17].iter().sum();
+        assert!(inside / d.iter().sum::<f32>() > 0.8);
+        // Faster running, larger theta: compare the envelope in the fastest and slowest
+        // fifths of the walk.
+        let speed = |tick: usize| {
+            let (a, b) = (s.positions[tick - 5], s.positions[tick + 5]);
+            (a[0] as f64 - b[0] as f64).hypot(a[1] as f64 - b[1] as f64)
+        };
+        let mut ticks: Vec<usize> = (50..s.ticks() - 50).collect();
+        ticks.sort_by(|&a, &b| speed(a).total_cmp(&speed(b)));
+        let envelope = |ticks: &[usize]| {
+            ticks.iter().map(|&t| z[t * 5].norm()).sum::<f32>() / ticks.len() as f32
+        };
+        let fifth = ticks.len() / 5;
+        let (slow, fast) = (
+            envelope(&ticks[..fifth]),
+            envelope(&ticks[ticks.len() - fifth..]),
+        );
+        assert!(fast > slow * 1.3, "envelope {slow} slow, {fast} fast");
+    }
+
+    #[test]
+    fn egf_reads_of_any_range_match_one_whole_read() {
+        let s = Synthetic::new(4271, 4, 2000, 10, 1);
+        let mut whole = vec![0; 50000];
+        s.egf(0, &mut whole, 2);
+        for (a, b) in [(0, 1), (37, 250), (99, 101), (12345, 50000)] {
+            let mut part = vec![0; b - a];
+            s.egf(a, &mut part, 2);
+            assert_eq!(part, whole[a..b], "{a}..{b}");
+        }
+    }
+
+    #[test]
     fn reads_of_any_range_match_the_whole_file() {
         let dataset = Dataset::new(&Params {
             seed: 4271,
@@ -1247,10 +1392,11 @@ mod tests {
             spikes: vec![2000],
         })
         .unwrap();
-        assert_eq!(dataset.files.len(), 2 * (1 + 8 + 1 + 7));
+        assert_eq!(dataset.files.len(), 2 * (1 + 8 + 1 + 2 + 7));
         for name in [
             "demo_box-a.1",
             "demo_box-a.pos",
+            "demo_box-a.egf2",
             "demo_box-a_7.cut",
             "demo_box-a.set",
         ] {

@@ -1925,7 +1925,7 @@ kbd {
 }
 .position-speed {
   bottom: auto;
-  height: 141px;
+  height: 128px;
 }
 .position-speed canvas {
   height: 128px;
@@ -2190,10 +2190,18 @@ kbd {
 .position-info {
   position: absolute;
   top: 3px;
-  left: 4px;
+  left: 2px;
   z-index: 2;
   pointer-events: none;
-  background: #ffffff99;
+}
+/* No box behind: text and plots each carry a narrow white outline over the path. */
+.position-time {
+  text-shadow:
+    -1px -1px 0 #fff,
+    1px -1px 0 #fff,
+    -1px 1px 0 #fff,
+    1px 1px 0 #fff,
+    0 0 2px #fff;
 }
 .position-time {
   font: 11px/15px Arial;
@@ -2206,20 +2214,12 @@ kbd {
   top: 0;
   bottom: auto;
   width: 76px;
-  height: 145px;
+  height: 128px;
 }
 .position-speed canvas {
   width: 40px;
   height: 128px;
   flex: none;
-}
-.speed-axis-limit {
-  position: absolute;
-  left: 0;
-  top: 128px;
-  padding: 1px 0 !important;
-  font: 9px/12px Arial;
-  white-space: nowrap;
 }
 .file-tag.missing {
   opacity: 0.45;
@@ -2498,4 +2498,138 @@ kbd {
 .demo-progress progress {
   width: 80px;
   height: 7px;
+}
+
+/* .egf files after ~.pos: the selected number full size, others collapsed to slivers
+   that keep their (hidden) label so selecting one can animate it open, as tetrodes do. */
+.egf-files {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 2px;
+}
+.trial-heading .egf-file {
+  max-width: 5px;
+  min-width: 5px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  justify-content: flex-start;
+  color: transparent;
+  background: #cfe3c6;
+  border: 1px solid #6c9160;
+  cursor: pointer;
+  transition:
+    max-width 0.22s ease,
+    min-width 0.22s ease,
+    padding 0.22s ease,
+    color 0.18s ease,
+    background-color 0.12s ease;
+}
+.trial-heading .egf-file.expanded {
+  max-width: 80px;
+  min-width: 25px;
+  padding: 0 4px;
+  color: #234018;
+}
+.trial-heading .egf-file:hover:not(:disabled) {
+  background: #b3d3a6;
+  border-color: #3d5c33;
+}
+.trial-heading .egf-file.active {
+  background: #345a28;
+  border-color: #1f3a17;
+  color: white;
+}
+.trial-heading .egf-file.missing {
+  cursor: default;
+  background: transparent;
+  border-style: dashed;
+}
+@media (prefers-reduced-motion: reduce) {
+  .trial-heading .egf-file {
+    transition: none;
+  }
+}
+.egf-truncated {
+  margin-left: 2px;
+  cursor: help;
+}
+
+/* The LFP frequency plot, below the speed dwell; its labels show when it's hovered. */
+.lfp-frequency canvas {
+  display: block;
+  width: 40px;
+  height: 96px;
+  margin-top: 4px;
+}
+.lfp-status {
+  color: #777;
+}
+
+/* The spike phase tile: beside the speed tuning, with its bars. */
+.tile-phase {
+  flex: none;
+  width: 24px;
+  margin-top: 28px;
+  height: 53px;
+  position: relative;
+}
+.tile-phase canvas {
+  height: 53px;
+}
+.tile-phase .plot-unavailable {
+  font-size: 7px;
+  writing-mode: vertical-rl;
+}
+
+/* A position plot's axis ends, while it's hovered: in the plot's colour, outlined
+   in white like the time. */
+.axis-label {
+  position: absolute;
+  z-index: 1;
+  font: bold 9px/10px Arial;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow:
+    -1px -1px 0 #fff,
+    1px -1px 0 #fff,
+    -1px 1px 0 #fff,
+    1px 1px 0 #fff,
+    0 0 2px #fff;
+}
+.speed-label {
+  color: #f00;
+  left: 8px;
+}
+.lfp-label {
+  color: #1e88e5;
+}
+.axis-label.top {
+  top: 3px;
+}
+.axis-label.bottom {
+  bottom: 3px;
+}
+.speed-label.top,
+.speed-label.bottom {
+  left: 8px;
+}
+.lfp-label.top,
+.lfp-label.bottom {
+  left: 8px;
+}
+.lfp-label.below-left {
+  top: 100%;
+  left: 2px;
+}
+/* The plots take the pointer (the rest of the overlay lets it through to the path), so
+   hovering one shows its axis labels. */
+.lfp-frequency {
+  position: relative;
+  width: 40px;
+  pointer-events: auto;
+}
+.position-info .position-speed {
+  pointer-events: auto;
 }
