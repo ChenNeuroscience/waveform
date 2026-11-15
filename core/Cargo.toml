@@ -7,6 +7,7 @@ license = "MIT"
 rustfft = { version = "6.4.1", features = ["wasm_simd"] }
 nalgebra = { version = "0.35.0", default-features = false, features = ["std"] }
 clap = { version = "4.6.7", features = ["derive"], optional = true }
+sci-rs = { version = "0.4.1", default-features = false, features = ["std"] }
 [lib]
 crate-type = ["cdylib", "rlib"]
 [profile.release]
@@ -14,6 +15,7 @@ lto = true
 opt-level = 3
 panic = "abort"
 codegen-units = 1
+strip = true
 [features]
 cli = ["dep:clap"]
 [[bin]]

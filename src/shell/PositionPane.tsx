@@ -1,10 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { SpeedDwellPlot } from "../plots/SpeedPlot";
 import { PathPlot, type SpikeLayer } from "../plots/PathPlot";
+import { LfpFrequencyPlot } from "../plots/LfpPlot";
 import {
   color,
   type AnalysisData,
+  type PositionPlots,
+  type LfpDistribution,
   type Settings,
   type Trajectory,
   type Trial,
@@ -12,6 +15,26 @@ import {
 } from "../types";
 import type { DragComparison } from "../tiles/tile-gestures";
 import { experimentTiming } from "./position-info";
+
+/** The speed dwell; hovered, its axis ends are shown. */
+function SpeedSection({ values, speedMax }: { values: Float32Array; speedMax: number }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      className="position-speed"
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+    >
+      <SpeedDwellPlot values={values} />
+      {hovered && (
+        <>
+          <span className="axis-label speed-label top">0</span>
+          <span className="axis-label speed-label bottom">{speedMax} cm/s</span>
+        </>
+      )}
+    </div>
+  );
+}
 
 /** Recording times, speed dwell and the path, with the hovered cell's spikes (or,
  * while dragging one tile onto another, both cells' spikes). */
@@ -21,6 +44,8 @@ export function PositionPane({
   settings,
   trajectory,
   speedDwell,
+  lfp,
+  plots,
   analysis,
   comparisonAnalysis,
   hoverCell,
@@ -36,6 +61,11 @@ export function PositionPane({
   settings: Settings;
   trajectory: Trajectory | null;
   speedDwell: Float32Array | null;
+  /** The trial's LFP frequency distribution, once computed. */
+  lfp: LfpDistribution | null;
+  /** Which plots are on: the speed dwell with the tiles' speed plots, the LFP frequency with
+   * their phase plots. Off, their values aren't asked for. */
+  plots: PositionPlots;
   /** The displayed (hovered or selected) cell's analysis. */
   analysis: AnalysisData | null;
   comparisonAnalysis: AnalysisData | null;
@@ -84,6 +114,11 @@ export function PositionPane({
     return (
       <section className="position-pane" {...hover}>
         <div className="position-content">
+          {plots.lfp && lfp && (
+            <div className="position-info">
+              <LfpFrequencyPlot data={lfp} />
+            </div>
+          )}
           <span className="pane-placeholder">
             {trial?.pos ? "Processing position…" : "Drop a matching .pos file for position plots."}
           </span>
@@ -100,10 +135,10 @@ export function PositionPane({
             <br />
             {timing.durationText}
           </div>
-          <div className="position-speed">
-            {speedDwell && <SpeedDwellPlot values={speedDwell} />}
-            <small className="speed-axis-limit">{settings.speedMax} cm/s max</small>
-          </div>
+          {plots.speed && speedDwell && (
+            <SpeedSection values={speedDwell} speedMax={settings.speedMax} />
+          )}
+          {plots.lfp && lfp && <LfpFrequencyPlot data={lfp} />}
         </div>
         <div
           className="position-path"

@@ -45,6 +45,7 @@ import { TOOL_PANELS, type PanelContext, type PanelName } from "./shell/panels";
 import { headersChanged } from "./shell/header-edits";
 import { useShortcuts } from "./app/shortcuts";
 import { useAnalyses } from "./app/analyses";
+import { useLfp } from "./app/lfp";
 import { useCopies } from "./app/copies";
 import { useFeatureSpace } from "./app/features";
 import { useSplit } from "./app/split";
@@ -75,6 +76,7 @@ function onlyPlot(mode: PlotMode): VisiblePlots {
     speed: false,
     ac: false,
     sc: false,
+    phase: false,
     [mode]: true,
   };
 }
@@ -159,6 +161,9 @@ export default function App() {
   const [trialId, setTrialId] = useState("");
   const [tetNum, setTetNum] = useState(1);
   const [cutId, setCutId] = useState("");
+  // The selected .egf file, by number: kept when switching trials, even where a trial doesn't
+  // have it (it shows as missing), until another is chosen.
+  const [egfNum, setEgfNum] = useState(1);
 
   // The loaded recording (from the worker) and what the position pane shows.
   const [data, setData] = useState<ViewData | null>(null);
@@ -184,6 +189,7 @@ export default function App() {
     speed: true,
     ac: true,
     sc: false,
+    phase: false,
   });
 
   // The toolbar (Esc hides and shows it), tool windows (the focused one is `pane`)
@@ -420,8 +426,22 @@ export default function App() {
     headerEdits,
     displayCell,
     dragComparison,
+    speedDwell: shown.speed,
     onError: setError,
   });
+  const lfp = useLfp({
+    trial,
+    egfNum,
+    settings,
+    show: shown.phase,
+    onError: setError,
+  });
+  const chooseEgf = (t: Trial, n: number) => {
+    setEgfNum(n);
+    if (t.id !== trialId) {
+      chooseTrial(t);
+    }
+  };
   const {
     copies,
     popOut,
@@ -555,6 +575,7 @@ export default function App() {
     setTrialId("");
     setTetNum(1);
     setCutId("");
+    setEgfNum(1);
     setData(null);
     setBusy(false);
     setSwap(null);
@@ -953,11 +974,16 @@ export default function App() {
                 onCopyTrial={copyMode.toggleTrial}
                 copyCuts={copyMode.cuts}
                 onCopyCut={copyMode.chooseCut}
+                egfNum={egfNum}
+                onEgf={chooseEgf}
               />
               <Divider part="files" onDrag={panes.dragDivider} />
               <PositionPane
                 {...{ data, trial, settings, trajectory, speedDwell, analysis, comparisonAnalysis }}
-                {...{ hoverCell, dragComparison, grabMode }}
+                {...{ hoverCell, dragComparison, grabMode, lfp }}
+                // The tiles' plot toggles: speed shows the trial's speed dwell, phase its LFP
+                // frequency.
+                plots={{ speed: shown.speed, lfp: shown.phase }}
                 onPopPlot={popPlot}
                 onOpenHeaders={() => setPane("headers")}
                 onHover={(hovered) => {
@@ -1040,6 +1066,7 @@ export default function App() {
                   copying={copyMode.cells}
                   copyingPath={copyMode.kind === "path"}
                   {...{ data, settings, trial, shown, splitPoint, swap, grabMode, headerEdits }}
+                  egfNum={egfNum}
                   selected={cell}
                   feedback={tileFeedback}
                   busy={!ready}
@@ -1067,7 +1094,7 @@ export default function App() {
       {drag && trials.length > 0 && (
         <div className="drag-overlay">
           <p className="drop-title-wobble">drag &amp; drop files here</p>
-          <small>.set · .pos · .1, .2, … · .cut · .clu.N</small>
+          <small>.set · .pos · .egf, .egf2, … · .1, .2, … · .cut · .clu.N</small>
         </div>
       )}
       {panels.map((name) => {

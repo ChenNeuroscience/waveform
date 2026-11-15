@@ -12,6 +12,15 @@ export interface Tetrode {
   file?: File;
   cuts: CutFile[];
 }
+/** A continuous-signal file: `.egf` is number 1, `.egf2` number 2, and so on. */
+export interface EgfFile {
+  number: number;
+  file: File;
+}
+/** At most this many `.egf` files per trial are used (the lowest numbered). */
+export const MAX_EGFS = 5;
+/** `~.egf`, `~.egf2`...: an `.egf` file's name in a trial. */
+export const egfName = (n: number) => `~.egf${n === 1 ? "" : n}`;
 export interface Trial {
   id: string;
   name: string;
@@ -19,6 +28,10 @@ export interface Trial {
   set?: File;
   pos?: File;
   tetrodes: Tetrode[];
+  /** Ascending by number, at most MAX_EGFS. */
+  egfs?: EgfFile[];
+  /** `.egf` files beyond MAX_EGFS, by name, which aren't used. */
+  ignoredEgfs?: string[];
   otherFiles?: string[];
 }
 export const RENDERING_MODES = ["fixed", "density", "drift"] as const;
@@ -40,6 +53,12 @@ export interface Settings {
   dirSmooth: number;
   speedBin: number;
   speedMax: number;
+  /** The LFP band-pass edges (Hz) and the frequency distribution's bin width (Hz). */
+  lfpLow: number;
+  lfpHigh: number;
+  lfpFreqBin: number;
+  /** The spike phase histogram's bin width (degrees). */
+  lfpPhaseBin: number;
 }
 export const defaultSettings: Settings = {
   pcaSamples: 5000,
@@ -58,8 +77,12 @@ export const defaultSettings: Settings = {
   dirSmooth: 1,
   speedBin: 4,
   speedMax: 45,
+  lfpLow: 6,
+  lfpHigh: 12,
+  lfpFreqBin: 0.25,
+  lfpPhaseBin: 15,
 };
-export type PlotMode = "waveforms" | "spatial" | "direction" | "speed" | "ac" | "sc";
+export type PlotMode = "waveforms" | "spatial" | "direction" | "speed" | "ac" | "sc" | "phase";
 export type FeatureMode = "amplitudes" | "pca";
 /** Four coordinates per spike. Amplitudes are bytes; PCA is normalised float32. */
 export interface FeatureCoordinates {
@@ -162,6 +185,7 @@ export const ANALYSIS_PARTS = [
   "spikes",
   "spatialDrift",
   "spikeDrift",
+  "phase",
 ] as const;
 export type AnalysisPart = (typeof ANALYSIS_PARTS)[number];
 /** A cell's analysis. Parts that weren't asked for are empty, with no key. */
@@ -195,6 +219,10 @@ export interface AnalysisData {
    * from 0 (the recording's start) to 1 (its last spike); NaN where a bin has no spikes. */
   spatialDrift?: Float32Array;
   spikeDrift?: Float32Array;
+  /** phase: spikes in each bin of the selected `.egf` signal's band phase, across a cycle
+   * from its peaks; and their circular mean (radians, 0 to 2π). Empty without an `.egf` file. */
+  phase?: Float32Array;
+  phaseMean?: number;
 }
 /** The fields each part fills. */
 const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
@@ -208,6 +236,7 @@ const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
   spikes: ["spikes"],
   spatialDrift: ["spatialDrift"],
   spikeDrift: ["spikeDrift"],
+  phase: ["phase", "phaseMean"],
 };
 /**
  * `next`, keeping `held`'s values for every part whose key is unchanged, so plots of those
@@ -252,6 +281,28 @@ export const positionSource = (trial: Trial | undefined, edits: HeaderEdits) => 
   ppm: editedNumber(trial, edits, "pixels_per_metre"),
   sync: editedNumber(trial, edits, SYNC_HEADER),
 });
+/** A trial's `.egf` file number `n`, as the worker's compute graph takes it. */
+export const egfSource = (trial: Trial | undefined, n: number) => {
+  const egf = trial?.egfs?.find((e) => e.number === n)?.file;
+  return { egf, egfFile: egf && trial ? `${trial.id}|${fileId(egf)}` : undefined };
+};
+/** Which of the position pane's plots are on (with the tiles' speed and phase plots). Off, a
+ * plot's values aren't asked for at all. */
+export interface PositionPlots {
+  speed: boolean;
+  lfp: boolean;
+}
+/** Time at each instantaneous frequency of a band-passed `.egf` signal, over the recording. */
+export interface LfpDistribution {
+  /** Its key in the worker's compute graph: equal keys mean identical values. */
+  key: string;
+  /** Seconds in each bin, the first starting at `low` Hz, each `bin` Hz wide. */
+  values: Float32Array;
+  low: number;
+  bin: number;
+  /** The mean frequency (within the band), NaN if none. */
+  mean: number;
+}
 export { groupTextColor } from "./palette";
 import { groupRgb8, groupTextColor } from "./palette";
 export const cellRgb = (cell: number) => groupRgb8(cell).map((value) => value / 255);

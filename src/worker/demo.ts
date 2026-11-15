@@ -25,7 +25,7 @@ function read(w: Core, dataset: number, index: number, start: number, end: numbe
 }
 
 /** A browser-side File marker (just the header) is resolved to this random-access
- * source in the worker; raw tetrode bytes are synthesised only when read. */
+ * source in the worker; raw tetrode and .egf bytes are synthesised only when read. */
 export class SyntheticRecording extends File {
   constructor(
     readonly wasm: Core,
@@ -151,14 +151,15 @@ export async function demoFiles(
     ),
     // Sizes reach ~2 GB, so read the usize as unsigned.
     size: w.synthetic_dataset_size(dataset, index) >>> 0,
-    recording: w.synthetic_dataset_is_recording(dataset, index) !== 0,
+    // Tetrodes and .egf files are made only as they're read.
+    lazy: w.synthetic_dataset_is_lazy(dataset, index) !== 0,
   }));
-  const total = entries.reduce((a, e) => a + (e.recording ? 0 : e.size), 0);
+  const total = entries.reduce((a, e) => a + (e.lazy ? 0 : e.size), 0);
   const modified = Date.now();
   const files: File[] = [];
   let completed = 0;
-  for (const { index, name, size, recording } of entries) {
-    if (recording) {
+  for (const { index, name, size, lazy } of entries) {
+    if (lazy) {
       const header = read(w, dataset, index, 0, w.synthetic_dataset_header_len(dataset, index));
       const file = new File([header], name, { lastModified: modified });
       sources.set(fileId(file), { dataset, index, size, file });

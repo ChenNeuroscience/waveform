@@ -1,11 +1,36 @@
 import { describe, it, expect } from "vitest";
 import { parseHeader, organiseFiles } from "../src/files";
 import { corePromise, decodeCut as readCut, seedRecording } from "./wasm";
-import { analysis, ask, command, trajectory, type ComputeInputs } from "../src/worker/compute";
+import {
+  analysis,
+  ask,
+  command,
+  lfpDistribution,
+  trajectory,
+  type ComputeInputs,
+} from "../src/worker/compute";
 import { ANALYSIS_PARTS } from "../src/types";
 import { defaultSettings } from "../src/types";
 import { fitGrid, projectionFrame, waveX, waveY, wavePoint } from "../src/plots/plot-geometry";
 describe("LTX import", () => {
+  it("groups .egf files by number, using only the first five", async () => {
+    const f = (name: string) => new File([""], name, { lastModified: 1 });
+    const { trials } = await organiseFiles([
+      f("t.1"),
+      f("t.egf3"),
+      f("t.egf"),
+      ...[2, 4, 5, 6, 10].map((n) => f(`t.egf${n}`)),
+      f("t.egf0"),
+    ]);
+    expect(trials[0].egfs!.map((e) => e.number)).toEqual([1, 2, 3, 4, 5]);
+    expect(trials[0].ignoredEgfs).toEqual(["t.egf6", "t.egf10"]);
+    expect(trials[0].otherFiles).toEqual(["t.egf0"]);
+    // A later import keeps what was there and what was left out.
+    const next = await organiseFiles([f("t.egf7")], trials);
+    expect(next.trials[0].egfs!.map((e) => e.number)).toEqual([1, 2, 3, 4, 5]);
+    expect(next.trials[0].ignoredEgfs).toEqual(["t.egf6", "t.egf7", "t.egf10"]);
+  });
+
   it("keeps folder-scoped File identities across incremental imports", async () => {
     const f = (path: string, text = "") => {
       const file = new File([text], path.split("/").at(-1)!, {
@@ -246,4 +271,57 @@ it("waveform frame geometry round-trips between samples and split points", () =>
   expect(waveY(0)).toBe(0.5);
   expect(waveY(127)).toBeLessThan(1 / 128);
   expect(waveY(-128)).toBe(1);
+});
+
+describe("LFP", () => {
+  /** An .egf file of `seconds` at 5 kHz whose phase (radians) is `phase(t)`. */
+  const egfFile = (seconds: number, phase: (t: number) => number) => {
+    const n = seconds * 5000;
+    const samples = new Int8Array(n).map((_, i) => Math.round(50 * Math.cos(phase(i / 5000))));
+    const header = `num_chans 1\r\nsample_rate 5000 hz\r\nnum_EEG_samples ${n}\r\ndata_start`;
+    return new File([header, samples, "\r\ndata_end"], "t.egf", { lastModified: 1 });
+  };
+
+  it("gives the time at each frequency over the recording, and the mean", async () => {
+    const w = await corePromise;
+    // 30 s of 7.1 Hz theta, then 30 s of 9.1 Hz.
+    const egf = egfFile(60, (t) =>
+      t < 30 ? 2 * Math.PI * 7.1 * t : 2 * Math.PI * (7.1 * 30 + 9.1 * (t - 30)),
+    );
+    const inputs: ComputeInputs = { settings: defaultSettings, egf, egfFile: "t|t.egf" };
+    const d = (await lfpDistribution(w, inputs))!;
+    expect([d.low, d.bin, d.values.length]).toEqual([6, 0.25, 24]);
+    const total = d.values.reduce((a, v) => a + v, 0);
+    expect(total).toBeGreaterThan(58);
+    // Nearly half in each of the 7.0-7.25 and 9.0-9.25 Hz bins; the mean between them.
+    expect(d.values[4] / total).toBeGreaterThan(0.45);
+    expect(d.values[12] / total).toBeGreaterThan(0.45);
+    expect(d.mean).toBeCloseTo(8.1, 1);
+    // The same answer keeps its key; 1 Hz bins across 6-12 Hz are six, and need no new read.
+    expect((await lfpDistribution(w, inputs))!.key).toBe(d.key);
+    const coarse = (await lfpDistribution(w, {
+      ...inputs,
+      settings: { ...defaultSettings, lfpFreqBin: 1 },
+    }))!;
+    expect(coarse.values.length).toBe(6);
+    expect(coarse.key).not.toBe(d.key);
+    // Without an .egf file, there's nothing to show.
+    expect(await lfpDistribution(w, { ...inputs, egf: undefined })).toBe(null);
+  });
+
+  it("gives the band's phase at each spike", async () => {
+    const w = await corePromise;
+    const egf = egfFile(20, (t) => 2 * Math.PI * 8 * t);
+    // Spikes (1 kHz ticks) at the peaks of 8 Hz theta.
+    const times = Array.from({ length: 120 }, (_, k) => (k + 20) * 125);
+    const recording = await seedRecording(times, Array(120).fill(1), { duration: 20 });
+    const inputs: ComputeInputs = { settings: defaultSettings, recording, egf, egfFile: "p|t.egf" };
+    const a = await analysis(w, inputs, 1, ["phase"]);
+    expect(a.phase!.length).toBe(24);
+    expect(a.phase![0] + a.phase![23]).toBe(120);
+    expect(Math.min(a.phaseMean!, 2 * Math.PI - a.phaseMean!)).toBeLessThan(0.1);
+    // Without an .egf file, the part is left out.
+    const none = await analysis(w, { ...inputs, egf: undefined }, 1, ["phase"]);
+    expect(none.phase).toBeUndefined();
+  });
 });

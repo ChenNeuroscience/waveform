@@ -3,8 +3,9 @@
 // supplies files they say they need, and copies their answers out.
 import { parseHeader, readCut } from "../files";
 import { streamFile, copyF32, copyU8, copyU16, copyU32, withU8, type Core } from "./wasm";
-import type { AnalysisData, AnalysisPart, Header, Trajectory } from "../types";
-import { Superseded, type PositionRequest } from "./protocol";
+import type { AnalysisData, AnalysisPart, Header, LfpDistribution, Trajectory } from "../types";
+import { Superseded, type LfpRequest, type PositionRequest } from "./protocol";
+import { recordingSource } from "./demo";
 import { readPopulation } from "./recording";
 import { fitPca } from "./pca";
 import { get, openStore } from "./history";
@@ -59,6 +60,64 @@ export async function readPosition(file: File, w: Core, editedPpm?: number): Pro
     throw e;
   }
 }
+/** Reads an `.egf` file (or a synthetic stand-in) into a new handle, decimated, for the
+ * compute graph to take (`compute_supply_egf`). */
+export async function readEgf(
+  w: Core,
+  marker: File,
+  options: { current?: () => boolean; progress?: (fraction: number) => void } = {},
+): Promise<number> {
+  const file = recordingSource(w, marker);
+  const { header: h, offset } = parseHeader(
+    new Uint8Array(await file.slice(0, 65536).arrayBuffer()),
+  );
+  const rate = parseFloat(h.sample_rate);
+  // A blank count is an interrupted recording: read what's there, without the end marker.
+  const stated = parseInt(h.num_EEG_samples);
+  const n = Number.isSafeInteger(stated) ? stated : Math.max(0, file.size - offset);
+  if (
+    parseInt(h.num_chans || "1") !== 1 ||
+    (h.bytes_per_sample && parseInt(h.bytes_per_sample) !== 1) ||
+    !(rate > 0) ||
+    n < 0 ||
+    offset + n > file.size
+  ) {
+    throw new Error(`${marker.name}: unsupported or truncated .egf file.`);
+  }
+  const handle = w.egf_new(n, rate);
+  try {
+    await streamFile(
+      w,
+      file,
+      offset,
+      n,
+      1 << 20,
+      (p, bytes) => {
+        if (options.current && !options.current()) {
+          throw new Superseded("Superseded .egf read.");
+        }
+        w.egf_push(handle, p, bytes);
+      },
+      options.progress,
+    );
+    return handle;
+  } catch (e) {
+    w.egf_free(handle);
+    throw e;
+  }
+}
+/** The frequency distribution of a trial's `.egf` signal, band-passed, or null without one. */
+export async function lfpDistribution(
+  w: Core,
+  inputs: ComputeInputs,
+): Promise<LfpDistribution | null> {
+  if (!inputs.egf) {
+    return null;
+  }
+  const answer = await ask(w, inputs, "lfpFrequency");
+  const [low, bin, mean] = answer.buffers.shape;
+  return { key: answer.key, values: answer.buffers.values as Float32Array, low, bin, mean };
+}
 /** The numeric inputs, in the order Rust reads them (checked by a test against
  * `compute_input_name`). */
 export const COMPUTE_INPUTS = [
@@ -79,6 +138,10 @@ export const COMPUTE_INPUTS = [
   "ppm",
   "sync",
   "pcaSamples",
+  "lfpLow",
+  "lfpHigh",
+  "lfpFreqBin",
+  "lfpPhaseBin",
 ] as const;
 /** A recording as the compute graph needs it: its identity and header, and the files only
  * JavaScript can read for it. */
@@ -97,7 +160,7 @@ export interface RecordingSource {
   history: string[];
 }
 /** The compute graph's inputs, besides the cell. */
-export interface ComputeInputs extends PositionRequest {
+export interface ComputeInputs extends PositionRequest, Omit<LfpRequest, "settings"> {
   recording?: RecordingSource;
   /** The id for a command's patch. */
   patch?: string;
@@ -129,6 +192,7 @@ function writeInputs(w: Core, i: ComputeInputs) {
   setText(w, 2, r?.cutSource ?? "");
   setText(w, 3, r?.history.join(",") ?? "");
   setText(w, 4, i.patch ?? "");
+  setText(w, 5, i.egf ? (i.egfFile ?? "") : "");
   const tb = parseFloat(r?.header.timebase ?? "");
   w.compute_set_recording(r?.n ?? 0, tb, r ? recordingDuration(r) : 0);
 }
@@ -155,6 +219,8 @@ export const HANDLERS = [
   "temporalAc",
   "spatialDrift",
   "spikeDrift",
+  "lfpFrequency",
+  "spikePhase",
 ] as const;
 export type HandlerName = (typeof HANDLERS)[number];
 type Buffer = Float32Array | Float64Array | Uint8Array | Uint16Array | Uint32Array;
@@ -184,7 +250,17 @@ function readAnswer(w: Core): Answer {
 }
 
 /** What the graph reports missing (see `Missing` in core/src/compute.rs). */
-const MISSING = ["", "population", "position", "cut", "patch", "pca", "scan", "invalid"] as const;
+const MISSING = [
+  "",
+  "population",
+  "position",
+  "cut",
+  "patch",
+  "pca",
+  "scan",
+  "invalid",
+  "egf",
+] as const;
 /** Supplies what the graph reported missing for `i` (status `status`), reading the files
  * only JavaScript can. Requests are handled one at a time, so the inputs are still these
  * when it is handed over. */
@@ -200,6 +276,14 @@ async function supply(w: Core, i: ComputeInputs, status: number) {
     const handle = await readPosition(i.pos, w, i.ppm);
     writeInputs(w, i);
     w.compute_supply_position(handle);
+  } else if (missing === "egf" && i.egf) {
+    const handle = await readEgf(w, i.egf, {
+      current: i.current,
+      progress: (fraction) =>
+        i.progress?.(fraction, `Reading ${i.egf!.name} ${Math.round(fraction * 100)}%`),
+    });
+    writeInputs(w, i);
+    w.compute_supply_egf(handle);
   } else if (missing === "population" && r) {
     const handle = await readPopulation(w, r.file, r, {
       current: i.current,
@@ -353,6 +437,7 @@ const PART_HANDLERS: Record<AnalysisPart, HandlerName> = {
   spikes: "spikePositions",
   spatialDrift: "spatialDrift",
   spikeDrift: "spikeDrift",
+  phase: "spikePhase",
 };
 /** Parts that need a position; without one they're left empty. */
 const POSITIONAL = new Set<AnalysisPart>([
@@ -398,7 +483,7 @@ export async function analysis(
     [result.arenaWidth, result.arenaHeight] = (await ask(w, inputs, "positionInfo")).buffers.info;
   }
   for (const part of new Set(parts)) {
-    if (POSITIONAL.has(part) && !hasPos) {
+    if ((POSITIONAL.has(part) && !hasPos) || (part === "phase" && !inputs.egf)) {
       continue;
     }
     const answer = await ask(w, inputs, PART_HANDLERS[part], cell);
@@ -415,6 +500,10 @@ export async function analysis(
       case "sc":
         result.spatialAc = values as Float32Array;
         [result.width, result.height] = shape;
+        break;
+      case "phase":
+        result.phase = values as Float32Array;
+        result.phaseMean = stats[0];
         break;
       default:
         result[part] = values as Float32Array;

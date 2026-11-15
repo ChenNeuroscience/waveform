@@ -9,6 +9,7 @@ import { waveX, waveY, type WaveLayout } from "../plots/plot-geometry";
 import { useTileGestures, type DragComparison } from "./tile-gestures";
 import {
   badgeStyle,
+  egfSource,
   positionSource,
   type HeaderEdits,
   type Trial,
@@ -26,6 +27,7 @@ import {
 import {
   TILE_PLOTS,
   captureAnalysisPlots,
+  phaseText,
   cellStatEntries,
   type CellCapture,
   type AnalysisFrame,
@@ -66,7 +68,9 @@ function tileCells(counts: Uint32Array, splitPoint: SplitPoint | null) {
 /** Tile widths from the shown plots, and the waveform frame within a tile. */
 function tileSizes(shown: VisiblePlots) {
   const wavePixels = shown.waveforms ? ROW * 4 : 0;
-  const tuningWidth = shown.ac ? 128 : (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0);
+  // Direction, speed and phase side by side, over the autocorrelogram.
+  const top = (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0) + (shown.phase ? 24 : 0);
+  const tuningWidth = shown.ac ? Math.max(128, top) : top;
   const numericWidth = (shown.spatial ? 128 : 0) + tuningWidth + (shown.sc ? 128 : 0);
   const tileWidth = wavePixels + numericWidth + 3;
   // Without numeric plots the badge sits over the waveforms' right edge.
@@ -110,6 +114,7 @@ export function TileWall({
   splitPoint,
   swap,
   headerEdits,
+  egfNum,
   copying,
   copyingPath = false,
   feedback,
@@ -136,6 +141,8 @@ export function TileWall({
   splitPoint: SplitPoint | null;
   swap: SwapState | null;
   headerEdits: HeaderEdits;
+  /** The selected `.egf` file, for tile phase plots. */
+  egfNum: number;
   /** The copy-mode selection, or null outside copy mode. */
   copying: number[] | null;
   copyingPath?: boolean;
@@ -147,6 +154,9 @@ export function TileWall({
 }) {
   const position = positionSource(trial, headerEdits);
   const { pos } = position;
+  const lfp = egfSource(trial, egfNum);
+  // Analyses read the position and the .egf file.
+  const sources = { ...position, ...lfp };
   const scroller = useRef<HTMLDivElement>(null);
   const waveCanvas = useRef<HTMLCanvasElement>(null);
 
@@ -203,7 +213,7 @@ export function TileWall({
   const waveKey = `${waveScope}|${signature}|${settings.renderMode}|${waveFrameWidth}`;
   const wavesReady = wavesDone === waveKey;
   // Cancels in-flight tile gestures whenever the cut or anything analyses read changes.
-  const scope = `${data.session}|${data.revision}|${JSON.stringify([position.posFile, position.ppm, position.sync, settings, shown.sc])}`;
+  const scope = `${data.session}|${data.revision}|${JSON.stringify([position.posFile, position.ppm, position.sync, lfp.egfFile, settings, shown.sc])}`;
   // Only the parts of the plots that are on (the stats line shows only their peaks).
   const parts: AnalysisPart[] = [
     ...(shown.spatial ? (["spatial"] as const) : []),
@@ -212,6 +222,7 @@ export function TileWall({
     ...(shown.sc ? (["sc"] as const) : []),
     ...(shown.speed ? (["speed"] as const) : []),
     ...(shown.ac ? (["ac"] as const) : []),
+    ...(shown.phase ? (["phase"] as const) : []),
   ];
   /** A cell's held analysis, if it was made from the cell's current spikes. */
   const analysisFor = (cell: number) => {
@@ -245,7 +256,7 @@ export function TileWall({
         request("analysis", {
           session: data.session,
           cell,
-          ...position,
+          ...sources,
           settings,
           parts,
         }),
@@ -330,7 +341,7 @@ export function TileWall({
         request("analysis", {
           session: data.session,
           cell,
-          ...position,
+          ...sources,
           settings,
           parts,
           batch,
@@ -367,6 +378,8 @@ export function TileWall({
     shown.sc,
     shown.speed,
     shown.ac,
+    shown.phase,
+    egfNum,
   ]);
   useEffect(() => {
     if (!shown.waveforms || !waveCanvas.current) {
@@ -624,13 +637,13 @@ export function TileWall({
                       )}
                     </div>
                   )}
-                  {(shown.direction || shown.speed || shown.ac) && (
+                  {(shown.direction || shown.speed || shown.ac || shown.phase) && (
                     <div className="tile-tuning" style={{ width: tuningWidth }}>
                       <div className="tile-tuning-top">
                         {shown.direction && (
                           <div
                             className="tile-direction"
-                            style={{ paddingRight: shown.speed ? 0 : 24 }}
+                            style={{ paddingRight: shown.speed || shown.phase ? 0 : 24 }}
                           >
                             {a && pos && (
                               <AnalysisPlot data={a} mode="direction" maxRate={0} compact />
@@ -640,6 +653,22 @@ export function TileWall({
                         {shown.speed && (
                           <div className="tile-speed">
                             {a && pos && <AnalysisPlot data={a} mode="speed" maxRate={0} compact />}
+                          </div>
+                        )}
+                        {shown.phase && (
+                          <div
+                            className="tile-phase"
+                            title={
+                              a?.phase?.length
+                                ? `Spike phase of the band-passed LFP: 0 (peaks, top) to 2π; circular mean ${phaseText(a.phaseMean ?? 0)}`
+                                : "No LFP in this trial"
+                            }
+                          >
+                            {a?.phase?.length ? (
+                              <AnalysisPlot data={a} mode="phase" maxRate={0} compact />
+                            ) : (
+                              !lfp.egf && <span className="plot-unavailable">No LFP</span>
+                            )}
                           </div>
                         )}
                       </div>

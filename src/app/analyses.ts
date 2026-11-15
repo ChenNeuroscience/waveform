@@ -20,9 +20,6 @@ import {
 } from "../types";
 import type { DragComparison } from "../tiles/tile-gestures";
 
-/** The displayed cell's parts: its spikes on the path and the speed dwell beside it. */
-const DISPLAYED = ["spikes", "speedDwell"] as const;
-
 export function useAnalyses({
   data,
   busy,
@@ -31,6 +28,7 @@ export function useAnalyses({
   headerEdits,
   displayCell,
   dragComparison,
+  speedDwell: showSpeed,
   onError,
 }: {
   data: ViewData | null;
@@ -40,6 +38,8 @@ export function useAnalyses({
   headerEdits: HeaderEdits;
   displayCell: number;
   dragComparison: DragComparison | null;
+  /** Whether the speed dwell is on: off, it isn't asked for. */
+  speedDwell: boolean;
   onError: (message: string) => void;
 }) {
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
@@ -94,7 +94,12 @@ export function useAnalyses({
           cell: displayCell,
           ...positionSource(trial, headerEdits),
           settings,
-          parts: settings.renderMode === "drift" ? [...DISPLAYED, "spikeDrift"] : DISPLAYED,
+          // The displayed cell's spikes on the path, and the speed dwell beside it if on.
+          parts: [
+            "spikes",
+            ...(showSpeed ? (["speedDwell"] as const) : []),
+            ...(settings.renderMode === "drift" ? (["spikeDrift"] as const) : []),
+          ],
         })
           .then((a) => {
             if (live) {
@@ -119,7 +124,7 @@ export function useAnalyses({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onError is a fresh callback each render
-  }, [data, displayCell, trial, headerEdits, settings, busy]);
+  }, [data, displayCell, trial, headerEdits, settings, busy, showSpeed]);
 
   // The drag-comparison target's analysis, for its spikes on the path.
   const target = dragComparison?.target;

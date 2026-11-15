@@ -1,7 +1,62 @@
 import { cutDownloadKey, type CutDownloads } from "../app/cut-downloads";
-import type { CutFile, Tetrode, Trial } from "../types";
+import { egfName, MAX_EGFS, type CutFile, type Tetrode, type Trial } from "../types";
 import { useEffect, useRef } from "react";
 import { ToggleButton } from "./ToggleButton";
+
+/** A trial's `.egf` files after its `.pos`: the selected number full size and the others
+ * collapsed (as tetrodes are), a placeholder if the selected number isn't in this trial, and
+ * a note of any beyond the first MAX_EGFS, which aren't used. */
+function EgfChips(p: {
+  trial: Trial;
+  current: boolean;
+  egfNum: number;
+  anyEgfs: boolean;
+  disabled: boolean;
+  onEgf: (t: Trial, n: number) => void;
+}) {
+  const t = p.trial;
+  const egfs = t.egfs || [];
+  if (!p.anyEgfs) {
+    return null;
+  }
+  return (
+    <span className="egf-files" role="group" aria-label={`${t.name} .egf files`}>
+      {egfs.map((e) => (
+        <button
+          key={e.number}
+          type="button"
+          disabled={p.disabled}
+          title={e.file.name}
+          aria-label={`${t.name} ${egfName(e.number)}`}
+          aria-pressed={p.current && e.number === p.egfNum}
+          className={`file-tag egf-file ${e.number === p.egfNum ? "expanded" : ""} ${p.current && e.number === p.egfNum ? "active" : ""}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            p.onEgf(t, e.number);
+          }}
+        >
+          {egfName(e.number)}
+        </button>
+      ))}
+      {!egfs.some((e) => e.number === p.egfNum) && (
+        <span
+          className="file-tag egf-file expanded missing"
+          title={`This trial has no ${egfName(p.egfNum)}. Choose another .egf file to use one of this trial's.`}
+        >
+          {egfName(p.egfNum)}
+        </span>
+      )}
+      {!!t.ignoredEgfs?.length && (
+        <span
+          className="other-files egf-truncated"
+          title={`Only the first ${MAX_EGFS} .egf files are used. Not loaded:\n${t.ignoredEgfs.join("\n")}`}
+        >
+          +{t.ignoredEgfs.length} .egf
+        </span>
+      )}
+    </span>
+  );
+}
 
 /** Tetrode navigation and the trials with their tetrode and cut files. */
 export function FilesPane(p: {
@@ -20,6 +75,8 @@ export function FilesPane(p: {
   onCopyTrial: (t: Trial) => void;
   copyCuts: Record<string, string>;
   onCopyCut: (t: Trial, cut: string) => void;
+  egfNum: number;
+  onEgf: (t: Trial, n: number) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const navigation = useRef<HTMLDivElement>(null);
@@ -34,6 +91,7 @@ export function FilesPane(p: {
       ?.querySelector<HTMLElement>(".trial-block.selected")
       ?.scrollIntoView({ block: "nearest" });
   }, [p.trial?.id]);
+  const anyEgfs = p.trials.some((t) => t.egfs?.length);
   const numbers = [...new Set(p.trials.flatMap((t) => t.tetrodes.map((t) => t.number)))].sort(
     (a, b) => a - b,
   );
@@ -84,6 +142,14 @@ export function FilesPane(p: {
               </span>
               <span className={`file-tag ${t.set ? "" : "missing"}`}>~.set</span>
               <span className={`file-tag ${t.pos ? "" : "missing"}`}>~.pos</span>
+              <EgfChips
+                trial={t}
+                current={t.id === p.trial?.id}
+                egfNum={p.egfNum}
+                anyEgfs={anyEgfs}
+                disabled={p.copying}
+                onEgf={p.onEgf}
+              />
               {!!t.otherFiles?.length && (
                 <span
                   className="other-files"

@@ -7,12 +7,17 @@ use crate::compute::{
     answer, f32s, staged_request, supply, u16s, u32s, u8s, Answer, Answered, Buffer, Handler, Key,
     Leaf::*, Missing, Node, Part, Request, Route, L,
 };
+use crate::lfp::{
+    analytic, band, frequency_bins, frequency_distribution, instantaneous_frequency,
+    mean_frequency, spike_phases, EgfBuilder, Signal,
+};
 use crate::pca::PcaBuilder;
 use crate::position::{direction_bins, refractory, speed_bins, temporal_ac, Position, Samples};
 use crate::processing::{apply_patch, CellWaves as Waves, CutParser, Scan};
 use crate::spatial_ac::autocorrelation;
 use crate::waves::WaveOrder as Order;
 use crate::Population as Spikes;
+use rustfft::num_complex::Complex;
 use std::{cell::RefCell, rc::Rc, slice};
 
 /// Rate-map colours are applied when the map is drawn, never computed with.
@@ -26,6 +31,9 @@ const PER_CELL: usize = 200;
 /// Recordings and their labels are large; the memo's budget bounds them too.
 const RECORDINGS: usize = 4;
 const LABELS: usize = 8;
+/// Continuous signals: a few files, and a few band-passes of each.
+const SIGNALS: usize = 4;
+const PER_SIGNAL: usize = 8;
 
 /// A scan to stream the file through, and where to keep its sample column and cell waveforms.
 type PendingScan = (Scan, Option<Key>, Option<Key>);
@@ -54,6 +62,8 @@ pub(crate) static ROUTES: &[Route] = &[
     ("temporalAc", answer::<TemporalAc>),
     ("spatialDrift", answer::<SpatialDrift>),
     ("spikeDrift", answer::<SpikeDrift>),
+    ("lfpFrequency", answer::<LfpFrequency>),
+    ("spikePhase", answer::<SpikePhase>),
 ];
 
 /// A recording's spike times and amplitudes. Only JavaScript can read its file
@@ -731,6 +741,121 @@ impl Handler for TemporalAc {
         let times = cx.call::<CellSpikes>()?;
         let (window, bin) = (cx.input(AcWindow), cx.input(AcBinMs));
         Ok(Values(temporal_ac(&times, cx.tb(), window, bin)))
+    }
+}
+
+/// An `.egf` file's signal, decimated. Only JavaScript can read it (`compute_supply_egf`).
+pub(crate) struct RawEgf;
+impl Handler for RawEgf {
+    type Value = Signal;
+    const NODE: Node = Node::EgfRaw;
+    const LIMIT: usize = SIGNALS;
+    fn compute(_: &mut Request) -> Result<Signal, Missing> {
+        Err(Missing::Egf)
+    }
+    fn bytes(s: &Signal) -> usize {
+        s.samples.len() * 4
+    }
+}
+/// Takes a finished `.egf` builder for the staged inputs.
+#[no_mangle]
+pub unsafe extern "C" fn compute_supply_egf(p: *mut EgfBuilder) {
+    supply::<RawEgf>(Box::from_raw(p).finish());
+}
+
+/// The band-passed signal, analytic: its argument is the band's phase, its magnitude its
+/// envelope. With the band as used and the rate, for what is made from it.
+pub(crate) struct Analytic;
+pub(crate) struct AnalyticSignal {
+    pub(crate) rate: f64,
+    pub(crate) start: f64,
+    pub(crate) band: (f64, f64),
+    pub(crate) z: Vec<Complex<f32>>,
+}
+impl Handler for Analytic {
+    type Value = AnalyticSignal;
+    const NODE: Node = Node::Analytic;
+    const LIMIT: usize = PER_SIGNAL;
+    fn compute(cx: &mut Request) -> Result<AnalyticSignal, Missing> {
+        let signal = cx.call::<RawEgf>()?;
+        let (low, high) = (cx.input(LfpLow), cx.input(LfpHigh));
+        Ok(AnalyticSignal {
+            rate: signal.rate,
+            start: signal.start,
+            band: band(low, high, signal.rate),
+            z: analytic(&signal, low, high),
+        })
+    }
+    fn bytes(a: &AnalyticSignal) -> usize {
+        a.z.len() * 8
+    }
+}
+
+/// Seconds at each instantaneous frequency of the band-passed signal over the whole
+/// recording, in bins of the set width from the band's low edge to (at least) its high edge;
+/// with where they start, their width, and the mean frequency (`lfp::mean_frequency`).
+pub(crate) struct LfpFrequency;
+pub(crate) struct Distribution {
+    values: Vec<f32>,
+    shape: [f64; 3],
+}
+impl Handler for LfpFrequency {
+    type Value = Distribution;
+    const NODE: Node = Node::LfpFrequency;
+    const LIMIT: usize = PER_SIGNAL;
+    fn compute(cx: &mut Request) -> Result<Distribution, Missing> {
+        let a = cx.call::<Analytic>()?;
+        let (low, high) = a.band;
+        let bin = match cx.input(LfpFreqBin) {
+            b if b > 0. => b,
+            _ => 0.25,
+        };
+        let bins = frequency_bins(low, high, bin);
+        let frequencies = instantaneous_frequency(&a.z, a.rate);
+        Ok(Distribution {
+            values: frequency_distribution(&frequencies, a.rate, low, bin, bins),
+            shape: [low, bin, mean_frequency(&frequencies, low, high)],
+        })
+    }
+}
+impl Answer for Distribution {
+    fn buffers(&self) -> Vec<(&'static str, Buffer)> {
+        vec![
+            ("values", f32s(&self.values)),
+            ("shape", Buffer::F64(self.shape.to_vec())),
+        ]
+    }
+}
+
+/// The band's phase at a cell's spikes: counts in bins of the set width (degrees) across a
+/// cycle, from the band-passed signal's peaks; and their circular mean (radians, 0 to 2π).
+pub(crate) struct SpikePhase;
+pub(crate) struct Phases {
+    counts: Vec<f32>,
+    mean: f64,
+}
+impl Handler for SpikePhase {
+    type Value = Phases;
+    const NODE: Node = Node::SpikePhase;
+    const LIMIT: usize = PER_CELL;
+    fn compute(cx: &mut Request) -> Result<Phases, Missing> {
+        let a = cx.call::<Analytic>()?;
+        let times = cx.call::<CellSpikes>()?;
+        let bin = match cx.input(LfpPhaseBin) {
+            b if b > 0. => b,
+            _ => 15.,
+        };
+        let bins = ((360. / bin).round() as usize).clamp(2, 360);
+        let (counts, mean, _) = spike_phases(&a.z, a.rate, a.start, &times, cx.tb(), bins);
+        Ok(Phases { counts, mean })
+    }
+}
+impl Answer for Phases {
+    fn buffers(&self) -> Vec<(&'static str, Buffer)> {
+        vec![
+            ("values", f32s(&self.counts)),
+            ("stats", Buffer::F64(vec![self.mean])),
+        ]
     }
 }
 

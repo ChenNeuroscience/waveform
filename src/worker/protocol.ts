@@ -5,6 +5,7 @@ import type {
   AnalysisData,
   AnalysisPart,
   Header,
+  LfpDistribution,
   Settings,
   Trajectory,
   ViewData,
@@ -71,6 +72,14 @@ export interface PositionRequest {
   settings: Settings;
 }
 
+/** A trial's `.egf` file (see `egfSource`) and the settings to analyse it with. */
+export interface LfpRequest {
+  egf?: File;
+  /** The `.egf` file's identity: its trial and `fileId`. */
+  egfFile?: string;
+  settings: Settings;
+}
+
 /** A secondary trial to analyse for the clipboard without activating its recording. */
 export interface CopyRecording {
   trialId: string;
@@ -134,9 +143,11 @@ export interface Requests {
   export_cut: [Session & { revision?: number; trial: string }, Blob];
   wave_batch: [{ asset: string; first: number; count: number }, { waves: Uint8Array }];
   trajectory: [PositionRequest, Trajectory | null];
+  lfp: [LfpRequest, LfpDistribution | null];
   analysis: [
     Partial<Session> &
-      PositionRequest & {
+      PositionRequest &
+      Omit<LfpRequest, "settings"> & {
         cell: number;
         /** What to compute: only what will be shown. */
         parts: readonly AnalysisPart[];

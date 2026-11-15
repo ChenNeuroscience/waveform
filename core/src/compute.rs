@@ -13,8 +13,8 @@
 //!
 //! JavaScript writes the current inputs (`compute_inputs`, `compute_set_text`) and asks for
 //! a handler by name (`compute_request`). The answer is a table of named buffers to copy
-//! out, or what is missing for JavaScript to supply (a recording's spikes, or a position
-//! file).
+//! out, or what is missing for JavaScript to supply (a recording's spikes, or a position or
+//! `.egf` file).
 use crate::cache;
 use std::{
     any::Any,
@@ -61,10 +61,16 @@ pub(crate) enum Leaf {
     SpeedMax,
     AcWindow,
     AcBinMs,
+    /// The `.egf` file: its trial and file identity.
+    EgfFile,
+    LfpLow,
+    LfpHigh,
+    LfpFreqBin,
+    LfpPhaseBin,
 }
 pub(crate) use Leaf::*;
 /// The numeric leaves, in the order JavaScript writes them (see `compute_input_name`).
-pub(crate) const NUMBERS: [(Leaf, &str); 17] = [
+pub(crate) const NUMBERS: [(Leaf, &str); 21] = [
     (Leds, "leds"),
     (MaxSpeed, "maxSpeed"),
     (PosSmooth, "posSmooth"),
@@ -82,6 +88,10 @@ pub(crate) const NUMBERS: [(Leaf, &str); 17] = [
     (Ppm, "ppm"),
     (Sync, "sync"),
     (PcaSamples, "pcaSamples"),
+    (LfpLow, "lfpLow"),
+    (LfpHigh, "lfpHigh"),
+    (LfpFreqBin, "lfpFreqBin"),
+    (LfpPhaseBin, "lfpPhaseBin"),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -145,6 +155,17 @@ pub(crate) enum Node {
     Speed,
     SettingsTemporalAc,
     TemporalAc,
+    /// An `.egf` file's signal as read, decimated.
+    EgfRaw,
+    SettingsBandPass,
+    /// The band-passed signal, analytic (its Hilbert transform as the imaginary part).
+    Analytic,
+    SettingsLfpFrequency,
+    /// Time at each instantaneous frequency of the band-passed signal.
+    LfpFrequency,
+    SettingsSpikePhase,
+    /// The band's phase at a cell's spikes.
+    SpikePhase,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Part {
@@ -188,6 +209,13 @@ fn children(node: Node) -> &'static [Part] {
         Speed => &[N(SpikeSamples), N(SpeedDwell)],
         SettingsTemporalAc => &[L(AcWindow), L(AcBinMs)],
         TemporalAc => &[N(Spikes), N(SettingsTemporalAc)],
+        EgfRaw => &[L(EgfFile)],
+        SettingsBandPass => &[L(LfpLow), L(LfpHigh)],
+        Analytic => &[N(EgfRaw), N(SettingsBandPass)],
+        SettingsLfpFrequency => &[L(LfpFreqBin)],
+        LfpFrequency => &[N(Analytic), N(SettingsLfpFrequency)],
+        SettingsSpikePhase => &[L(LfpPhaseBin)],
+        SpikePhase => &[N(Spikes), N(Analytic), N(SettingsSpikePhase)],
     }
 }
 fn beneath(part: Part, into: &mut Vec<Part>) {
@@ -226,6 +254,7 @@ impl Key {
 pub(crate) struct Inputs {
     pub(crate) numbers: [f64; NUMBERS.len()],
     pub(crate) pos_file: Rc<str>,
+    pub(crate) egf_file: Rc<str>,
     pub(crate) recording: Rc<str>,
     pub(crate) cut_source: Rc<str>,
     /// Patch ids, comma-separated.
@@ -247,6 +276,7 @@ impl Default for Inputs {
         Self {
             numbers: [f64::NAN; NUMBERS.len()],
             pos_file: "".into(),
+            egf_file: "".into(),
             recording: "".into(),
             cut_source: "".into(),
             history: "".into(),
@@ -290,6 +320,7 @@ impl Inputs {
             .map(|leaf| {
                 let value = match leaf {
                     PosFile => Value::Text(self.pos_file.clone()),
+                    EgfFile => Value::Text(self.egf_file.clone()),
                     Recording => Value::Text(self.recording.clone()),
                     CutSource => Value::Text(self.cut_source.clone()),
                     History => Value::Text(self.history.clone()),
@@ -335,6 +366,8 @@ pub(crate) enum Missing {
     Scan = 6,
     /// Not missing: what was supplied (a cut or patch) doesn't fit the recording.
     Invalid = 7,
+    /// Read the `.egf` file (`compute_supply_egf`).
+    Egf = 8,
 }
 
 /// Computes one node's value from the inputs, calling other handlers for what it needs.
@@ -643,7 +676,8 @@ pub extern "C" fn compute_input_name_len(i: usize) -> usize {
     NUMBERS[i].1.len()
 }
 /// Sets a text input from UTF-8: 0 the position file, 1 the recording, 2 the cut source,
-/// 3 the history (comma-separated patch ids), 4 the id for a command's patch.
+/// 3 the history (comma-separated patch ids), 4 the id for a command's patch, 5 the `.egf`
+/// file.
 #[no_mangle]
 pub unsafe extern "C" fn compute_set_text(field: u32, text: *const u8, len: usize) {
     let text: Rc<str> = String::from_utf8_lossy(std::slice::from_raw_parts(text, len)).into();
@@ -652,7 +686,8 @@ pub unsafe extern "C" fn compute_set_text(field: u32, text: *const u8, len: usiz
         1 => i.recording = text,
         2 => i.cut_source = text,
         3 => i.history = text,
-        _ => i.patch = text,
+        4 => i.patch = text,
+        _ => i.egf_file = text,
     })
 }
 

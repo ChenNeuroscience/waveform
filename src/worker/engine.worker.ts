@@ -19,6 +19,7 @@ import {
   ask,
   command,
   exportLabels,
+  lfpDistribution,
   positionHeader,
   trajectory,
   type ComputeInputs,
@@ -237,7 +238,7 @@ async function waveBatch(w: Core, r: Recording, first: number, count: number) {
 async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
   if (
     splitState &&
-    !["split", "analysis", "trajectory", "wave_batch", "features"].includes(m.type)
+    !["split", "analysis", "trajectory", "lfp", "wave_batch", "features"].includes(m.type)
   ) {
     throw new Error("Finish the waveform split with a left click, or press Escape to cancel.");
   }
@@ -403,6 +404,10 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
     );
     active = s;
     return shown;
+  }
+  if (m.type === "lfp") {
+    // Needs only the .egf file, not a loaded tetrode.
+    return lfpDistribution(w, m);
   }
   if (m.type === "export_cut") {
     const target = sessions.get(m.session);

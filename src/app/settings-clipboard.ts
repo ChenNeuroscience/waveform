@@ -16,7 +16,13 @@ const limits: Record<Exclude<keyof Settings, "renderMode">, [number, number]> = 
   dirSmooth: [0, 10],
   speedBin: [1, 10],
   speedMax: [10, 200],
+  lfpLow: [1, 30],
+  lfpHigh: [2, 60],
+  lfpFreqBin: [0.05, 2],
+  lfpPhaseBin: [5, 90],
 };
+/** Settings added later, so older copies without them are still complete. */
+const OPTIONAL = ["acBinMs", "dirSmooth", "lfpLow", "lfpHigh", "lfpFreqBin", "lfpPhaseBin"];
 
 /** A flat YAML mapping, deliberately readable in notes and editable by hand. */
 export function encodeSettings(settings: Settings): string {
@@ -44,11 +50,7 @@ export function decodeSettings(text: string): Settings {
     throw new Error("These are not supported Waveform settings.");
   }
   fields.delete("waveform-settings");
-  if (
-    Object.keys(defaultSettings).some(
-      (key) => !["acBinMs", "dirSmooth"].includes(key) && !fields.has(key),
-    )
-  ) {
+  if (Object.keys(defaultSettings).some((key) => !OPTIONAL.includes(key) && !fields.has(key))) {
     throw new Error("Paste a complete Waveform settings mapping.");
   }
   const result = { ...defaultSettings };

@@ -32,7 +32,7 @@ npx playwright install chromium
 npm run test:e2e     # browser tests (Playwright)
 ```
 
-To write the simulated recordings to disk as real files (`.set`, `.pos`, tetrode and `.cut`), run `cargo run --release --manifest-path core/Cargo.toml --features cli --bin synthetic -- OUT_DIR`; add `--help` for options such as `--seed`, `--trials`, `--duration`, `--cells` and `--spikes`.
+To write the simulated recordings to disk as real files (`.set`, `.pos`, `.egf`, tetrode and `.cut`), run `cargo run --release --manifest-path core/Cargo.toml --features cli --bin synthetic -- OUT_DIR`; add `--help` for options such as `--seed`, `--trials`, `--duration`, `--cells` and `--spikes`.
 
 The default browser stress test uses 1M spikes. To opt into the 9M case, run `WAVEFORM_STRESS_9M=1 npm run test:e2e -- e2e/synthetic.spec.ts`; it is skipped in ordinary runs and CI.
 
