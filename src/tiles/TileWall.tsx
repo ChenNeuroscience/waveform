@@ -1,6 +1,8 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { WaveGPU } from "./wave-gpu";
+import { LabelMark } from "../shell/TimelineIcon";
+import type { TimeLabelRequest } from "../worker/protocol";
 import { AnalysisPlot } from "../plots/AnalysisPlot";
 import { CellStats } from "./CellStats";
 import { request } from "../worker/client";
@@ -65,13 +67,14 @@ function tileCells(counts: Uint32Array, splitPoint: SplitPoint | null) {
   return cells;
 }
 
-/** Tile widths from the shown plots, and the waveform frame within a tile. */
-function tileSizes(shown: VisiblePlots) {
+/** Tile widths from the shown plots (with `maps` rate maps: one per timeline row shown), and
+ * the waveform frame within a tile. */
+function tileSizes(shown: VisiblePlots, maps: number) {
   const wavePixels = shown.waveforms ? ROW * 4 : 0;
   // Direction, speed and phase side by side, over the autocorrelogram.
   const top = (shown.direction ? 96 : 0) + (shown.speed ? 24 : 0) + (shown.phase ? 24 : 0);
   const tuningWidth = shown.ac ? Math.max(128, top) : top;
-  const numericWidth = (shown.spatial ? 128 : 0) + tuningWidth + (shown.sc ? 128 : 0);
+  const numericWidth = (shown.spatial ? 128 * maps : 0) + tuningWidth + (shown.sc ? 128 : 0);
   const tileWidth = wavePixels + numericWidth + 3;
   // Without numeric plots the badge sits over the waveforms' right edge.
   const waveFrameWidth = numericWidth ? wavePixels : Math.max(0, wavePixels - 24);
@@ -115,6 +118,7 @@ export function TileWall({
   swap,
   headerEdits,
   egfNum,
+  timeLabels,
   copying,
   copyingPath = false,
   feedback,
@@ -143,6 +147,9 @@ export function TileWall({
   headerEdits: HeaderEdits;
   /** The selected `.egf` file, for tile phase plots. */
   egfNum: number;
+  /** While the timeline is on: the time-label inputs (see `timeLabelSource`) and the rows
+   * shown (`timeSelections`: null for the whole trial, else a label), a rate map each. */
+  timeLabels?: TimeLabelRequest & { selections: (number | null)[] };
   /** The copy-mode selection, or null outside copy mode. */
   copying: number[] | null;
   copyingPath?: boolean;
@@ -155,8 +162,19 @@ export function TileWall({
   const position = positionSource(trial, headerEdits);
   const { pos } = position;
   const lfp = egfSource(trial, egfNum);
-  // Analyses read the position and the .egf file.
-  const sources = { ...position, ...lfp };
+  // Rate maps: the whole trial's, and each label's shown.
+  const selections = timeLabels?.selections ?? [null];
+  const total = selections.includes(null);
+  const labels = selections.filter((l): l is number => l !== null);
+  const timeSource = timeLabels && {
+    log: timeLabels.log,
+    logFile: timeLabels.logFile,
+    timeRules: timeLabels.timeRules,
+    timeLabelValues: labels,
+  };
+  // Analyses read the position, the .egf file and the time labels.
+  const sources = { ...position, ...lfp, ...timeSource };
+  const timeKey = JSON.stringify([timeSource?.logFile, timeSource?.timeRules, labels]);
   const scroller = useRef<HTMLDivElement>(null);
   const waveCanvas = useRef<HTMLCanvasElement>(null);
 
@@ -191,7 +209,7 @@ export function TileWall({
     waveFrameWidth,
     waveFrameHeight,
     waveFrameTop,
-  } = tileSizes(shown);
+  } = tileSizes(shown, selections.length);
   const columns = Math.max(1, Math.floor((width - 4) / tileStride));
   const totalRows = Math.ceil(all.length / columns);
   // Render one row above and a few below the viewport.
@@ -213,11 +231,14 @@ export function TileWall({
   const waveKey = `${waveScope}|${signature}|${settings.renderMode}|${waveFrameWidth}`;
   const wavesReady = wavesDone === waveKey;
   // Cancels in-flight tile gestures whenever the cut or anything analyses read changes.
-  const scope = `${data.session}|${data.revision}|${JSON.stringify([position.posFile, position.ppm, position.sync, lfp.egfFile, settings, shown.sc])}`;
+  const scope = `${data.session}|${data.revision}|${JSON.stringify([position.posFile, position.ppm, position.sync, lfp.egfFile, settings, shown.sc])}|${timeKey}`;
   // Only the parts of the plots that are on (the stats line shows only their peaks).
   const parts: AnalysisPart[] = [
-    ...(shown.spatial ? (["spatial"] as const) : []),
-    ...(shown.spatial && settings.renderMode === "drift" ? (["spatialDrift"] as const) : []),
+    ...(shown.spatial && total ? (["spatial"] as const) : []),
+    ...(shown.spatial && total && settings.renderMode === "drift"
+      ? (["spatialDrift"] as const)
+      : []),
+    ...(shown.spatial && labels.length ? (["labelSpatial"] as const) : []),
     ...(shown.direction ? (["direction"] as const) : []),
     ...(shown.sc ? (["sc"] as const) : []),
     ...(shown.speed ? (["speed"] as const) : []),
@@ -270,7 +291,23 @@ export function TileWall({
     const wall = scroller.current!;
     const frames: AnalysisFrame[] = TILE_PLOTS.flatMap(({ mode, selector, name }) => {
       const size = shown[mode] && regionSize(wall, selector);
-      return size ? [{ mode, name, ...size }] : [];
+      const own: AnalysisFrame[] = size ? [{ mode, name, ...size }] : [];
+      if (mode !== "spatial" || !shown.spatial) {
+        return own;
+      }
+      // Each time label's map, after the whole trial's.
+      const labelSize = regionSize(wall, ".tile-label-spatial");
+      return labelSize
+        ? [
+            ...own,
+            ...labels.map((label) => ({
+              mode,
+              name: `Spatial rate map, timeline label ${label}`,
+              ...labelSize,
+              label,
+            })),
+          ]
+        : own;
     });
     return cells.map((cell) => {
       const a = fetched.get(cell);
@@ -380,6 +417,7 @@ export function TileWall({
     shown.ac,
     shown.phase,
     egfNum,
+    timeKey,
   ]);
   useEffect(() => {
     if (!shown.waveforms || !waveCanvas.current) {
@@ -604,10 +642,11 @@ export function TileWall({
                   )}
                 </div>
                 <div className="tile-numeric-plots" style={{ width: numericWidth }}>
-                  {shown.spatial && (
+                  {shown.spatial && total && (
                     <div
-                      className="tile-spatial"
-                      style={{ paddingRight: tuningWidth || shown.sc ? 2 : 24 }}
+                      // With label maps beside it, shrunk to match them (under an empty strip).
+                      className={classNames("tile-spatial", { "with-marks": labels.length > 0 })}
+                      style={{ paddingRight: labels.length || tuningWidth || shown.sc ? 2 : 24 }}
                       title={`Spatial peak: ${a?.peak.toFixed(2) || "—"} Hz`}
                     >
                       {a && pos ? (
@@ -624,6 +663,38 @@ export function TileWall({
                       )}
                     </div>
                   )}
+                  {shown.spatial &&
+                    labels.map((label, k) => {
+                      // Matched by label, so a map's slot doesn't show another's while asked.
+                      const map = a?.labelSpatial?.find((m) => m.label === label);
+                      const last = k === labels.length - 1 && !tuningWidth && !shown.sc;
+                      return (
+                        <div
+                          key={label}
+                          className="tile-spatial tile-label-spatial with-marks"
+                          style={{ paddingRight: last ? 24 : 2 }}
+                          title={`Timeline label ${label} only · spatial peak: ${map?.peak.toFixed(2) || "—"} Hz`}
+                        >
+                          {a && map && pos ? (
+                            <AnalysisPlot
+                              data={{ ...a, ...map }}
+                              mode="spatial"
+                              maxRate={settings.maxRate}
+                              rateMapSteps={settings.rateMapSteps}
+                              compact
+                            />
+                          ) : (
+                            <span className="plot-unavailable">
+                              {!pos ? "No .pos" : a?.labelSpatial && !map ? "Not labelled" : "…"}
+                            </span>
+                          )}
+                          {/* Centred over the map, which the padding sets in from the edges. */}
+                          <div className="label-mark-row" style={{ right: last ? 24 : 2 }}>
+                            <LabelMark label={label} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   {shown.sc && (
                     <div
                       className="tile-sc"

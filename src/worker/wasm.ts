@@ -34,6 +34,7 @@ export const EXPORTS = {
   compute_set_text: 3,
   compute_supply_cut: 1,
   compute_supply_egf: 1,
+  compute_supply_log: 2,
   compute_supply_patch: 2,
   compute_supply_pca: 1,
   compute_supply_population: 1,

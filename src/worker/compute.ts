@@ -3,7 +3,15 @@
 // supplies files they say they need, and copies their answers out.
 import { parseHeader, readCut } from "../files";
 import { streamFile, copyF32, copyU8, copyU16, copyU32, withU8, type Core } from "./wasm";
-import type { AnalysisData, AnalysisPart, Header, LfpDistribution, Trajectory } from "../types";
+import type {
+  AnalysisData,
+  AnalysisPart,
+  Header,
+  LfpDistribution,
+  TimeLabelsData,
+  TimeMask,
+  Trajectory,
+} from "../types";
 import { Superseded, type LfpRequest, type PositionRequest } from "./protocol";
 import { recordingSource } from "./demo";
 import { readPopulation } from "./recording";
@@ -118,6 +126,56 @@ export async function lfpDistribution(
   const [low, bin, mean] = answer.buffers.shape;
   return { key: answer.key, values: answer.buffers.values as Float32Array, low, bin, mean };
 }
+/** The trial's time labels for `inputs`' recording. */
+export async function timeLabels(w: Core, inputs: ComputeInputs): Promise<TimeLabelsData> {
+  const { key, buffers: b } = await ask(w, inputs, "timeLabels");
+  const text = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes);
+  const counts = b.counts as Uint32Array;
+  // One name per label; a lone empty name is still a label.
+  const names = counts.length ? text(b.names as Uint8Array).split("\n") : [];
+  const result: TimeLabelsData = {
+    key,
+    duration: b.stats[0],
+    lines: b.stats[1],
+    segments: b.segments as Float64Array,
+    labels: b.labels as Uint16Array,
+    names,
+    seconds: b.seconds as Float64Array,
+    counts,
+    matched: b.matched as Uint32Array,
+    error: text(b.error as Uint8Array),
+    problems: text(b.problems as Uint8Array)
+      .split("\n")
+      .filter(Boolean)
+      .map((row) => {
+        const [rule, ...message] = row.split("\t");
+        return { rule: +rule, message: message.join("\t") };
+      }),
+    preview: text(b.preview as Uint8Array)
+      .split("\n")
+      .filter(Boolean)
+      .map((row) => {
+        // The text is last, and may hold tabs itself. 65535 is no rule or label.
+        const [rule, label, line, kind, start, end, ...rest] = row.split("\t");
+        const none = (v: string) => v === "65535";
+        return {
+          rule: none(rule) ? null : +rule,
+          label: none(label) ? null : Number(names[+label]),
+          line: +line,
+          kind: ({ m: "match", o: "other", g: "gap" } as const)[kind as "m" | "o" | "g"],
+          start: +start,
+          end: +end,
+          text: rest.join("\t"),
+        };
+      }),
+  };
+  return result;
+}
+/** The times `inputs`' label covers (see `timeMaskSource`), or the whole trial without one. */
+export async function timeMask(w: Core, inputs: ComputeInputs): Promise<TimeMask> {
+  const { key, buffers } = await ask(w, inputs, "timeMask");
+  return { key, intervals: buffers.intervals as Float64Array, seconds: buffers.stats[0] };
+}
 /** The numeric inputs, in the order Rust reads them (checked by a test against
  * `compute_input_name`). */
 export const COMPUTE_INPUTS = [
@@ -164,6 +222,14 @@ export interface ComputeInputs extends PositionRequest, Omit<LfpRequest, "settin
   recording?: RecordingSource;
   /** The id for a command's patch. */
   patch?: string;
+  /** Time labels (see `timeLabelSource` and `timeMaskSource`): the log file and its
+   * identity, the rules' text and the label a mask covers. */
+  log?: File;
+  logFile?: string;
+  timeRules?: string;
+  timeLabel?: string;
+  /** For a cell's rate maps by label (`labelSpatial`): the labels, one map each. */
+  timeLabelValues?: number[];
   /** For reading files the graph needs: whether the request is still wanted, and progress. */
   current?: () => boolean;
   progress?: (fraction: number, message: string) => void;
@@ -193,6 +259,9 @@ function writeInputs(w: Core, i: ComputeInputs) {
   setText(w, 3, r?.history.join(",") ?? "");
   setText(w, 4, i.patch ?? "");
   setText(w, 5, i.egf ? (i.egfFile ?? "") : "");
+  setText(w, 6, i.log ? (i.logFile ?? "") : "");
+  setText(w, 7, i.timeRules ?? "");
+  setText(w, 8, i.timeLabel ?? "");
   const tb = parseFloat(r?.header.timebase ?? "");
   w.compute_set_recording(r?.n ?? 0, tb, r ? recordingDuration(r) : 0);
 }
@@ -221,6 +290,10 @@ export const HANDLERS = [
   "spikeDrift",
   "lfpFrequency",
   "spikePhase",
+  "timeLabels",
+  "timeMask",
+  "labelRatemap",
+  "labelPath",
 ] as const;
 export type HandlerName = (typeof HANDLERS)[number];
 type Buffer = Float32Array | Float64Array | Uint8Array | Uint16Array | Uint32Array;
@@ -260,6 +333,7 @@ const MISSING = [
   "scan",
   "invalid",
   "egf",
+  "log",
 ] as const;
 /** Supplies what the graph reported missing for `i` (status `status`), reading the files
  * only JavaScript can. Requests are handled one at a time, so the inputs are still these
@@ -284,6 +358,10 @@ async function supply(w: Core, i: ComputeInputs, status: number) {
     });
     writeInputs(w, i);
     w.compute_supply_egf(handle);
+  } else if (missing === "log" && i.log) {
+    const bytes = new Uint8Array(await i.log.arrayBuffer());
+    writeInputs(w, i);
+    withU8(w, bytes, (p, n) => w.compute_supply_log(p, n));
   } else if (missing === "population" && r) {
     const handle = await readPopulation(w, r.file, r, {
       current: i.current,
@@ -438,6 +516,7 @@ const PART_HANDLERS: Record<AnalysisPart, HandlerName> = {
   spatialDrift: "spatialDrift",
   spikeDrift: "spikeDrift",
   phase: "spikePhase",
+  labelSpatial: "labelRatemap",
 };
 /** Parts that need a position; without one they're left empty. */
 const POSITIONAL = new Set<AnalysisPart>([
@@ -449,6 +528,7 @@ const POSITIONAL = new Set<AnalysisPart>([
   "spikes",
   "spatialDrift",
   "spikeDrift",
+  "labelSpatial",
 ]);
 /**
  * The `parts` of a cell's analysis, from the compute graph.
@@ -484,6 +564,22 @@ export async function analysis(
   }
   for (const part of new Set(parts)) {
     if ((POSITIONAL.has(part) && !hasPos) || (part === "phase" && !inputs.egf)) {
+      continue;
+    }
+    if (part === "labelSpatial") {
+      // A rate map per label, each over that label's times; one key for them all. None when
+      // the trial's labels can't be made (no log file, say), rather than empty maps.
+      const maps = [];
+      const keys = [];
+      const labelled = await timeLabels(w, inputs);
+      for (const label of labelled.error ? [] : (inputs.timeLabelValues ?? [])) {
+        const a = await ask(w, { ...inputs, timeLabel: String(label) }, "labelRatemap", cell);
+        const [width, height, peak] = a.buffers.shape;
+        maps.push({ label, spatial: a.buffers.values as Float32Array, width, height, peak });
+        keys.push(a.key);
+      }
+      result.labelSpatial = maps;
+      result.keys.labelSpatial = [labelled.key, ...keys].join("|");
       continue;
     }
     const answer = await ask(w, inputs, PART_HANDLERS[part], cell);

@@ -32,7 +32,10 @@ export interface Trial {
   egfs?: EgfFile[];
   /** `.egf` files beyond MAX_EGFS, by name, which aren't used. */
   ignoredEgfs?: string[];
+  /** Files the organiser doesn't use itself, by name (with why, if there's a reason). */
   otherFiles?: string[];
+  /** Those files named for the trial, such as a log file time labels can read. */
+  auxFiles?: File[];
 }
 export const RENDERING_MODES = ["fixed", "density", "drift"] as const;
 export type RenderingMode = (typeof RENDERING_MODES)[number];
@@ -186,8 +189,17 @@ export const ANALYSIS_PARTS = [
   "spatialDrift",
   "spikeDrift",
   "phase",
+  "labelSpatial",
 ] as const;
 export type AnalysisPart = (typeof ANALYSIS_PARTS)[number];
+/** A cell's rate map over one time label's times. */
+export interface LabelRatemap {
+  label: number;
+  spatial: Float32Array;
+  width: number;
+  height: number;
+  peak: number;
+}
 /** A cell's analysis. Parts that weren't asked for are empty, with no key. */
 export interface AnalysisData {
   /** The membership key the worker analysed (see membershipKey). */
@@ -223,6 +235,8 @@ export interface AnalysisData {
    * from its peaks; and their circular mean (radians, 0 to 2π). Empty without an `.egf` file. */
   phase?: Float32Array;
   phaseMean?: number;
+  /** labelSpatial: a rate map for each time label asked for, in order. */
+  labelSpatial?: LabelRatemap[];
 }
 /** The fields each part fills. */
 const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
@@ -237,6 +251,7 @@ const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
   spatialDrift: ["spatialDrift"],
   spikeDrift: ["spikeDrift"],
   phase: ["phase", "phaseMean"],
+  labelSpatial: ["labelSpatial"],
 };
 /**
  * `next`, keeping `held`'s values for every part whose key is unchanged, so plots of those
@@ -312,3 +327,47 @@ export const badgeStyle = (cell: number) => ({
   background: color(cell),
   color: groupTextColor(cell),
 });
+/** A trial's time labels (see core/src/time_labels.rs). */
+export interface TimeLabelsData {
+  /** Its key in the worker's compute graph: equal keys mean identical values. */
+  key: string;
+  /** The trial's duration (s). */
+  duration: number;
+  /** The log's data lines (0 without a log). */
+  lines: number;
+  /** Contiguous segments as (start, end) pairs (s), and each one's label (into `names`). */
+  segments: Float64Array;
+  labels: Uint16Array;
+  /** Label names; each one's total seconds and number of segments. */
+  names: string[];
+  seconds: Float64Array;
+  counts: Uint32Array;
+  /** Log lines each rule matched (only the first rule that matches a line counts it). */
+  matched: Uint32Array;
+  /** Why the rules can't be used ("" when they can); with no segments. */
+  error: string;
+  /** The log, previewed: each label's first two and last lines, in file order, with gaps
+   * where lines are left out; with none matched, its first three and last lines. */
+  preview: LogPreviewLine[];
+  /** Log rules that can't be used as given, and why: the others still label. */
+  problems: { rule: number; message: string }[];
+}
+export interface LogPreviewLine {
+  /** The rule that took the line, and the label it gives; null for neither. */
+  rule: number | null;
+  label: number | null;
+  /** The file's line number, from 1 (0 for a gap). */
+  line: number;
+  kind: "match" | "other" | "gap";
+  /** For a match, its time's span in `text` (characters). */
+  start: number;
+  end: number;
+  text: string;
+}
+/** The times one label covers (or the whole trial), for plots made from those times. */
+export interface TimeMask {
+  key: string;
+  /** Merged (start, end) pairs (s), and their total. */
+  intervals: Float64Array;
+  seconds: number;
+}

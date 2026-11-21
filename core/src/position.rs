@@ -428,6 +428,43 @@ impl Position {
         (s.is_finite() && s >= 0. && s < speed_max)
             .then(|| ((s / speed_bin).floor() as usize).min(ns - 1))
     }
+    /// Whether each sample is within `intervals`: merged, ascending (start, end) pairs in
+    /// seconds on the spikes' clock (where sample i is at i / rate + sync).
+    pub(crate) fn within(&self, intervals: &[f64]) -> Vec<bool> {
+        let mut next = 0;
+        (0..self.x.len())
+            .map(|i| {
+                let t = i as f64 / self.rate + self.sync;
+                while next + 1 < intervals.len() && intervals[next + 1] <= t {
+                    next += 2;
+                }
+                next + 1 < intervals.len() && intervals[next] <= t && t < intervals[next + 1]
+            })
+            .collect()
+    }
+    /// The trajectory's samples that `keep` says (see `within`), as `path` gives them, with a
+    /// NaN pair wherever samples are left out, so the line breaks there.
+    pub(crate) fn path_within(&self, keep: &[bool]) -> Vec<f32> {
+        let mut out = vec![];
+        for i in (0..self.x.len()).filter(|&i| self.dwell(i).is_some()) {
+            if keep[i] {
+                out.extend([self.x[i] / self.width, self.y[i] / self.height]);
+            } else if out.last().is_some_and(|v: &f32| !v.is_nan()) {
+                out.extend([f32::NAN, f32::NAN]);
+            }
+        }
+        out
+    }
+    /// Seconds spent in each spatial bin by the samples `keep` says (see `within`).
+    pub(crate) fn spatial_occupancy_within(&self, w: usize, h: usize, keep: &[bool]) -> Vec<f32> {
+        let mut occupancy = vec![0.; w * h];
+        for i in (0..self.x.len()).filter(|&i| keep[i]) {
+            if let Some(dt) = self.dwell(i) {
+                occupancy[self.spatial_bin(i, w, h)] += dt;
+            }
+        }
+        occupancy
+    }
     /// Normalised (x, y) of every sample in the arena, for the trajectory plot.
     pub(crate) fn path(&self) -> Vec<f32> {
         (0..self.x.len())

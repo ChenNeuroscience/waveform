@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toolbar } from "./shell/Toolbar";
 import { RenderingToggles } from "./shell/RenderingToggles";
 import { FilesPane } from "./shell/FilesPane";
@@ -50,6 +50,16 @@ import { useCopies } from "./app/copies";
 import { useFeatureSpace } from "./app/features";
 import { useSplit } from "./app/split";
 import { CopyWindow } from "./shell/CopyWindow";
+import { TimelinePane } from "./shell/TimelinePane";
+import { useLabelPath, useTimeLabels } from "./app/time-labels";
+import {
+  defaultTimeLabels,
+  logFiles,
+  timeLabelSource,
+  timeSelections,
+  validTimeLabels,
+  type TimeLabelConfig,
+} from "./app/time-label-config";
 import { GrabOutline } from "./shell/GrabOutline";
 import { downloadBlob, organiseFiles, parseHeader } from "./files";
 function readSettings(): Settings {
@@ -237,7 +247,9 @@ export default function App() {
   // Bumped when a cut file finishes preparing, to re-render its export-ready marker.
   const [, setDownloadVersion] = useState(0);
 
-  const panes = usePaneLayout();
+  // The timeline pane (the toolbar's timeline toggle), between the position and feature panes.
+  const [timeline, setTimeline] = usePreference("timeline-pane", false);
+  const panes = usePaneLayout(timeline);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   // Bumped per recording load; async edits, loads and progress updates compare
@@ -457,6 +469,37 @@ export default function App() {
     show: shown.phase,
     onError: setError,
   });
+  // Time labels: kept as a preference (validated, as older or hand-edited values may not be),
+  // and asked for while their window is open.
+  const [timeLabelPreference, setTimeLabelPreference] = usePreference<TimeLabelConfig>(
+    "time-labels",
+    defaultTimeLabels,
+  );
+  const timeLabelConfig = useMemo(() => {
+    try {
+      return validTimeLabels(timeLabelPreference);
+    } catch {
+      return defaultTimeLabels;
+    }
+  }, [timeLabelPreference]);
+  const timeLabels = useTimeLabels({
+    trial,
+    recording: data?.key,
+    config: timeLabelConfig,
+    show: timeline || panels.includes("labels"),
+    onError: setError,
+  });
+  // A timeline label's row hovered in the pane: the position pane shows its times' path.
+  const [hoverLabel, setHoverLabel] = useState<number | null>(null);
+  const labelPath = useLabelPath({
+    trial,
+    headerEdits,
+    settings,
+    recording: data?.key,
+    config: timeLabelConfig,
+    label: timeline ? hoverLabel : null,
+    onError: setError,
+  });
   const chooseEgf = (t: Trial, n: number) => {
     setEgfNum(n);
     if (t.id !== trialId) {
@@ -482,6 +525,7 @@ export default function App() {
     cell,
     data,
     tileWall,
+    timeLabels: timeline ? timeLabelConfig : undefined,
     onNotice: setNotice,
   });
   useEffect(() => {
@@ -907,6 +951,15 @@ export default function App() {
     headerEdits,
     estimatedHeaders,
     setHeaderEdits,
+    timeLabels: {
+      config: timeLabelConfig,
+      setConfig: (change) => setTimeLabelPreference(change(timeLabelConfig)),
+      data: timeLabels,
+      trialName: trial?.name,
+      logNames: logFiles(trial, timeLabelConfig).map((f) => f.name),
+      notify: showTimedNotice,
+      onHoverLabel: setHoverLabel,
+    },
   };
   // Files dragged in from outside (not a cut dragged out of the organiser).
   const dragOver = (e: React.DragEvent) => {
@@ -953,6 +1006,16 @@ export default function App() {
             <Toolbar
               {...{ data, ready, busy, progress, message, shown }}
               headersChanged={headersChanged(headerFiles, headerEdits, estimatedHeaders)}
+              timeline={timeline}
+              // On, the pane shows and its window opens; off, both go.
+              onTimeline={() => {
+                setTimeline(!timeline);
+                if (timeline) {
+                  closePanel("labels");
+                } else {
+                  setPane("labels");
+                }
+              }}
               onHome={goHome}
               onOpenFiles={openFiles}
               onOpenFolder={openFolder}
@@ -1017,8 +1080,21 @@ export default function App() {
                 copyLayers={
                   copyMode.cells !== null && copyMode.kind === "path" ? copyMode.pathLayers : null
                 }
+                labelPath={labelPath}
               />
               <Divider part="position" onDrag={panes.dragDivider} />
+              {timeline && (
+                <>
+                  <TimelinePane
+                    c={panelContext.timeLabels}
+                    settingsOpen={panels.includes("labels")}
+                    onSettings={() =>
+                      panels.includes("labels") ? closePanel("labels") : setPane("labels")
+                    }
+                  />
+                  <Divider part="timeline" onDrag={panes.dragDivider} />
+                </>
+              )}
               <FeaturePane
                 {...{ data, settings, cell, painting, grabMode }}
                 threeD={feature3D}
@@ -1092,6 +1168,15 @@ export default function App() {
                   copyingPath={copyMode.kind === "path"}
                   {...{ data, settings, trial, shown, splitPoint, swap, grabMode, headerEdits }}
                   egfNum={egfNum}
+                  // While the timeline is on, a rate map for each row ticked in its pane.
+                  timeLabels={
+                    timeline
+                      ? {
+                          ...timeLabelSource(trial, timeLabelConfig),
+                          selections: timeSelections(timeLabelConfig),
+                        }
+                      : undefined
+                  }
                   selected={cell}
                   feedback={tileFeedback}
                   busy={!ready}
@@ -1134,7 +1219,7 @@ export default function App() {
             x={panel.x}
             y={panel.y}
             height={panel.height}
-            autoHeight={name === "settings"}
+            autoHeight={name === "settings" || name === "labels"}
             onFocus={() => setPane(name)}
             onClose={() => closePanel(name)}
           >

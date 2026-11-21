@@ -7,6 +7,7 @@ import type {
   Header,
   LfpDistribution,
   Settings,
+  TimeLabelsData,
   Trajectory,
   ViewData,
   ViewMessage,
@@ -80,8 +81,17 @@ export interface LfpRequest {
   settings: Settings;
 }
 
+/** Time labels for a cell's rate maps by label (see `timeLabelSource`): the log, the rules,
+ * and the labels to make a map for. */
+export interface TimeLabelRequest {
+  log?: File;
+  logFile?: string;
+  timeRules?: string;
+  timeLabelValues?: number[];
+}
+
 /** A secondary trial to analyse for the clipboard without activating its recording. */
-export interface CopyRecording {
+export interface CopyRecording extends TimeLabelRequest {
   trialId: string;
   file: File;
   assetKey: string;
@@ -144,10 +154,16 @@ export interface Requests {
   wave_batch: [{ asset: string; first: number; count: number }, { waves: Uint8Array }];
   trajectory: [PositionRequest, Trajectory | null];
   lfp: [LfpRequest, LfpDistribution | null];
+  /** The trajectory in one time label's times (see `timeMaskSource`), broken where it leaves
+   * them, for the loaded recording's trial. */
+  label_path: [PositionRequest & TimeLabelRequest & { timeLabel: string }, Float32Array];
+  /** The loaded recording's trial's time labels (see `timeLabelSource`). */
+  time_labels: [{ log?: File; logFile?: string; timeRules: string }, TimeLabelsData];
   analysis: [
     Partial<Session> &
       PositionRequest &
-      Omit<LfpRequest, "settings"> & {
+      Omit<LfpRequest, "settings"> &
+      TimeLabelRequest & {
         cell: number;
         /** What to compute: only what will be shown. */
         parts: readonly AnalysisPart[];

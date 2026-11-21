@@ -111,7 +111,12 @@ export function useShortcuts(context: ShortcutContext) {
     let copyPressed = 0;
     const key = (e: KeyboardEvent) => {
       const c = latest.current;
-      if ((e.target as HTMLElement).matches('input,select,textarea,[contenteditable="true"]')) {
+      // Typing goes to the field; a tick box or radio button keeps the shortcuts.
+      if (
+        (e.target as HTMLElement).matches(
+          'input:not([type="checkbox"],[type="radio"]),select,textarea,[contenteditable="true"]',
+        )
+      ) {
         return;
       }
       if (c.dragging) {

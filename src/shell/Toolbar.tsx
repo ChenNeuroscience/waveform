@@ -6,6 +6,7 @@ import type { PanelName } from "./panels";
 import { experimentTiming } from "./position-info";
 import { ToggleButton } from "./ToggleButton";
 import { FileMenu } from "./FileMenu";
+import { TimelineIcon } from "./TimelineIcon";
 
 /** A file with paired key/value lines, for recording header metadata. */
 function HeadersIcon() {
@@ -33,6 +34,9 @@ export function Toolbar(p: {
   data: ViewData | null;
   /** Whether a header of the active files has a value that isn't the file's. */
   headersChanged: boolean;
+  /** Whether the timeline pane is shown, and its toggle. */
+  timeline: boolean;
+  onTimeline: () => void;
   message: string;
   onOperation: (type: "undo" | "redo") => void;
   onPanel: (panel: PanelName) => void;
@@ -97,6 +101,15 @@ export function Toolbar(p: {
       <button title="Settings" aria-label="Settings" onClick={() => p.onPanel("settings")}>
         <SettingsIcon size={17} />
       </button>
+      <ToggleButton
+        title="Timeline labels"
+        aria-label="Timeline labels"
+        className="timeline-toggle"
+        pressed={p.timeline}
+        onClick={p.onTimeline}
+      >
+        <TimelineIcon />
+      </ToggleButton>
       <span className="tool-separator" />
       {(["waveforms", "spatial", "sc", "direction", "speed", "ac", "phase"] as PlotMode[]).map(
         (m) => (

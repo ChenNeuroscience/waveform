@@ -51,8 +51,9 @@ test("Waveform menu offers both additive pickers and clear files; keyboard focus
     mimeType: "application/octet-stream",
     buffer: Buffer.from("auxiliary"),
   });
+  // With the trial's simulated .ttl log, two.
   await expect(page.getByRole("button", { name: "demo_box-a 8", exact: true })).toContainText(
-    "1 other file",
+    "2 other files",
   );
   await expect(page).toHaveTitle("demo_box-a [Waveform]");
   await expect(page.locator(".trial-block")).toHaveCount(5);

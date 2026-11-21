@@ -21,6 +21,7 @@ import {
   exportLabels,
   lfpDistribution,
   positionHeader,
+  timeLabels,
   trajectory,
   type ComputeInputs,
   type RecordingSource,
@@ -238,7 +239,16 @@ async function waveBatch(w: Core, r: Recording, first: number, count: number) {
 async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
   if (
     splitState &&
-    !["split", "analysis", "trajectory", "lfp", "wave_batch", "features"].includes(m.type)
+    ![
+      "split",
+      "analysis",
+      "trajectory",
+      "lfp",
+      "time_labels",
+      "label_path",
+      "wave_batch",
+      "features",
+    ].includes(m.type)
   ) {
     throw new Error("Finish the waveform split with a left click, or press Escape to cancel.");
   }
@@ -317,6 +327,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
             "ac",
             ...(m.spatialAc ? ["sc" as const] : []),
             ...(drift ? ["spatialDrift" as const] : []),
+            ...(recording.timeLabelValues?.length ? ["labelSpatial" as const] : []),
           ];
       const found = new Map<number, AnalysisData>();
       for (const cell of new Set(m.path ? [...m.cells, 0] : m.cells)) {
@@ -424,6 +435,15 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
   }
   let s = active;
   const r = recordings.get(s.asset)!;
+  if (m.type === "label_path") {
+    // The recording gives the trial's duration, which the labels are clipped to.
+    return (await ask(w, inputs(s, m), "labelPath")).buffers.values as Float32Array;
+  }
+  if (m.type === "time_labels") {
+    // The recording gives the trial's duration; the labels don't depend on its cut.
+    const { log, logFile, timeRules } = m;
+    return timeLabels(w, inputs(s, { log, logFile, timeRules }));
+  }
   if ("session" in m && m.session && m.session !== s.key) {
     throw new Error("The active cut changed; retry the operation.");
   }

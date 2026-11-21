@@ -27,13 +27,20 @@ export function drawPathBase(
   ctx.strokeStyle = "#333333";
   ctx.lineWidth = 0.6;
   ctx.beginPath();
+  // A NaN pair is a break (a path in one time label's times leaves them there).
+  let broken = true;
   for (let i = 0; i < trajectory.path.length; i += 2) {
+    if (Number.isNaN(trajectory.path[i])) {
+      broken = true;
+      continue;
+    }
     const x = box.x + trajectory.path[i] * box.width;
     const y = box.y + trajectory.path[i + 1] * box.height;
-    if (i) {
-      ctx.lineTo(x, y);
-    } else {
+    if (broken) {
       ctx.moveTo(x, y);
+      broken = false;
+    } else {
+      ctx.lineTo(x, y);
     }
   }
   ctx.stroke();

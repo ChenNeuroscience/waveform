@@ -1,6 +1,7 @@
 /** Floating copies of plots: a cell's tile (pop-out), the path or feature grid
  * (Space-click), and copying cells to the clipboard: the selected cell, or in copy
  * mode a set of cells picked on the tile wall, rewritten after every change. */
+import { timeLabelSource, timeSelections, type TimeLabelConfig } from "./time-label-config";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { captureTile, type TileWallHandle, type VisiblePlots } from "../tiles/TileWall";
 import { captureAnalysisPlots, cellStatEntries, type AnalysisFrame } from "./copy-plots";
@@ -67,6 +68,7 @@ export function useCopies({
   cell,
   data,
   tileWall,
+  timeLabels,
   onNotice,
 }: {
   trial: Trial | undefined;
@@ -80,6 +82,9 @@ export function useCopies({
   data: ViewData | null;
   tileWall: RefObject<TileWallHandle | null>;
   onNotice: (message: string) => void;
+  /** While the timeline is on, its configuration: other trials' cells get rate maps by label
+   * too, each from that trial's own log. */
+  timeLabels?: TimeLabelConfig;
 }) {
   const [copies, setCopies] = useState<PlotCopy[]>([]);
   // Copy mode's selected cells (null outside copy mode), and the latest write.
@@ -166,6 +171,9 @@ export function useCopies({
     const id = ++latestWrite.current;
     setPreparing(true);
     const secondary = trials.filter((t) => t.id !== trial?.id && selectedTrials.includes(t.id));
+    const labels = timeLabels
+      ? timeSelections(timeLabels).filter((l): l is number => l !== null)
+      : [];
     const sources = (kind === "path" ? [trial, ...secondary] : secondary).map((t) => {
       const tet = t.tetrodes.find((tet) => tet.number === tetNum && tet.file);
       const cut = tet?.cuts.find((cut) => cut.id === (selectedCuts[t.id] ?? rememberedCut(tet)));
@@ -179,6 +187,10 @@ export function useCopies({
             revision: t.id === trial.id ? data.revision : cut?.revision || 0,
             ...positionSource(t, headerEdits),
             set: t.set,
+            // The labels ticked, from this trial's log (or method).
+            ...(labels.length && timeLabels
+              ? { ...timeLabelSource(t, timeLabels), timeLabelValues: labels }
+              : {}),
           }
         : undefined;
       return { trial: t, recording, cut };
@@ -228,6 +240,7 @@ export function useCopies({
                       name: plot.name,
                       width: plot.canvas.width / ratio,
                       height: plot.canvas.height / ratio,
+                      label: plot.label,
                     },
                   ],
             );

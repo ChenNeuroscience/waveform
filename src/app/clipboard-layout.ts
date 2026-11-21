@@ -1,4 +1,16 @@
-import type { CellCapture, PlotCapture } from "./copy-plots";
+import { labelPeakStat, type CellCapture, type PlotCapture } from "./copy-plots";
+import { labelMarkImage } from "../shell/TimelineIcon";
+
+/** A time label's mark as a tiny inline image, for a label map's stats. */
+function markHtml(label: number) {
+  const { url, width, height } = labelMarkImage(label);
+  return `<img src="${url}" width="${width}" height="${height}" alt="L${label}" style="vertical-align:-3px;">`;
+}
+/** A stat's name as HTML: a label map's peak shows its label as its mark. */
+function statNameHtml(name: string) {
+  const label = /^spa max L(\d+)$/.exec(name);
+  return label ? `spa max ${markHtml(+label[1])}` : escapeHtml(name);
+}
 
 export interface TrialCapture {
   name: string;
@@ -20,12 +32,19 @@ function plotImage(plot: PlotCapture, width: number, alt: string, flow = "block"
   return `<img src="${plot.canvas.toDataURL()}" alt="${escapeHtml(alt)}" width="${Math.round(width)}" height="${height}" style="${style}${plot.mode === "spatial" ? "image-rendering:pixelated;" : ""}">`;
 }
 
-function peakStat(mode: PlotCapture["mode"]) {
-  return mode === "spatial" ? "spa max" : mode === "direction" ? "dir max" : undefined;
+/** The stat naming a plot's peak: a time label's rate map has its own. */
+function peakStat({ mode, label }: Pick<PlotCapture, "mode" | "label">) {
+  return mode === "spatial"
+    ? label === undefined
+      ? "spa max"
+      : labelPeakStat(label)
+    : mode === "direction"
+      ? "dir max"
+      : undefined;
 }
 
-function peakValue(cell: CellCapture, mode: PlotCapture["mode"]) {
-  return (cell.stats.find((stat) => stat.label === peakStat(mode))?.value || "—").replace(
+function peakValue(cell: CellCapture, frame: Pick<PlotCapture, "mode" | "label">) {
+  return (cell.stats.find((stat) => stat.label === peakStat(frame))?.value || "—").replace(
     /(\d)Hz$/,
     "$1 Hz",
   );
@@ -42,6 +61,12 @@ function singleTrialClipboard(trial: TrialCapture, tetNum: number) {
       .filter((s) => s.label !== "n spikes")
       .map((s) => `${s.label}: ${s.value.replace(/(\d)Hz$/, "$1 Hz")}`);
     const details = [`${cell.spikes.toLocaleString("en-GB")} spikes`, ...rates].join(" · ");
+    const detailsHtml = [
+      escapeHtml(`${cell.spikes.toLocaleString("en-GB")} spikes`),
+      ...cell.stats
+        .filter((s) => s.label !== "n spikes")
+        .map((s) => `${statNameHtml(s.label)}: ${escapeHtml(s.value.replace(/(\d)Hz$/, "$1 Hz"))}`),
+    ].join(" · ");
     const images = cell.plots.map((plot) => {
       const width = Math.min(
         plot.mode === "waveforms" ? 192 : Infinity,
@@ -50,7 +75,7 @@ function singleTrialClipboard(trial: TrialCapture, tetNum: number) {
       return plotImage(plot, width, plot.name, "inline");
     });
     html.push(
-      `<p style="margin:0;font:11px Arial;"><b>${escapeHtml(title)}</b> · ${escapeHtml(details)}</p>`,
+      `<p style="margin:0;font:11px Arial;"><b>${escapeHtml(title)}</b> · ${detailsHtml}</p>`,
       `<p style="margin:0 0 9px;white-space:nowrap;">${images.join(" ")}</p>`,
     );
     text.push(`${title} · ${details}`);
@@ -112,8 +137,8 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
     const columns = trials.map((trial) => trial.cells.find((c) => c.cell === capture.cell)!);
     columns.forEach((cell, i) => {
       const rates = frames
-        .filter((frame) => peakStat(frame.mode))
-        .map((frame) => `${frame.name}: ${peakValue(cell, frame.mode)}`)
+        .filter((frame) => peakStat(frame))
+        .map((frame) => `${frame.name}: ${peakValue(cell, frame)}`)
         .join(" · ");
       text.push(
         `${trials[i].name} · t${tetNum} c${cell.cell}${cell.spikes ? "" : " · No data"}${rates ? ` · ${rates}` : ""}`,
@@ -128,7 +153,7 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
         : 0;
       const height = Math.ceil(
         Math.max(
-          frame ? (frame.canvas.height / ratio) * plotScale + (peakStat(frame.mode) ? 14 : 0) : 0,
+          frame ? (frame.canvas.height / ratio) * plotScale + (peakStat(frame) ? 14 : 0) : 0,
           index === 0 ? waveHeight + 14 : 0,
         ) + 2,
       );
@@ -140,7 +165,9 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
       html.push(
         `<tr>${label}`,
         ...columns.map((cell, i) => {
-          const plot = frame && cell.plots.find((p) => p.mode === frame.mode);
+          // A rate map of one label's times is that label's, not the whole trial's.
+          const plot =
+            frame && cell.plots.find((p) => p.mode === frame.mode && p.label === frame.label);
           const graphic = plot
             ? plotImage(
                 plot,
@@ -149,8 +176,8 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
               )
             : "";
           const caption =
-            frame && peakStat(frame.mode)
-              ? `<p style="margin:0 0 1px;line-height:13px;">${escapeHtml(peakValue(cell, frame.mode))}</p>`
+            frame && peakStat(frame)
+              ? `<p style="margin:0 0 1px;line-height:13px;">${frame.label === undefined ? "" : `${markHtml(frame.label)} `}${escapeHtml(peakValue(cell, frame))}</p>`
               : "";
           return `<td width="${columnWidth}" height="${height}" align="center" valign="top" style="${valueStyle}${rowStyle}">${caption}${graphic}</td>`;
         }),
@@ -160,9 +187,9 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
     html.push("</tbody>");
   }
   html.push("</table>");
-  const peakMaps = frames
-    .filter((frame) => peakStat(frame.mode))
-    .map((frame) => (frame.mode === "spatial" ? "spatial rate maps" : "directional maps"));
+  const peakMaps = [...new Set(frames.filter((frame) => peakStat(frame)).map((f) => f.mode))].map(
+    (mode) => (mode === "spatial" ? "spatial rate maps" : "directional maps"),
+  );
   if (peakMaps.length) {
     const footnote = `Values above ${peakMaps.join(" and ")} are peak firing rates (Hz).`;
     html.push(`<p style="margin:3px 0;font:10px Arial;color:#666;">${escapeHtml(footnote)}</p>`);

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { SpeedDwellPlot } from "../plots/SpeedPlot";
 import { PathPlot, type SpikeLayer } from "../plots/PathPlot";
+import { LabelMark } from "./TimelineIcon";
 import { LfpFrequencyPlot } from "../plots/LfpPlot";
 import {
   color,
@@ -55,6 +56,7 @@ export function PositionPane({
   onOpenHeaders,
   onHover,
   copyLayers,
+  labelPath,
 }: {
   data: ViewData | null;
   trial: Trial | undefined;
@@ -76,7 +78,14 @@ export function PositionPane({
   onOpenHeaders: () => void;
   onHover: (hovered: boolean) => void;
   copyLayers: SpikeLayer[] | null;
+  /** While a timeline label's row is hovered: the path in that label's times, shown in place
+   * of the whole path, and marked. */
+  labelPath: { label: number; path: Float32Array } | null;
 }) {
+  const shownTrajectory = useMemo(
+    () => (trajectory && labelPath ? { ...trajectory, path: labelPath.path } : trajectory),
+    [trajectory, labelPath],
+  );
   const timing = experimentTiming(data?.headers || {}, data?.duration || 0);
   const pathCell = dragComparison?.source ?? hoverCell;
   const primary = analysis?.cell === pathCell ? analysis : null;
@@ -149,7 +158,8 @@ export function PositionPane({
           data-target-spikes={secondary ? secondary.spikes.length / 2 : 0}
           onPointerDownCapture={grabPath}
         >
-          <PathPlot trajectory={trajectory} layers={pathLayers} />
+          <PathPlot trajectory={shownTrajectory!} layers={pathLayers} />
+          {labelPath && <LabelMark label={labelPath.label} className="position-label-mark" />}
         </div>
         {trajectory.ppmEstimated && (
           <div className="position-warning" role="status">

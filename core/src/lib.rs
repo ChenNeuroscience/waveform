@@ -22,6 +22,7 @@ mod processing;
 mod projection;
 mod spatial_ac;
 pub mod synthetic;
+mod time_labels;
 mod waves;
 pub const RECORD: usize = 216;
 pub const MAX_CELLS: usize = 1024;

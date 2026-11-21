@@ -54,6 +54,7 @@ export async function organiseFiles(
     otherFiles: [...(t.otherFiles || [])],
     egfs: [...(t.egfs || [])],
     ignoredEgfs: [...(t.ignoredEgfs || [])],
+    auxFiles: [...(t.auxFiles || [])],
     tetrodes: t.tetrodes.map((e) => ({ ...e, cuts: [...e.cuts] })),
   }));
   const map = new Map(trials.map((t) => [t.id, t]));
@@ -154,8 +155,8 @@ export async function organiseFiles(
       target.cuts.push({ id, file: f, name: f.name });
     }
   }
-  // Associate auxiliary names after grouping, independent of input ordering.
-  // Keep only names: skipped multi-GB files need no retained handles or reads.
+  // Associate auxiliary files after grouping, independent of input ordering. Handles are
+  // kept (a handle reads nothing) for those named for the trial, such as log files.
   for (const { file, detail } of skipped) {
     const folder = (file.webkitRelativePath || "").split("/").slice(0, -1).join("/");
     const owner = trials
@@ -167,6 +168,7 @@ export async function organiseFiles(
       .sort((a, b) => b.name.length - a.name.length)[0];
     if (owner) {
       owner.otherFiles = [...new Set([...(owner.otherFiles || []), detail])].sort();
+      owner.auxFiles = [...(owner.auxFiles || []).filter((f) => f.name !== file.name), file];
     }
   }
   trials.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
