@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { ready } from "./controls";
+import { readClipboard, ready } from "./controls";
 
 test("timeline labels: equal sections, log rules against a simulated .ttl, plot selection and a copied code", async ({
   page,
@@ -13,7 +13,7 @@ test("timeline labels: equal sections, log rules against a simulated .ttl, plot 
   await ready(page, 60000);
 
   // The toolbar's toggle shows the timeline pane and opens its window.
-  const button = page.getByRole("button", { name: /^Timeline labels( \(on\))?$/ });
+  const button = page.getByRole("button", { name: "Timeline labels", exact: true });
   await button.click();
   await expect(button).toHaveAttribute("aria-pressed", "true");
   const pane = page.getByRole("region", { name: "Timeline labels" });
@@ -172,8 +172,33 @@ test("timeline labels: equal sections, log rules against a simulated .ttl, plot 
   await expect(show("Total")).toBeChecked();
   await expect(show("1")).not.toBeChecked();
   await show("1").check();
-  await expect(page.getByRole("button", { name: "Timeline labels (on)" })).toBeVisible();
+  // Tiles add a rate map for label 1, marked with the timeline icon in its colour.
+  const firstTile = page.locator(".cell-tile").first();
+  const labelMap = firstTile.locator(".tile-label-spatial");
+  await expect(labelMap).toHaveCount(1);
+  await expect(labelMap.locator(".label-mark")).toHaveText("1");
+  await expect(labelMap.locator("canvas")).toBeVisible({ timeout: 30000 });
+  await expect(firstTile.locator(".tile-spatial:not(.tile-label-spatial)")).toHaveCount(1);
+  // Hovering label 1's row shows its times on the path above, marked; leaving, the whole path.
+  const pathMark = page.locator(".position-label-mark");
+  await rows.nth(1).hover();
+  await expect(pathMark).toHaveText("1");
+  await page.mouse.move(700, 10);
+  await expect(pathMark).toHaveCount(0);
+  // Ctrl+C copies the cell with its label 1 map too, though focus is on a tick box.
+  await expect(show("1")).toBeFocused();
+  await page.evaluate(() => navigator.clipboard.writeText(""));
+  await firstTile.hover();
+  await page.keyboard.press("ControlOrMeta+c");
+  await expect
+    .poll(async () => (await readClipboard(page)).text)
+    .toMatch(/spa max: [\d.]+ Hz · spa max L1: [\d.]+ Hz/);
+  // In the HTML, label 1's peak shows its mark as a tiny image, not in the map's.
+  expect((await readClipboard(page)).html).toContain('alt="L1"');
   await show("Total").uncheck();
+  // Without the total, tiles show only label 1's map.
+  await expect(firstTile.locator(".tile-spatial:not(.tile-label-spatial)")).toHaveCount(0);
+  await expect(labelMap).toHaveCount(1);
   // The last ticked row stays ticked, and isn't shown disabled.
   await expect(show("1")).toBeEnabled();
   await show("1").click();
@@ -222,5 +247,8 @@ test("timeline labels: equal sections, log rules against a simulated .ttl, plot 
   await button.click();
   await expect(pane).toHaveCount(0);
   await expect(panel).toHaveCount(0);
+  // Off, the tiles show the whole trial's rate map alone again.
+  await expect(page.locator(".tile-label-spatial")).toHaveCount(0);
+  await expect(page.locator(".cell-tile").first().locator(".tile-spatial")).toHaveCount(1);
   expect(errors).toEqual([]);
 });

@@ -70,6 +70,8 @@ pub(crate) static ROUTES: &[Route] = &[
     ("spikePhase", answer::<SpikePhase>),
     ("timeLabels", answer::<TimeLabels>),
     ("timeMask", answer::<TimeMask>),
+    ("labelRatemap", answer::<LabelRatemap>),
+    ("labelPath", answer::<LabelPath>),
 ];
 
 /// A recording's spike times and amplitudes. Only JavaScript can read its file
@@ -1125,6 +1127,88 @@ impl Answer for Mask {
     }
 }
 
+/// A cell's spike samples whose spikes are in the label's times (the spikes' own clock).
+pub(crate) struct LabelSpikeSamples;
+impl Handler for LabelSpikeSamples {
+    type Value = Samples;
+    const NODE: Node = Node::LabelSpikeSamples;
+    const LIMIT: usize = PER_CELL;
+    fn compute(cx: &mut Request) -> Result<Samples, Missing> {
+        let all = cx.call::<SpikeSamples>()?;
+        let mask = cx.call::<TimeMask>()?;
+        let tb = cx.tb();
+        let inside = |t: u32| {
+            let s = t as f64 / tb;
+            mask.intervals
+                .chunks_exact(2)
+                .any(|i| i[0] <= s && s < i[1])
+        };
+        let (samples, times) = all
+            .samples
+            .iter()
+            .zip(&all.times)
+            .filter(|(_, &t)| inside(t))
+            .map(|(&i, &t)| (i, t))
+            .unzip();
+        Ok(Samples { samples, times })
+    }
+}
+/// Seconds in each spatial bin, counting only position samples in the label's times.
+pub(crate) struct LabelOccupancy;
+impl Handler for LabelOccupancy {
+    type Value = Grid;
+    const NODE: Node = Node::LabelOccupancy;
+    const IGNORE: &'static [Part] = &[L(Smooth), COLOURS[0], COLOURS[1]];
+    const LIMIT: usize = PER_POSITION;
+    fn compute(cx: &mut Request) -> Result<Grid, Missing> {
+        let p = cx.call::<ProcessedPosition>()?;
+        let mask = cx.call::<TimeMask>()?;
+        let (w, h) = p.grid(cx.input(BinCm) as f32);
+        Ok(Grid {
+            w,
+            h,
+            values: p.spatial_occupancy_within(w, h, &p.within(&mask.intervals)),
+        })
+    }
+}
+/// A cell's rate map in the label's times: its spikes then, over the time spent then.
+pub(crate) struct LabelRatemap;
+impl Handler for LabelRatemap {
+    type Value = Rates;
+    const NODE: Node = Node::LabelRatemap;
+    const IGNORE: &'static [Part] = &COLOURS;
+    const LIMIT: usize = PER_CELL;
+    fn compute(cx: &mut Request) -> Result<Rates, Missing> {
+        let samples = cx.call::<LabelSpikeSamples>()?;
+        let occupancy = cx.call::<LabelOccupancy>()?;
+        let p = cx.call::<ProcessedPosition>()?;
+        let (w, h) = (occupancy.w, occupancy.h);
+        let (values, peak) = p.rate_map(
+            &samples.samples,
+            &occupancy.values,
+            w,
+            h,
+            cx.input(Smooth) as usize,
+        );
+        Ok(Rates {
+            grid: Grid { w, h, values },
+            peak,
+        })
+    }
+}
+/// The trajectory in the label's times, with a break (a NaN pair) wherever it leaves them.
+pub(crate) struct LabelPath;
+impl Handler for LabelPath {
+    type Value = Values;
+    const NODE: Node = Node::LabelPath;
+    const LIMIT: usize = PER_POSITION;
+    fn compute(cx: &mut Request) -> Result<Values, Missing> {
+        let p = cx.call::<ProcessedPosition>()?;
+        let mask = cx.call::<TimeMask>()?;
+        Ok(Values(p.path_within(&p.within(&mask.intervals))))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1514,5 +1598,51 @@ mod tests {
         assert_eq!(labelled.matched, [2, 0]);
         assert_eq!(labelled.seconds, [2., 8.]);
         assert!(String::from_utf8_lossy(&labelled.problems).starts_with("1\tRule 2:"));
+    }
+
+    #[test]
+    fn label_rate_maps_split_the_trial_between_labels() {
+        let (raw, times, labels) = data();
+        let mut i = inputs();
+        i.time_rules = "split\t2\n0\n1".into();
+        supply_recording(&i, times, labels);
+        supply::<RawPosition>(&i, raw.variant(1, 0., 0., 0.));
+        let at = |label: &str| Inputs {
+            time_label: label.into(),
+            ..i.clone()
+        };
+        let all = Request::new(i.clone()).call::<SpikeSamples>().unwrap();
+        let first = Request::new(at("0")).call::<LabelSpikeSamples>().unwrap();
+        let second = Request::new(at("1")).call::<LabelSpikeSamples>().unwrap();
+        // Every spike is in one half or the other (the trial is 1 s, at 1000 ticks a second).
+        assert_eq!(
+            first.samples.len() + second.samples.len(),
+            all.samples.len()
+        );
+        assert!(first.times.iter().all(|&t| (t as f64) < 500.));
+        assert!(second.times.iter().all(|&t| (t as f64) >= 500.));
+        // The position runs 20 ms behind (the sync offset), so its last sample, at 1 s, is
+        // outside the trial: the halves' time is the whole's but that sample's.
+        let dwell = |g: &Grid| g.values.iter().sum::<f32>();
+        let whole = dwell(&Request::new(i.clone()).call::<SpatialOccupancy>().unwrap());
+        let halves = dwell(&Request::new(at("0")).call::<LabelOccupancy>().unwrap())
+            + dwell(&Request::new(at("1")).call::<LabelOccupancy>().unwrap());
+        assert!((halves - (whole - 0.02)).abs() < 1e-4, "{halves} {whole}");
+        let map = Request::new(at("1")).call::<LabelRatemap>().unwrap();
+        let plain = Request::new(i.clone()).call::<Ratemap>().unwrap();
+        assert_eq!(map.grid.values.len(), plain.grid.values.len());
+        assert!(map.peak > 0.);
+        // The path in one half is shorter, and ends where that half does.
+        let path = Request::new(at("0")).call::<LabelPath>().unwrap();
+        assert!(path.0.len() < Request::new(i.clone()).call::<Path>().unwrap().0.len());
+        // The whole trial's maps don't depend on time labels at all.
+        let unlabelled = Inputs {
+            time_rules: "".into(),
+            ..i.clone()
+        };
+        assert_eq!(
+            Request::new(i.clone()).key::<Ratemap>().unwrap(),
+            Request::new(unlabelled).key::<Ratemap>().unwrap()
+        );
     }
 }

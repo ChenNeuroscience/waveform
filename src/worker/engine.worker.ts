@@ -239,9 +239,16 @@ async function waveBatch(w: Core, r: Recording, first: number, count: number) {
 async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
   if (
     splitState &&
-    !["split", "analysis", "trajectory", "lfp", "time_labels", "wave_batch", "features"].includes(
-      m.type,
-    )
+    ![
+      "split",
+      "analysis",
+      "trajectory",
+      "lfp",
+      "time_labels",
+      "label_path",
+      "wave_batch",
+      "features",
+    ].includes(m.type)
   ) {
     throw new Error("Finish the waveform split with a left click, or press Escape to cancel.");
   }
@@ -427,6 +434,10 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
   }
   let s = active;
   const r = recordings.get(s.asset)!;
+  if (m.type === "label_path") {
+    // The recording gives the trial's duration, which the labels are clipped to.
+    return (await ask(w, inputs(s, m), "labelPath")).buffers.values as Float32Array;
+  }
   if (m.type === "time_labels") {
     // The recording gives the trial's duration; the labels don't depend on its cut.
     const { log, logFile, timeRules } = m;

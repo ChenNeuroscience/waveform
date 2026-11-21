@@ -5,8 +5,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Settings as SettingsIcon } from "lucide-react";
 import type { TimeLabelsData } from "../types";
-import { labelColor, type TimeLabelConfig } from "../app/time-label-config";
+import { labelColor, timeSelections, type TimeLabelConfig } from "../app/time-label-config";
 import type { TimeLabelsContext } from "./TimeLabelsPanel";
+import { LabelMark } from "./TimelineIcon";
 import { ToggleButton } from "./ToggleButton";
 
 const pct = (part: number, whole: number) =>
@@ -35,9 +36,12 @@ export function TimelinePane({
   const toggleRow = (label: number | null) =>
     c.setConfig((x) =>
       label === null
-        ? { ...x, total: !x.total }
+        ? // As shown: the total stands in when nothing else applies.
+          { ...x, total: !timeSelections(x).includes(null) }
         : {
             ...x,
+            // The total stays as shown (it may only be standing in).
+            total: timeSelections(x).includes(null),
             selected: x.selected.includes(label)
               ? x.selected.filter((n) => n !== label)
               : [...x.selected, label],
@@ -72,7 +76,7 @@ export function TimelinePane({
               {p.message}
             </p>
           ))}
-          <LabelSummary data={data} config={config} onToggle={toggleRow} />
+          <LabelSummary data={data} config={config} onToggle={toggleRow} onHover={c.onHoverLabel} />
         </>
       )}
     </section>
@@ -108,15 +112,23 @@ function LabelSummary({
   data,
   config,
   onToggle,
+  onHover,
 }: {
   data: TimeLabelsData;
   config: TimeLabelConfig;
   /** Ticks or unticks a row: a label, or null for the total. */
   onToggle: (label: number | null) => void;
+  /** A row hovered (its label, or null for the total or none). */
+  onHover: (label: number | null) => void;
 }) {
-  const selected = new Set(config.selected);
+  // Leaving with a row hovered (the pane closed, say) leaves none hovered.
+  useEffect(() => () => onHover(null), [onHover]);
+  // Ticks as plots use them: for the labels the method gives (see `timeSelections`).
+  const shown = timeSelections(config);
+  const selected = new Set(shown.filter((l): l is number => l !== null));
   // The last ticked row stays ticked: plots always show something.
-  const ticked = (config.total ? 1 : 0) + labelValues(data).filter((v) => selected.has(v)).length;
+  const ticked =
+    (shown.includes(null) ? 1 : 0) + labelValues(data).filter((v) => selected.has(v)).length;
   const values = labelValues(data);
   const canvas = useRef<HTMLCanvasElement>(null);
   // The pane is resizable: the strip is drawn again at each width.
@@ -142,7 +154,7 @@ function LabelSummary({
     g.clearRect(0, 0, el.width, el.height);
     const scale = el.width / Math.max(data.duration, 1e-9);
     // With labels ticked, the rest fade.
-    const chosen = new Set(config.selected);
+    const chosen = selected;
     for (let i = 0; i < data.labels.length; i++) {
       const label = data.labels[i];
       const [a, b] = [data.segments[i * 2], data.segments[i * 2 + 1]];
@@ -152,7 +164,8 @@ function LabelSummary({
       // At least a pixel, so brief segments still show.
       g.fillRect(a * scale, 0, Math.max(1, (b - a) * scale), el.height);
     }
-  }, [data, config.selected, width]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selected is made from the config
+  }, [data, config, width]);
   const total = data.labels.length;
   const row = (
     key: string,
@@ -161,9 +174,15 @@ function LabelSummary({
     segments: number,
     name: string,
   ) => {
-    const on = label === null ? config.total : selected.has(label);
+    const on = label === null ? shown.includes(null) : selected.has(label);
     return (
-      <tr key={key} className={`${on ? "chosen" : ""} ${label === null ? "total" : ""}`}>
+      <tr
+        key={key}
+        className={`${on ? "chosen" : ""} ${label === null ? "total" : ""}`}
+        // A label's row shows its times on the path above; the total's, the whole path.
+        onPointerEnter={() => onHover(label)}
+        onPointerLeave={() => onHover(null)}
+      >
         <td>
           <label>
             <input
@@ -174,10 +193,8 @@ function LabelSummary({
               // The last ticked row stays ticked, looking like the rest (not disabled).
               onChange={() => !(on && ticked === 1) && onToggle(label)}
             />
-            {label !== null && (
-              <span className="time-swatch" style={{ background: labelColor(label) }} />
-            )}
-            {name}
+            {/* A label as plots mark it: the timeline icon and the label, in its colour. */}
+            {label !== null ? <LabelMark label={label} /> : name}
           </label>
         </td>
         <td>{duration(seconds)}</td>

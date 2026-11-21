@@ -6,6 +6,7 @@ import type { PanelName } from "./panels";
 import { experimentTiming } from "./position-info";
 import { ToggleButton } from "./ToggleButton";
 import { FileMenu } from "./FileMenu";
+import { TimelineIcon } from "./TimelineIcon";
 
 /** A file with paired key/value lines, for recording header metadata. */
 function HeadersIcon() {
@@ -27,37 +28,12 @@ function HeadersIcon() {
   );
 }
 
-/** A timeline: a bar in labelled segments (one filled, as a label is picked out) above a
- * ticked time axis. */
-function TimelineIcon() {
-  return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="2" y="5" width="20" height="8" rx="1.5" />
-      <path d="M8.5 5v8M15.5 5v8" />
-      <rect x="8.5" y="5" width="7" height="8" fill="currentColor" stroke="none" />
-      <path d="M2 19h20M2 17v4M12 17v4M22 17v4" />
-    </svg>
-  );
-}
-
 /** File menu, undo/redo, panels, plot toggles and the recording status line. */
 export function Toolbar(p: {
   busy: boolean;
   data: ViewData | null;
   /** Whether a header of the active files has a value that isn't the file's. */
   headersChanged: boolean;
-  /** Whether plots show time labels, not just the whole trial. */
-  timeLabelsOn: boolean;
   /** Whether the timeline pane is shown, and its toggle. */
   timeline: boolean;
   onTimeline: () => void;
@@ -126,14 +102,13 @@ export function Toolbar(p: {
         <SettingsIcon size={17} />
       </button>
       <ToggleButton
-        title={`Timeline labels${p.timeLabelsOn ? ": plots show selected labels" : ""}`}
-        aria-label={`Timeline labels${p.timeLabelsOn ? " (on)" : ""}`}
-        className="headers-button timeline-toggle"
+        title="Timeline labels"
+        aria-label="Timeline labels"
+        className="timeline-toggle"
         pressed={p.timeline}
         onClick={p.onTimeline}
       >
         <TimelineIcon />
-        {p.timeLabelsOn && <span className="headers-changed" />}
       </ToggleButton>
       <span className="tool-separator" />
       {(["waveforms", "spatial", "sc", "direction", "speed", "ac", "phase"] as PlotMode[]).map(

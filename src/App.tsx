@@ -51,11 +51,12 @@ import { useFeatureSpace } from "./app/features";
 import { useSplit } from "./app/split";
 import { CopyWindow } from "./shell/CopyWindow";
 import { TimelinePane } from "./shell/TimelinePane";
-import { useTimeLabels } from "./app/time-labels";
+import { useLabelPath, useTimeLabels } from "./app/time-labels";
 import {
   defaultTimeLabels,
-  labelsInUse,
   logFiles,
+  timeLabelSource,
+  timeSelections,
   validTimeLabels,
   type TimeLabelConfig,
 } from "./app/time-label-config";
@@ -486,6 +487,17 @@ export default function App() {
     recording: data?.key,
     config: timeLabelConfig,
     show: timeline || panels.includes("labels"),
+    onError: setError,
+  });
+  // A timeline label's row hovered in the pane: the position pane shows its times' path.
+  const [hoverLabel, setHoverLabel] = useState<number | null>(null);
+  const labelPath = useLabelPath({
+    trial,
+    headerEdits,
+    settings,
+    recording: data?.key,
+    config: timeLabelConfig,
+    label: timeline ? hoverLabel : null,
     onError: setError,
   });
   const chooseEgf = (t: Trial, n: number) => {
@@ -945,6 +957,7 @@ export default function App() {
       trialName: trial?.name,
       logNames: logFiles(trial, timeLabelConfig).map((f) => f.name),
       notify: showTimedNotice,
+      onHoverLabel: setHoverLabel,
     },
   };
   // Files dragged in from outside (not a cut dragged out of the organiser).
@@ -992,7 +1005,6 @@ export default function App() {
             <Toolbar
               {...{ data, ready, busy, progress, message, shown }}
               headersChanged={headersChanged(headerFiles, headerEdits, estimatedHeaders)}
-              timeLabelsOn={labelsInUse(timeLabelConfig)}
               timeline={timeline}
               // On, the pane shows and its window opens; off, both go.
               onTimeline={() => {
@@ -1067,6 +1079,7 @@ export default function App() {
                 copyLayers={
                   copyMode.cells !== null && copyMode.kind === "path" ? copyMode.pathLayers : null
                 }
+                labelPath={labelPath}
               />
               <Divider part="position" onDrag={panes.dragDivider} />
               {timeline && (
@@ -1154,6 +1167,15 @@ export default function App() {
                   copyingPath={copyMode.kind === "path"}
                   {...{ data, settings, trial, shown, splitPoint, swap, grabMode, headerEdits }}
                   egfNum={egfNum}
+                  // While the timeline is on, a rate map for each row ticked in its pane.
+                  timeLabels={
+                    timeline
+                      ? {
+                          ...timeLabelSource(trial, timeLabelConfig),
+                          selections: timeSelections(timeLabelConfig),
+                        }
+                      : undefined
+                  }
                   selected={cell}
                   feedback={tileFeedback}
                   busy={!ready}

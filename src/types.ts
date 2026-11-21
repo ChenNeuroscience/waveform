@@ -189,8 +189,17 @@ export const ANALYSIS_PARTS = [
   "spatialDrift",
   "spikeDrift",
   "phase",
+  "labelSpatial",
 ] as const;
 export type AnalysisPart = (typeof ANALYSIS_PARTS)[number];
+/** A cell's rate map over one time label's times. */
+export interface LabelRatemap {
+  label: number;
+  spatial: Float32Array;
+  width: number;
+  height: number;
+  peak: number;
+}
 /** A cell's analysis. Parts that weren't asked for are empty, with no key. */
 export interface AnalysisData {
   /** The membership key the worker analysed (see membershipKey). */
@@ -226,6 +235,8 @@ export interface AnalysisData {
    * from its peaks; and their circular mean (radians, 0 to 2π). Empty without an `.egf` file. */
   phase?: Float32Array;
   phaseMean?: number;
+  /** labelSpatial: a rate map for each time label asked for, in order. */
+  labelSpatial?: LabelRatemap[];
 }
 /** The fields each part fills. */
 const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
@@ -240,6 +251,7 @@ const PART_FIELDS: Record<AnalysisPart, (keyof AnalysisData)[]> = {
   spatialDrift: ["spatialDrift"],
   spikeDrift: ["spikeDrift"],
   phase: ["phase", "phaseMean"],
+  labelSpatial: ["labelSpatial"],
 };
 /**
  * `next`, keeping `held`'s values for every part whose key is unchanged, so plots of those

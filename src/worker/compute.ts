@@ -228,6 +228,8 @@ export interface ComputeInputs extends PositionRequest, Omit<LfpRequest, "settin
   logFile?: string;
   timeRules?: string;
   timeLabel?: string;
+  /** For a cell's rate maps by label (`labelSpatial`): the labels, one map each. */
+  timeLabelValues?: number[];
   /** For reading files the graph needs: whether the request is still wanted, and progress. */
   current?: () => boolean;
   progress?: (fraction: number, message: string) => void;
@@ -290,6 +292,8 @@ export const HANDLERS = [
   "spikePhase",
   "timeLabels",
   "timeMask",
+  "labelRatemap",
+  "labelPath",
 ] as const;
 export type HandlerName = (typeof HANDLERS)[number];
 type Buffer = Float32Array | Float64Array | Uint8Array | Uint16Array | Uint32Array;
@@ -512,6 +516,7 @@ const PART_HANDLERS: Record<AnalysisPart, HandlerName> = {
   spatialDrift: "spatialDrift",
   spikeDrift: "spikeDrift",
   phase: "spikePhase",
+  labelSpatial: "labelRatemap",
 };
 /** Parts that need a position; without one they're left empty. */
 const POSITIONAL = new Set<AnalysisPart>([
@@ -523,6 +528,7 @@ const POSITIONAL = new Set<AnalysisPart>([
   "spikes",
   "spatialDrift",
   "spikeDrift",
+  "labelSpatial",
 ]);
 /**
  * The `parts` of a cell's analysis, from the compute graph.
@@ -558,6 +564,20 @@ export async function analysis(
   }
   for (const part of new Set(parts)) {
     if ((POSITIONAL.has(part) && !hasPos) || (part === "phase" && !inputs.egf)) {
+      continue;
+    }
+    if (part === "labelSpatial") {
+      // A rate map per label, each over that label's times; one key for them all.
+      const maps = [];
+      const keys = [];
+      for (const label of inputs.timeLabelValues ?? []) {
+        const a = await ask(w, { ...inputs, timeLabel: String(label) }, "labelRatemap", cell);
+        const [width, height, peak] = a.buffers.shape;
+        maps.push({ label, spatial: a.buffers.values as Float32Array, width, height, peak });
+        keys.push(a.key);
+      }
+      result.labelSpatial = maps;
+      result.keys.labelSpatial = keys.join("|");
       continue;
     }
     const answer = await ask(w, inputs, PART_HANDLERS[part], cell);

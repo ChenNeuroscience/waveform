@@ -181,6 +181,14 @@ pub(crate) enum Node {
     TimeLabels,
     /// The times one label covers.
     TimeMask,
+    /// A cell's spike samples in one label's times.
+    LabelSpikeSamples,
+    /// Seconds in each spatial bin in one label's times.
+    LabelOccupancy,
+    /// A cell's rate map in one label's times.
+    LabelRatemap,
+    /// The trajectory in one label's times, broken where it leaves them.
+    LabelPath,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Part {
@@ -236,6 +244,11 @@ fn children(node: Node) -> &'static [Part] {
         // The recording gives the trial's duration.
         TimeLabels => &[L(Recording), N(LogChanges)],
         TimeMask => &[N(TimeLabels), L(TimeLabel)],
+        // Made from the plain nodes and a mask, so values of the whole trial keep their keys.
+        LabelSpikeSamples => &[N(SpikeSamples), N(TimeMask)],
+        LabelOccupancy => &[N(Position), N(SettingsRatemap), N(TimeMask)],
+        LabelRatemap => &[N(LabelSpikeSamples), N(LabelOccupancy)],
+        LabelPath => &[N(Position), N(TimeMask)],
     }
 }
 fn beneath(part: Part, into: &mut Vec<Part>) {

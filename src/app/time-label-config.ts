@@ -173,12 +173,31 @@ export function timeMaskSource(trial: Trial | undefined, c: TimeLabelConfig, lab
     ? { log: undefined, logFile: undefined, timeRules: "", timeLabel: "" }
     : { ...timeLabelSource(trial, c), timeLabel: String(label) };
 }
-/** What plots show, in order: the whole trial (null) if ticked, then each ticked label. */
+/** The labels the configured method gives (whether or not the trial has them). */
+export function configuredLabels(c: TimeLabelConfig): number[] {
+  const labels =
+    c.method === "split"
+      ? c.sections
+      : c.method === "times"
+        ? c.times.map((t) => t.label)
+        : [c.initial, ...c.rules.map((r) => r.label)];
+  return [...new Set(labels)];
+}
+/**
+ * What plots show, in order: the whole trial (null) if ticked, then each ticked label the
+ * method gives. Ticks for labels it doesn't give (left from another method, kept for going
+ * back to it) are passed over; with nothing ticked left, the whole trial stands in.
+ */
 export function timeSelections(c: TimeLabelConfig): (number | null)[] {
-  return [...(c.total ? [null] : []), ...[...new Set(c.selected)].sort((a, b) => a - b)];
+  const given = new Set(configuredLabels(c));
+  const labels = [...new Set(c.selected)].filter((l) => given.has(l)).sort((a, b) => a - b);
+  return [...(c.total || !labels.length ? [null] : []), ...labels];
 }
 /** Whether plots show anything but the whole trial. */
-export const labelsInUse = (c: TimeLabelConfig) => !c.total || c.selected.length > 0;
+export const labelsInUse = (c: TimeLabelConfig) => {
+  const shown = timeSelections(c);
+  return shown.length !== 1 || shown[0] !== null;
+};
 
 /** `raw` as a configuration, or an error naming what isn't valid. Missing fields take their
  * defaults. */

@@ -10,6 +10,7 @@ import {
   logFile,
   logFiles,
   resizeSections,
+  configuredLabels,
   labelsInUse,
   timeLabelSource,
   timeMaskSource,
@@ -95,6 +96,16 @@ describe("time label configuration", () => {
     expect(timeSelections({ ...logRules, selected: [2, 0, 2] })).toEqual([null, 0, 2]);
     expect(timeSelections({ ...logRules, total: false, selected: [1] })).toEqual([1]);
     expect(labelsInUse(defaultTimeLabels)).toBe(false);
+    // Ticks for labels the method doesn't give (left from another) are passed over, kept for
+    // going back; with nothing ticked left, the whole trial stands in.
+    const fromSplit = { ...defaultTimeLabels, sections: [0, 1, 2, 3], selected: [2, 3] };
+    expect(timeSelections(fromSplit)).toEqual([null, 2, 3]);
+    expect(timeSelections({ ...fromSplit, method: "times" })).toEqual([null]);
+    expect(timeSelections({ ...fromSplit, method: "times", total: false })).toEqual([null]);
+    expect(labelsInUse({ ...fromSplit, method: "times", total: false })).toBe(false);
+    expect(timeSelections({ ...fromSplit, method: "log", total: false })).toEqual([null]);
+    expect(timeSelections({ ...fromSplit, method: "log", selected: [1, 2] })).toEqual([null, 1]);
+    expect(configuredLabels(logRules)).toEqual([0, 1, 2]);
     expect(labelsInUse({ ...defaultTimeLabels, selected: [1] })).toBe(true);
     expect(() => validTimeLabels({ total: false, selected: [] })).toThrow("at least one");
   });

@@ -228,6 +228,7 @@ export function useCopies({
                       name: plot.name,
                       width: plot.canvas.width / ratio,
                       height: plot.canvas.height / ratio,
+                      label: plot.label,
                     },
                   ],
             );

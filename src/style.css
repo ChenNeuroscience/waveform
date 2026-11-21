@@ -2708,7 +2708,9 @@ kbd {
 .time-labels input.time-glob {
   font-family: ui-monospace, Menlo, monospace;
 }
+/* Right, under the box, as the rules' statuses are. */
 .time-file-status {
+  align-self: flex-end;
   display: flex;
   align-items: center;
   gap: 3px;
@@ -3045,4 +3047,43 @@ kbd {
 }
 .timeline-pane > p {
   margin: 4px 6px;
+}
+/* A plot of one time label's times: the timeline icon and the label, in its colour. */
+.label-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+  padding: 0 3px 0 2px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px #fff8;
+  color: #1f2328;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+.tile-label-spatial {
+  position: relative;
+}
+/* With label maps shown, every rate map leaves a strip along its top for their marks, so
+ * the marks are clear of the maps (the total's strip is empty, so the maps match). */
+.tile-spatial.with-marks {
+  padding-top: 17px;
+}
+.label-mark-row {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.position-path {
+  position: relative;
+}
+.position-label-mark {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
 }

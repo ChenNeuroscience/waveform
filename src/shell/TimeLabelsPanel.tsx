@@ -41,6 +41,8 @@ export interface TimeLabelsContext {
   trialName?: string;
   logNames: string[];
   notify: (message: string, isError?: boolean) => void;
+  /** A label's row hovered in the timeline pane (null when none is), to show its times. */
+  onHoverLabel: (label: number | null) => void;
 }
 
 const REGEX_REFERENCE = "https://docs.rs/regex-lite/latest/regex_lite/#syntax";

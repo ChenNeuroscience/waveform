@@ -6,8 +6,14 @@
 import { useEffect, useState } from "react";
 import { request } from "../worker/client";
 import { Superseded } from "../worker/protocol";
-import type { TimeLabelsData, Trial } from "../types";
-import { timeLabelSource, type TimeLabelConfig } from "./time-label-config";
+import {
+  positionSource,
+  type HeaderEdits,
+  type Settings,
+  type TimeLabelsData,
+  type Trial,
+} from "../types";
+import { timeLabelSource, timeMaskSource, type TimeLabelConfig } from "./time-label-config";
 
 /** The trial's time labels for the loaded recording (its duration), while `show` is on. */
 export function useTimeLabels({
@@ -51,4 +57,65 @@ export function useTimeLabels({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onError is a fresh callback each render
   }, [show, recording, file, timeRules]);
   return show && recording ? held : null;
+}
+
+/** While `label` is set (a timeline row hovered), the trajectory in that label's times,
+ * broken where it leaves them, for the position pane. */
+export function useLabelPath({
+  trial,
+  headerEdits,
+  settings,
+  recording,
+  config,
+  label,
+  onError,
+}: {
+  trial: Trial | undefined;
+  headerEdits: HeaderEdits;
+  settings: Settings;
+  /** The loaded recording's key: its duration is the trial's. */
+  recording: string | undefined;
+  config: TimeLabelConfig;
+  label: number | null;
+  onError: (message: string) => void;
+}) {
+  const [held, setHeld] = useState<{ label: number; path: Float32Array } | null>(null);
+  const position = positionSource(trial, headerEdits);
+  const { timeRules, logFile } = timeLabelSource(trial, config);
+  const { leds, maxSpeed, posSmooth } = settings;
+  useEffect(() => {
+    let live = true;
+    if (label === null || !recording || !position.pos) {
+      return;
+    }
+    request("label_path", {
+      ...position,
+      ...timeMaskSource(trial, config, label),
+      settings,
+    })
+      .then((path) => live && setHeld({ label, path }))
+      .catch((e) => {
+        if (live && !(e instanceof Superseded)) {
+          onError(e.message);
+        }
+      });
+    return () => {
+      live = false;
+    };
+    // The sources are fresh objects each render; their parts are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onError is a fresh callback each render
+  }, [
+    label,
+    recording,
+    position.posFile,
+    position.ppm,
+    position.sync,
+    timeRules,
+    logFile,
+    leds,
+    maxSpeed,
+    posSmooth,
+  ]);
+  // Only the hovered label's path: none while another's is on its way.
+  return label !== null && held?.label === label ? held : null;
 }
