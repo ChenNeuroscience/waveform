@@ -7,6 +7,7 @@ import type {
   Header,
   LfpDistribution,
   Settings,
+  TimeLabelsData,
   Trajectory,
   ViewData,
   ViewMessage,
@@ -144,6 +145,8 @@ export interface Requests {
   wave_batch: [{ asset: string; first: number; count: number }, { waves: Uint8Array }];
   trajectory: [PositionRequest, Trajectory | null];
   lfp: [LfpRequest, LfpDistribution | null];
+  /** The loaded recording's trial's time labels (see `timeLabelSource`). */
+  time_labels: [{ log?: File; logFile?: string; timeRules: string }, TimeLabelsData];
   analysis: [
     Partial<Session> &
       PositionRequest &

@@ -1,4 +1,4 @@
-/** Tool-window panels: settings, help/shortcuts and file headers. */
+/** Tool-window panels: settings, help/shortcuts, file headers and timeline labels. */
 import { useId, useState, type ReactNode } from "react";
 import {
   ChevronDown,
@@ -23,8 +23,9 @@ import {
   stepHeader,
   validHeader,
 } from "./header-edits";
+import { TimeLabelsPanel, type TimeLabelsContext } from "./TimeLabelsPanel";
 
-export type PanelName = "settings" | "history" | "headers" | "help";
+export type PanelName = "settings" | "history" | "headers" | "help" | "labels";
 /** Everything the tool panels read or act on, assembled once by App. */
 export interface PanelContext {
   settings: Settings;
@@ -42,6 +43,7 @@ export interface PanelContext {
   /** Values worked out because a file doesn't give them, by section. */
   estimatedHeaders: Record<string, Record<string, string>>;
   setHeaderEdits: (update: (edits: HeaderEdits) => HeaderEdits) => void;
+  timeLabels: TimeLabelsContext;
 }
 /** Each tool panel's window title, default placement and content. */
 export const TOOL_PANELS: Record<
@@ -82,6 +84,13 @@ export const TOOL_PANELS: Record<
     y: 65,
     height: 460,
     render: (c) => <HeadersPanel c={c} />,
+  },
+  labels: {
+    title: "Timeline labels",
+    x: 410,
+    y: 105,
+    height: 600,
+    render: (c) => <TimeLabelsPanel c={c.timeLabels} />,
   },
   help: {
     title: "Keyboard shortcuts",

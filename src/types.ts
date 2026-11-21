@@ -32,7 +32,10 @@ export interface Trial {
   egfs?: EgfFile[];
   /** `.egf` files beyond MAX_EGFS, by name, which aren't used. */
   ignoredEgfs?: string[];
+  /** Files the organiser doesn't use itself, by name (with why, if there's a reason). */
   otherFiles?: string[];
+  /** Those files named for the trial, such as a log file time labels can read. */
+  auxFiles?: File[];
 }
 export const RENDERING_MODES = ["fixed", "density", "drift"] as const;
 export type RenderingMode = (typeof RENDERING_MODES)[number];
@@ -312,3 +315,28 @@ export const badgeStyle = (cell: number) => ({
   background: color(cell),
   color: groupTextColor(cell),
 });
+/** A trial's time labels (see core/src/time_labels.rs). */
+export interface TimeLabelsData {
+  /** Its key in the worker's compute graph: equal keys mean identical values. */
+  key: string;
+  /** The trial's duration (s). */
+  duration: number;
+  /** Contiguous segments as (start, end) pairs (s), and each one's label (into `names`). */
+  segments: Float64Array;
+  labels: Uint16Array;
+  /** Label names; each one's total seconds and number of segments. */
+  names: string[];
+  seconds: Float64Array;
+  counts: Uint32Array;
+  /** Log lines each rule matched (only the first rule that matches a line counts it). */
+  matched: Uint32Array;
+  /** Why the rules can't be used ("" when they can); with no segments. */
+  error: string;
+}
+/** The times one label covers (or the whole trial), for plots made from those times. */
+export interface TimeMask {
+  key: string;
+  /** Merged (start, end) pairs (s), and their total. */
+  intervals: Float64Array;
+  seconds: number;
+}

@@ -15,6 +15,7 @@ use crate::pca::PcaBuilder;
 use crate::position::{direction_bins, refractory, speed_bins, temporal_ac, Position, Samples};
 use crate::processing::{apply_patch, CellWaves as Waves, CutParser, Scan};
 use crate::spatial_ac::autocorrelation;
+use crate::time_labels::{self, Method, Rules};
 use crate::waves::WaveOrder as Order;
 use crate::Population as Spikes;
 use rustfft::num_complex::Complex;
@@ -34,6 +35,9 @@ const LABELS: usize = 8;
 /// Continuous signals: a few files, and a few band-passes of each.
 const SIGNALS: usize = 4;
 const PER_SIGNAL: usize = 8;
+/// Logs are small, and rules are edited as they're typed: keep recent variants.
+const LOGS: usize = 4;
+const PER_LOG: usize = 16;
 
 /// A scan to stream the file through, and where to keep its sample column and cell waveforms.
 type PendingScan = (Scan, Option<Key>, Option<Key>);
@@ -64,6 +68,8 @@ pub(crate) static ROUTES: &[Route] = &[
     ("spikeDrift", answer::<SpikeDrift>),
     ("lfpFrequency", answer::<LfpFrequency>),
     ("spikePhase", answer::<SpikePhase>),
+    ("timeLabels", answer::<TimeLabels>),
+    ("timeMask", answer::<TimeMask>),
 ];
 
 /// A recording's spike times and amplitudes. Only JavaScript can read its file
@@ -859,6 +865,208 @@ impl Answer for Phases {
     }
 }
 
+/// A log file's bytes. Only JavaScript can read it (`compute_supply_log`).
+pub(crate) struct RawLog;
+impl Handler for RawLog {
+    type Value = Vec<u8>;
+    const NODE: Node = Node::LogRaw;
+    const LIMIT: usize = LOGS;
+    fn compute(_: &mut Request) -> Result<Vec<u8>, Missing> {
+        Err(Missing::Log)
+    }
+    fn bytes(log: &Vec<u8>) -> usize {
+        log.len()
+    }
+}
+/// Takes a log file's `n` bytes at `p` for the staged inputs.
+#[no_mangle]
+pub unsafe extern "C" fn compute_supply_log(p: *const u8, n: usize) {
+    supply::<RawLog>(if n == 0 {
+        vec![]
+    } else {
+        slice::from_raw_parts(p, n).to_vec()
+    });
+}
+
+/// Where the log's rules change the label, and how many lines each rule matched; or why the
+/// rules can't be used.
+pub(crate) struct LogChanges;
+pub(crate) struct Changes {
+    names: Vec<String>,
+    changes: Result<time_labels::Changes, String>,
+}
+impl Handler for LogChanges {
+    type Value = Changes;
+    const NODE: Node = Node::LogChanges;
+    const LIMIT: usize = PER_LOG;
+    fn compute(cx: &mut Request) -> Result<Changes, Missing> {
+        let rules = match Rules::parse(&cx.inputs().time_rules) {
+            Ok(rules) => rules,
+            Err(e) => {
+                return Ok(Changes {
+                    names: vec![],
+                    changes: Err(e),
+                })
+            }
+        };
+        let Method::Log(list) = &rules.method else {
+            return Ok(Changes {
+                names: rules.names,
+                changes: Err("These rules don't read a log.".into()),
+            });
+        };
+        let log = cx.call::<RawLog>()?;
+        Ok(Changes {
+            changes: Ok(time_labels::log_changes(list, &log)),
+            names: rules.names,
+        })
+    }
+}
+
+/// The trial's labelled segments (see `time_labels::segments`), each label's name, total
+/// seconds and segment count, how many lines each log rule matched, and any error (with no
+/// segments).
+pub(crate) struct TimeLabels;
+pub(crate) struct Labelled {
+    segments: Vec<(f64, f64, u16)>,
+    duration: f64,
+    names: Vec<String>,
+    matched: Vec<u32>,
+    error: String,
+    // As answered.
+    flat: Vec<f64>,
+    labels: Vec<u16>,
+    seconds: Vec<f64>,
+    counts: Vec<u32>,
+    text: Vec<u8>,
+}
+impl Labelled {
+    fn new(
+        segments: Vec<(f64, f64, u16)>,
+        duration: f64,
+        names: Vec<String>,
+        matched: Vec<u32>,
+        error: String,
+    ) -> Self {
+        let (seconds, counts) = time_labels::label_stats(&segments, names.len());
+        Self {
+            flat: segments.iter().flat_map(|s| [s.0, s.1]).collect(),
+            labels: segments.iter().map(|s| s.2).collect(),
+            text: names.join("\n").into_bytes(),
+            seconds,
+            counts,
+            segments,
+            duration,
+            names,
+            matched,
+            error,
+        }
+    }
+}
+impl Handler for TimeLabels {
+    type Value = Labelled;
+    const NODE: Node = Node::TimeLabels;
+    const LIMIT: usize = PER_LOG;
+    fn compute(cx: &mut Request) -> Result<Labelled, Missing> {
+        // The header's duration, else (an interrupted recording) its last spike.
+        let duration = match cx.duration() {
+            d if d > 0. => d,
+            _ => last_spike(cx)? as f64 / cx.tb(),
+        };
+        let failed = |names, matched, error: String| {
+            Ok(Labelled::new(vec![], duration, names, matched, error))
+        };
+        let rules = match Rules::parse(&cx.inputs().time_rules) {
+            Ok(rules) => rules,
+            Err(e) => return failed(vec![], vec![], e),
+        };
+        let segments = match rules.method {
+            Method::Off => vec![(0., duration, 0)]
+                .into_iter()
+                .filter(|s| s.1 > 0.)
+                .collect(),
+            Method::Split(labels) => time_labels::split(&labels, duration),
+            Method::Times(times) => time_labels::segments(times[0].1, &times, duration),
+            Method::Log(_) if cx.inputs().log_file.is_empty() => {
+                return failed(rules.names, vec![], "This trial has no log file.".into())
+            }
+            Method::Log(_) => {
+                let changes = cx.call::<LogChanges>()?;
+                return match &changes.changes {
+                    Ok(c) => Ok(Labelled::new(
+                        time_labels::segments(0, &c.points, duration),
+                        duration,
+                        changes.names.clone(),
+                        c.matched.clone(),
+                        String::new(),
+                    )),
+                    Err(e) => failed(changes.names.clone(), vec![], e.clone()),
+                };
+            }
+        };
+        Ok(Labelled::new(
+            segments,
+            duration,
+            rules.names,
+            vec![],
+            String::new(),
+        ))
+    }
+}
+impl Answer for Labelled {
+    fn buffers(&self) -> Vec<(&'static str, Buffer)> {
+        vec![
+            ("segments", Buffer::F64(self.flat.clone())),
+            ("labels", u16s(&self.labels)),
+            ("names", u8s(&self.text)),
+            ("seconds", Buffer::F64(self.seconds.clone())),
+            ("counts", u32s(&self.counts)),
+            ("matched", u32s(&self.matched)),
+            ("error", u8s(self.error.as_bytes())),
+            ("stats", Buffer::F64(vec![self.duration])),
+        ]
+    }
+}
+
+/// The times one label covers, as merged (start, end) intervals in seconds; and their total
+/// and the trial's duration. With no label, the whole trial (the "total" plots compare labels
+/// with); a label the trial doesn't have covers nothing.
+pub(crate) struct TimeMask;
+pub(crate) struct Mask {
+    intervals: Vec<f64>,
+    stats: [f64; 2],
+}
+impl Handler for TimeMask {
+    type Value = Mask;
+    const NODE: Node = Node::TimeMask;
+    const LIMIT: usize = PER_LOG;
+    fn compute(cx: &mut Request) -> Result<Mask, Missing> {
+        let labelled = cx.call::<TimeLabels>()?;
+        let label = cx.inputs().time_label.clone();
+        let intervals = if label.is_empty() {
+            vec![[0., labelled.duration]]
+        } else {
+            let wanted = labelled.names.iter().position(|n| **n == *label);
+            time_labels::mask(&labelled.segments, |l| Some(l as usize) == wanted)
+        };
+        Ok(Mask {
+            stats: [
+                intervals.iter().map(|i| i[1] - i[0]).sum(),
+                labelled.duration,
+            ],
+            intervals: intervals.into_iter().flatten().collect(),
+        })
+    }
+}
+impl Answer for Mask {
+    fn buffers(&self) -> Vec<(&'static str, Buffer)> {
+        vec![
+            ("intervals", Buffer::F64(self.intervals.clone())),
+            ("stats", Buffer::F64(self.stats.to_vec())),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1139,5 +1347,89 @@ mod tests {
             Missing::Scan as i32
         );
         assert_eq!(crate::commands::command_split(1, 0, 99, 60), -1);
+    }
+
+    #[test]
+    fn time_labels_come_from_the_log_and_each_mask_from_one_label() {
+        let mut i = Inputs {
+            recording: "t1".into(),
+            log_file: "trial|a.ttl".into(),
+            time_rules: "log\toff\n1\ton\t^ttl_4 (\\S+) 1$\n1\toff\t^ttl_4 (\\S+) 0$".into(),
+            tb: 1000.,
+            duration: 10.,
+            ..Default::default()
+        };
+        let mut cx = Request::new(i.clone());
+        assert_eq!(cx.call::<TimeLabels>().err(), Some(Missing::Log));
+        supply::<RawLog>(
+            &i,
+            b"data_startttl_4 2 1\nttl_4 4 0\nttl_4 6 1\ndata_end".to_vec(),
+        );
+        let labelled = cx.call::<TimeLabels>().unwrap();
+        assert_eq!(labelled.names, ["off", "on"]);
+        assert_eq!(labelled.matched, [2, 1]);
+        assert_eq!(labelled.seconds, [4., 6.]);
+        assert_eq!(labelled.counts, [2, 2]);
+        let mask = |i: &Inputs| Request::new(i.clone()).call::<TimeMask>().unwrap();
+        // No label: the whole trial.
+        assert_eq!(mask(&i).intervals, [0., 10.]);
+        i.time_label = "on".into();
+        assert_eq!(mask(&i).intervals, [2., 4., 6., 10.]);
+        assert_eq!(mask(&i).stats, [6., 10.]);
+        let missing = Inputs {
+            time_label: "nope".into(),
+            ..i.clone()
+        };
+        assert!(mask(&missing).intervals.is_empty());
+        // The label is the mask's alone; the rules and log are both's.
+        let key = |i: &Inputs, node| match node {
+            0 => Request::new(i.clone()).key::<TimeLabels>().unwrap(),
+            _ => Request::new(i.clone()).key::<TimeMask>().unwrap(),
+        };
+        let other = Inputs {
+            time_label: "off".into(),
+            ..i.clone()
+        };
+        assert_eq!(key(&i, 0), key(&other, 0));
+        assert_ne!(key(&i, 1), key(&other, 1));
+        let renamed = Inputs {
+            log_file: "trial|b.ttl".into(),
+            ..i.clone()
+        };
+        assert_ne!(key(&i, 0), key(&renamed, 0));
+        // Without a log, log rules say so; split and no rules need none.
+        let none = Inputs {
+            log_file: "".into(),
+            ..i.clone()
+        };
+        let labelled = Request::new(none.clone()).call::<TimeLabels>().unwrap();
+        assert!(labelled.error.contains("no log file"));
+        assert!(labelled.segments.is_empty());
+        let split = Inputs {
+            time_rules: "split\t4\n1\n3\n1\n4".into(),
+            time_label: "1".into(),
+            ..none.clone()
+        };
+        assert_eq!(mask(&split).intervals, [0., 2.5, 5., 7.5]);
+        let times = Inputs {
+            time_rules: "times\n0\ta\n3\tb\n12\ta".into(),
+            time_label: "b".into(),
+            ..split.clone()
+        };
+        // A time after the end is outside the trial.
+        assert_eq!(mask(&times).intervals, [3., 10.]);
+        let off = Inputs {
+            time_rules: "".into(),
+            time_label: "".into(),
+            ..none
+        };
+        assert_eq!(mask(&off).intervals, [0., 10.]);
+        // Bad rules are an answer, not a failure.
+        let bad = Inputs {
+            time_rules: "log\tx\n1\ty\t(".into(),
+            ..i
+        };
+        let labelled = Request::new(bad).call::<TimeLabels>().unwrap();
+        assert!(labelled.error.starts_with("Rule 1:"));
     }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toolbar } from "./shell/Toolbar";
 import { RenderingToggles } from "./shell/RenderingToggles";
 import { FilesPane } from "./shell/FilesPane";
@@ -50,6 +50,14 @@ import { useCopies } from "./app/copies";
 import { useFeatureSpace } from "./app/features";
 import { useSplit } from "./app/split";
 import { CopyWindow } from "./shell/CopyWindow";
+import { useTimeLabels } from "./app/time-labels";
+import {
+  defaultTimeLabels,
+  labelsInUse,
+  logFiles,
+  validTimeLabels,
+  type TimeLabelConfig,
+} from "./app/time-label-config";
 import { GrabOutline } from "./shell/GrabOutline";
 import { downloadBlob, organiseFiles, parseHeader } from "./files";
 function readSettings(): Settings {
@@ -455,6 +463,26 @@ export default function App() {
     egfNum,
     settings,
     show: shown.phase,
+    onError: setError,
+  });
+  // Time labels: kept as a preference (validated, as older or hand-edited values may not be),
+  // and asked for while their window is open.
+  const [timeLabelPreference, setTimeLabelPreference] = usePreference<TimeLabelConfig>(
+    "time-labels",
+    defaultTimeLabels,
+  );
+  const timeLabelConfig = useMemo(() => {
+    try {
+      return validTimeLabels(timeLabelPreference);
+    } catch {
+      return defaultTimeLabels;
+    }
+  }, [timeLabelPreference]);
+  const timeLabels = useTimeLabels({
+    trial,
+    recording: data?.key,
+    config: timeLabelConfig,
+    show: panels.includes("labels"),
     onError: setError,
   });
   const chooseEgf = (t: Trial, n: number) => {
@@ -907,6 +935,15 @@ export default function App() {
     headerEdits,
     estimatedHeaders,
     setHeaderEdits,
+    timeLabels: {
+      config: timeLabelConfig,
+      setConfig: (change) => setTimeLabelPreference(change(timeLabelConfig)),
+      data: timeLabels,
+      trialName: trial?.name,
+      logName: logFiles(trial, timeLabelConfig)[0]?.name,
+      logMatches: logFiles(trial, timeLabelConfig).length,
+      notify: showTimedNotice,
+    },
   };
   // Files dragged in from outside (not a cut dragged out of the organiser).
   const dragOver = (e: React.DragEvent) => {
@@ -953,6 +990,7 @@ export default function App() {
             <Toolbar
               {...{ data, ready, busy, progress, message, shown }}
               headersChanged={headersChanged(headerFiles, headerEdits, estimatedHeaders)}
+              timeLabelsOn={labelsInUse(timeLabelConfig)}
               onHome={goHome}
               onOpenFiles={openFiles}
               onOpenFolder={openFolder}

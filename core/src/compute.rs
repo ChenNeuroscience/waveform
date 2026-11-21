@@ -13,8 +13,8 @@
 //!
 //! JavaScript writes the current inputs (`compute_inputs`, `compute_set_text`) and asks for
 //! a handler by name (`compute_request`). The answer is a table of named buffers to copy
-//! out, or what is missing for JavaScript to supply (a recording's spikes, or a position or
-//! `.egf` file).
+//! out, or what is missing for JavaScript to supply (a recording's spikes, or a position,
+//! `.egf` or log file).
 use crate::cache;
 use std::{
     any::Any,
@@ -67,6 +67,13 @@ pub(crate) enum Leaf {
     LfpHigh,
     LfpFreqBin,
     LfpPhaseBin,
+    /// The log file time labels read: its trial and file identity (empty unless used).
+    LogFile,
+    /// How time is labelled: the rules' text (see `time_labels::Rules::parse`); empty for
+    /// no labels.
+    TimeRules,
+    /// The label a time mask covers (empty: the whole trial).
+    TimeLabel,
 }
 pub(crate) use Leaf::*;
 /// The numeric leaves, in the order JavaScript writes them (see `compute_input_name`).
@@ -166,6 +173,14 @@ pub(crate) enum Node {
     SettingsSpikePhase,
     /// The band's phase at a cell's spikes.
     SpikePhase,
+    /// A log file as read.
+    LogRaw,
+    /// Where the log's rules change the label.
+    LogChanges,
+    /// The trial's labelled segments, and each label's time and segment count.
+    TimeLabels,
+    /// The times one label covers.
+    TimeMask,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Part {
@@ -216,6 +231,11 @@ fn children(node: Node) -> &'static [Part] {
         LfpFrequency => &[N(Analytic), N(SettingsLfpFrequency)],
         SettingsSpikePhase => &[L(LfpPhaseBin)],
         SpikePhase => &[N(Spikes), N(Analytic), N(SettingsSpikePhase)],
+        LogRaw => &[L(LogFile)],
+        LogChanges => &[N(LogRaw), L(TimeRules)],
+        // The recording gives the trial's duration.
+        TimeLabels => &[L(Recording), N(LogChanges)],
+        TimeMask => &[N(TimeLabels), L(TimeLabel)],
     }
 }
 fn beneath(part: Part, into: &mut Vec<Part>) {
@@ -255,6 +275,9 @@ pub(crate) struct Inputs {
     pub(crate) numbers: [f64; NUMBERS.len()],
     pub(crate) pos_file: Rc<str>,
     pub(crate) egf_file: Rc<str>,
+    pub(crate) log_file: Rc<str>,
+    pub(crate) time_rules: Rc<str>,
+    pub(crate) time_label: Rc<str>,
     pub(crate) recording: Rc<str>,
     pub(crate) cut_source: Rc<str>,
     /// Patch ids, comma-separated.
@@ -277,6 +300,9 @@ impl Default for Inputs {
             numbers: [f64::NAN; NUMBERS.len()],
             pos_file: "".into(),
             egf_file: "".into(),
+            log_file: "".into(),
+            time_rules: "".into(),
+            time_label: "".into(),
             recording: "".into(),
             cut_source: "".into(),
             history: "".into(),
@@ -321,6 +347,9 @@ impl Inputs {
                 let value = match leaf {
                     PosFile => Value::Text(self.pos_file.clone()),
                     EgfFile => Value::Text(self.egf_file.clone()),
+                    LogFile => Value::Text(self.log_file.clone()),
+                    TimeRules => Value::Text(self.time_rules.clone()),
+                    TimeLabel => Value::Text(self.time_label.clone()),
                     Recording => Value::Text(self.recording.clone()),
                     CutSource => Value::Text(self.cut_source.clone()),
                     History => Value::Text(self.history.clone()),
@@ -368,6 +397,8 @@ pub(crate) enum Missing {
     Invalid = 7,
     /// Read the `.egf` file (`compute_supply_egf`).
     Egf = 8,
+    /// Read the log file (`compute_supply_log`).
+    Log = 9,
 }
 
 /// Computes one node's value from the inputs, calling other handlers for what it needs.
@@ -677,7 +708,7 @@ pub extern "C" fn compute_input_name_len(i: usize) -> usize {
 }
 /// Sets a text input from UTF-8: 0 the position file, 1 the recording, 2 the cut source,
 /// 3 the history (comma-separated patch ids), 4 the id for a command's patch, 5 the `.egf`
-/// file.
+/// file, 6 the log file, 7 the time-label rules, 8 the label a time mask covers.
 #[no_mangle]
 pub unsafe extern "C" fn compute_set_text(field: u32, text: *const u8, len: usize) {
     let text: Rc<str> = String::from_utf8_lossy(std::slice::from_raw_parts(text, len)).into();
@@ -687,7 +718,11 @@ pub unsafe extern "C" fn compute_set_text(field: u32, text: *const u8, len: usiz
         2 => i.cut_source = text,
         3 => i.history = text,
         4 => i.patch = text,
-        _ => i.egf_file = text,
+        5 => i.egf_file = text,
+        6 => i.log_file = text,
+        7 => i.time_rules = text,
+        8 => i.time_label = text,
+        _ => {}
     })
 }
 

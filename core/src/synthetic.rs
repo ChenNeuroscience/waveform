@@ -693,6 +693,44 @@ const TAIL: &[u8] = b"\r\ndata_end";
 const EGF_RATE: usize = 5000;
 /// `.egf` files per trial.
 const EGF_CHANNELS: u32 = 2;
+/// The trials (from 0) with a `.ttl` log.
+const TTL_TRIALS: [usize; 2] = [0, 2];
+
+/// A `.ttl` log like an acquisition system writes: a light on TTL 4, switched on and off in
+/// blocks of about two minutes (from about a minute in), and brief reward pulses on TTL 2
+/// every 10 to 40 s. Times in seconds.
+fn ttl_log(seed: u32, trial: u32, duration: usize) -> String {
+    let mut events: Vec<(f64, u32, u8)> = vec![];
+    let draw = |salt: u32, i: u32| {
+        unit(hash(
+            seed ^ trial.wrapping_mul(7919) ^ salt ^ i.wrapping_mul(0x9e37),
+        )) as f64
+    };
+    let end = duration as f64;
+    let (mut t, mut on, mut i) = (55. + 10. * draw(0x7110, 0), true, 0);
+    while t < end {
+        events.push((t, 4, on as u8));
+        on = !on;
+        i += 1;
+        t += 110. + 20. * draw(0x7111, i);
+    }
+    let (mut t, mut i) = (5. + 10. * draw(0x7220, 0), 0);
+    while t + 0.05 < end {
+        events.push((t, 2, 1));
+        events.push((t + 0.05, 2, 0));
+        i += 1;
+        t += 10. + 30. * draw(0x7221, i);
+    }
+    events.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut text = format!(
+        "trial_date SIMULATED\ntrial_time {}:00\ncreated_by Waveform simulated data\nduration {duration}\ndata_start",
+        if trial > 0 { 13 } else { 12 }
+    );
+    for (t, channel, level) in events {
+        text += &format!("ttl_{channel} {t:.4} {level}\n");
+    }
+    text + "\ndata_end"
+}
 
 /// What to simulate. Files are named `{name}-a.set`, `{name}-a.1`, `{name}-a_1.cut`, ...
 pub struct Params {
@@ -840,6 +878,13 @@ impl Dataset {
                 .into(),
                 body: Body::Text,
             });
+            if TTL_TRIALS.contains(&trial) {
+                files.push(SyntheticFile {
+                    name: format!("{name}.ttl"),
+                    header: ttl_log(seed, trial as u32, duration).into(),
+                    body: Body::Text,
+                });
+            }
             for tet in 1..=p.tetrodes {
                 let cells = p.cells[(tet - 1) % p.cells.len()];
                 let requested = p.spikes[(trial * p.tetrodes + tet - 1) % p.spikes.len()];
@@ -1392,13 +1437,15 @@ mod tests {
             spikes: vec![2000],
         })
         .unwrap();
-        assert_eq!(dataset.files.len(), 2 * (1 + 8 + 1 + 2 + 7));
+        // Only the first trial of the two has a log.
+        assert_eq!(dataset.files.len(), 2 * (1 + 8 + 1 + 2 + 7) + 1);
         for name in [
             "demo_box-a.1",
             "demo_box-a.pos",
             "demo_box-a.egf2",
             "demo_box-a_7.cut",
             "demo_box-a.set",
+            "demo_box-a.ttl",
         ] {
             let f = dataset.files.iter().find(|f| f.name == name).unwrap();
             let mut whole = vec![0; f.size()];
@@ -1410,5 +1457,46 @@ mod tests {
                 assert_eq!(part, whole[a..b], "{name} {a}..{b}");
             }
         }
+    }
+
+    #[test]
+    fn ttl_logs_alternate_the_light_in_blocks_with_reward_pulses_between() {
+        let log = ttl_log(4271, 0, 1200);
+        let lines: Vec<&str> = crate::time_labels::data_lines(log.as_bytes()).collect();
+        let light: Vec<(f64, &str)> = lines
+            .iter()
+            .filter_map(|l| l.strip_prefix("ttl_4 "))
+            .map(|l| {
+                let (t, v) = l.split_once(' ').unwrap();
+                (t.parse().unwrap(), v)
+            })
+            .collect();
+        assert!((9..=11).contains(&light.len()), "{}", light.len());
+        assert!((55. ..65.).contains(&light[0].0) && light[0].1 == "1");
+        for pair in light.windows(2) {
+            assert_ne!(pair[0].1, pair[1].1);
+            assert!((110. ..=130.).contains(&(pair[1].0 - pair[0].0)));
+        }
+        let rewards = lines.iter().filter(|l| l.starts_with("ttl_2 ")).count();
+        assert!(rewards > 40 && rewards % 2 == 0, "{rewards}");
+        assert!(log.ends_with("\n\ndata_end"));
+        let names = |trials| {
+            let d = Dataset::new(&Params {
+                seed: 1,
+                name: "x".into(),
+                trials,
+                tetrodes: 1,
+                duration: 60,
+                cells: vec![2],
+                spikes: vec![100],
+            })
+            .unwrap();
+            d.files
+                .iter()
+                .filter(|f| f.name.ends_with(".ttl"))
+                .map(|f| f.name.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(5), ["x-a.ttl", "x-c.ttl"]);
     }
 }
