@@ -165,7 +165,9 @@ export function comparisonClipboard(trials: TrialCapture[], tetNum: number) {
       html.push(
         `<tr>${label}`,
         ...columns.map((cell, i) => {
-          const plot = frame && cell.plots.find((p) => p.mode === frame.mode);
+          // A rate map of one label's times is that label's, not the whole trial's.
+          const plot =
+            frame && cell.plots.find((p) => p.mode === frame.mode && p.label === frame.label);
           const graphic = plot
             ? plotImage(
                 plot,

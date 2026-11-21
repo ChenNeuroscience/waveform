@@ -91,7 +91,7 @@ export interface TimeLabelRequest {
 }
 
 /** A secondary trial to analyse for the clipboard without activating its recording. */
-export interface CopyRecording {
+export interface CopyRecording extends TimeLabelRequest {
   trialId: string;
   file: File;
   assetKey: string;

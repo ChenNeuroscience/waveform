@@ -327,6 +327,7 @@ async function handle(m: WorkerMessage): Promise<WorkerResult<RequestType>> {
             "ac",
             ...(m.spatialAc ? ["sc" as const] : []),
             ...(drift ? ["spatialDrift" as const] : []),
+            ...(recording.timeLabelValues?.length ? ["labelSpatial" as const] : []),
           ];
       const found = new Map<number, AnalysisData>();
       for (const cell of new Set(m.path ? [...m.cells, 0] : m.cells)) {

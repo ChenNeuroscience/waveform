@@ -567,17 +567,19 @@ export async function analysis(
       continue;
     }
     if (part === "labelSpatial") {
-      // A rate map per label, each over that label's times; one key for them all.
+      // A rate map per label, each over that label's times; one key for them all. None when
+      // the trial's labels can't be made (no log file, say), rather than empty maps.
       const maps = [];
       const keys = [];
-      for (const label of inputs.timeLabelValues ?? []) {
+      const labelled = await timeLabels(w, inputs);
+      for (const label of labelled.error ? [] : (inputs.timeLabelValues ?? [])) {
         const a = await ask(w, { ...inputs, timeLabel: String(label) }, "labelRatemap", cell);
         const [width, height, peak] = a.buffers.shape;
         maps.push({ label, spatial: a.buffers.values as Float32Array, width, height, peak });
         keys.push(a.key);
       }
       result.labelSpatial = maps;
-      result.keys.labelSpatial = keys.join("|");
+      result.keys.labelSpatial = [labelled.key, ...keys].join("|");
       continue;
     }
     const answer = await ask(w, inputs, PART_HANDLERS[part], cell);

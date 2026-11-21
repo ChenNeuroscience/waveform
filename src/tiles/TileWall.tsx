@@ -684,7 +684,9 @@ export function TileWall({
                               compact
                             />
                           ) : (
-                            <span className="plot-unavailable">{pos ? "…" : "No .pos"}</span>
+                            <span className="plot-unavailable">
+                              {!pos ? "No .pos" : a?.labelSpatial && !map ? "Not labelled" : "…"}
+                            </span>
                           )}
                           {/* Centred over the map, which the padding sets in from the edges. */}
                           <div className="label-mark-row" style={{ right: last ? 24 : 2 }}>

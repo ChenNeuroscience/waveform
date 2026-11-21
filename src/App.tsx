@@ -525,6 +525,7 @@ export default function App() {
     cell,
     data,
     tileWall,
+    timeLabels: timeline ? timeLabelConfig : undefined,
     onNotice: setNotice,
   });
   useEffect(() => {

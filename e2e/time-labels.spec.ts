@@ -252,3 +252,45 @@ test("timeline labels: equal sections, log rules against a simulated .ttl, plot 
   await expect(page.locator(".cell-tile").first().locator(".tile-spatial")).toHaveCount(1);
   expect(errors).toEqual([]);
 });
+
+test("multi-trial copies make each trial's rate maps by label from its own log", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/?demo=quick");
+  await page.getByRole("button", { name: "Try it now with simulated data" }).click();
+  await ready(page, 60000);
+  await page.getByRole("button", { name: "Timeline labels", exact: true }).click();
+  const panel = page.getByRole("dialog", { name: "Timeline labels", exact: true });
+  await panel.getByRole("button", { name: "Log file" }).click();
+  await panel.getByRole("button", { name: "Close panel" }).click();
+  const pane = page.getByRole("region", { name: "Timeline labels" });
+  await pane.getByLabel("Show 1 in plots").check();
+  await expect(
+    page.locator(".cell-tile").first().locator(".tile-label-spatial canvas"),
+  ).toBeVisible({ timeout: 30000 });
+  // Copy mode, with trial c (which has a log) and b (which hasn't) alongside a.
+  await page.locator('.cell-tile[data-cell="2"]').hover();
+  await page.keyboard.down("ControlOrMeta");
+  await page.keyboard.down("c");
+  await page.waitForTimeout(1100);
+  // A held key repeats.
+  await page.keyboard.down("c");
+  await page.keyboard.up("c");
+  await page.keyboard.up("ControlOrMeta");
+  await expect(page.getByRole("region", { name: "Copy cells", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "demo_box-b 8", exact: true }).click();
+  await page.getByRole("button", { name: "demo_box-c 8", exact: true }).click();
+  await page.locator('.cell-tile[data-cell="3"]').click();
+  const line = (trial: string) =>
+    readClipboard(page).then(
+      ({ text }) => text.split("\n").find((l) => l.startsWith(`${trial} · t1 c3`)) ?? "",
+    );
+  // Each trial's label 1 map has its own peak; without a log, there's none to give.
+  await expect
+    .poll(() => line("demo_box-c"))
+    .toMatch(/Spatial rate map, timeline label 1: [\d.]+ Hz/);
+  await expect.poll(() => line("demo_box-a")).toMatch(/timeline label 1: [\d.]+ Hz/);
+  expect(await line("demo_box-b")).toMatch(/timeline label 1: —/);
+});
