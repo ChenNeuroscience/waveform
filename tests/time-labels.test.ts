@@ -147,6 +147,9 @@ describe("time label configuration", () => {
       "t_10.ttl",
     ]);
     expect(logFiles(trial, { ...defaultTimeLabels, glob: " " })).toEqual([]);
+    // With several, which is meant isn't known: none is used.
+    expect(logFile(trial, { ...defaultTimeLabels, glob: "*.ttl" })).toBeUndefined();
+    expect(logFile(trial, { ...defaultTimeLabels, glob: "t_2.*" })?.name).toBe("t_2.ttl");
     // An extension is how the log was first chosen.
     expect(validTimeLabels({ extension: ".log" }).glob).toBe("*.log");
   });
@@ -184,6 +187,14 @@ describe("time labels in the compute graph", () => {
     expect([...labelled.seconds]).toEqual([2.5, 5.5, 2]);
     expect([...labelled.counts]).toEqual([1, 2, 1]);
     expect([...labelled.matched]).toEqual([2, 1]);
+    // The log previewed: each label's first two and last lines, by file line, with its rule,
+    // label and time's span; a gap for the lines left out at the end.
+    expect(labelled.preview).toEqual([
+      { rule: 0, label: 1, line: 2, kind: "match", start: 6, end: 9, text: "ttl_4 2.5 1" },
+      { rule: 1, label: 2, line: 3, kind: "match", start: 6, end: 10, text: "ttl_2 5000 0" },
+      { rule: 0, label: 1, line: 4, kind: "match", start: 6, end: 7, text: "ttl_4 7 1" },
+      { rule: null, label: null, line: 0, kind: "gap", start: 0, end: 0, text: "" },
+    ]);
     const on = await mask(logRules, 1);
     expect([...on.intervals]).toEqual([2.5, 5, 7, 10]);
     expect(on.seconds).toBe(5.5);
@@ -210,7 +221,11 @@ describe("time labels in the compute graph", () => {
       ...logRules,
       rules: [{ ...logRules.rules[0], pattern: "(" }],
     });
-    expect(bad.error).toMatch(/^Rule 1:/);
+    // A broken rule is reported against itself; the rest still label.
+    expect(bad.error).toBe("");
+    expect(bad.problems).toHaveLength(1);
+    expect(bad.problems[0]).toMatchObject({ rule: 0 });
+    expect(bad.problems[0].message).toMatch(/^Rule 1:/);
     const missing = await ask({ ...logRules, glob: "*.log" });
     expect(missing.error).toContain("no log file");
   });

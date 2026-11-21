@@ -12,12 +12,18 @@ test("timeline labels: equal sections, log rules against a simulated .ttl, plot 
   await page.getByRole("button", { name: "Try it now with simulated data" }).click();
   await ready(page, 60000);
 
-  const button = page.getByRole("button", { name: "Timeline labels", exact: true });
+  // The toolbar's toggle shows the timeline pane and opens its window.
+  const button = page.getByRole("button", { name: /^Timeline labels( \(on\))?$/ });
   await button.click();
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+  const pane = page.getByRole("region", { name: "Timeline labels" });
   const panel = page.getByRole("dialog", { name: "Timeline labels", exact: true });
   // The table's label rows; Total is its last.
-  const rows = panel.locator(".time-stats tbody tr:not(.total)");
-  const total = panel.locator(".time-stats tr.total");
+  const rows = pane.locator(".time-stats tbody tr:not(.total)");
+  const total = pane.locator(".time-stats tr.total");
+  const summary = pane.locator(".timeline-summary span");
+  const cog = pane.getByRole("button", { name: "Timeline label settings" });
+  await expect(summary).toHaveText("2 equal sections");
   // Two sections by default, labelled 0 and 1: half the trial each, one segment apiece.
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toHaveText(/^0\s*5:00\s*50\.0%\s*1$/);
@@ -71,15 +77,42 @@ test("timeline labels: equal sections, log rules against a simulated .ttl, plot 
 
   // The first simulated trial has a log: the light alternates on TTL 4, 1 on and 0 off.
   await panel.getByRole("button", { name: "Log file" }).click();
-  await expect(panel.getByText("demo_box-a.ttl")).toBeVisible();
+  await expect(panel.locator(".time-file-status.found")).toHaveText("demo_box-a.ttl");
+  // A glob matching none (or several) is an error, and no file is read.
+  await panel.getByLabel("Log file", { exact: true }).fill("*.log");
+  await expect(panel.getByRole("alert")).toHaveText("No file of demo_box-a matches");
+  await expect(summary).toHaveText("2 rules on no log file");
+  await panel.getByLabel("Log file", { exact: true }).fill("*.ttl");
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0).locator("td").first()).toHaveText("0");
   await expect(rows.nth(1).locator("td").first()).toHaveText("1");
   const matched = panel.locator(".time-matched");
   await expect(matched).toHaveCount(2);
-  await expect(matched.nth(0)).toHaveText(/^\d+ lines$/);
+  await expect(matched.nth(0)).toHaveText(/^matched \d+\/\d+ lines$/);
+  // A valid rule that matches is green, with a check.
+  await expect(matched.nth(0)).toHaveClass(/found/);
+  await expect(matched.nth(0).getByLabel("Valid")).toBeVisible();
   // Reward pulses on TTL 2 belong to neither rule; a catch-all after them takes them.
   await panel.getByRole("button", { name: "Add rule" }).click();
+  // The new rule's pattern takes the focus.
+  await expect(panel.getByLabel("Rule 3 pattern")).toBeFocused();
+  // Without a capture group, its lines still preview (in its label's colour), with the error
+  // in the pane.
+  await panel.getByLabel("Rule 3 pattern").fill("^ttl_2 .* 1$");
+  const preview = panel.getByRole("list", { name: "Log preview" });
+  await expect(preview.locator("li.match", { hasText: "ttl_2" }).first()).toBeVisible();
+  await expect(pane.getByRole("alert")).toContainText("needs a capture group");
+  // Its row says both: what it matched, and that it has no time group.
+  await expect(matched.nth(2)).toHaveText(/^matched \d+\/\d+ lines, no time group$/);
+  // With no time, its unit doesn't apply.
+  await expect(panel.getByLabel("Rule 3 time unit")).toBeDisabled();
+  // Several groups, none named the time: which is meant isn't known.
+  await panel.getByLabel("Rule 3 pattern").fill(String.raw`(ttl)_2 (\S+) 1`);
+  await expect(matched.nth(2)).toHaveText(/^2 capture groups: make the others \(\?:…\)/);
+  await expect(panel.getByLabel("Rule 3 time unit")).toBeDisabled();
+  await panel.getByLabel("Rule 3 pattern").fill(String.raw`(?:ttl)_2 (\S+) 1`);
+  await expect(matched.nth(2)).toHaveClass(/found/);
+  await expect(panel.getByLabel("Rule 1 time unit")).toBeEnabled();
   await panel.getByLabel("Rule 3 pattern").fill(String.raw`^ttl_2 (\S+) 1$`);
   // A new rule takes the next label, 2; its steps go up and down.
   await expect(panel.getByLabel("Rule 3 label", { exact: true })).toHaveValue("2");
@@ -88,25 +121,54 @@ test("timeline labels: equal sections, log rules against a simulated .ttl, plot 
   await panel.getByLabel("Rule 3 label", { exact: true }).press("ArrowDown");
   await expect(panel.getByLabel("Rule 3 label", { exact: true })).toHaveValue("2");
   await expect(rows).toHaveCount(3);
-  await expect(matched.nth(2)).toHaveText(/^\d+ lines$/);
+  await expect(matched.nth(2)).toHaveText(/^matched \d+\/\d+ lines$/);
   // A broken regex is reported in the window.
   await panel.getByLabel("Rule 3 pattern").fill("ttl_2 (");
-  await expect(panel.getByRole("alert")).toContainText("Rule 3:");
+  await expect(pane.getByRole("alert")).toContainText("Rule 3:");
+  // Its row shows the error, not a count.
+  await expect(matched.nth(2)).toHaveText(/unclosed|open group|closing/i);
+  // The other rules still label, and the broken one is marked.
+  await expect(total).toBeVisible();
+  await expect(panel.getByLabel("Rule 3 pattern")).toHaveAttribute("aria-invalid", "true");
+  await expect(panel.getByLabel("Rule 1 pattern")).toHaveAttribute("aria-invalid", "false");
   await panel.getByRole("button", { name: "Remove rule 3" }).click();
   await expect(rows).toHaveCount(2);
 
-  // The cheat sheet is folded away until asked for.
-  const help = panel.locator(".time-cheatsheet");
-  await expect(help.locator("table")).toBeHidden();
-  await help.locator("summary").click();
-  await expect(help.getByRole("link", { name: /Full syntax/ })).toHaveAttribute(
+  // The window's foot previews the log: each label's first two and last lines, in its colour
+  // with the time picked out, "…" where lines are skipped; then a cheat sheet.
+  const shown = preview.locator("li.match");
+  // Label 1 has three lines and 0 two: all are shown.
+  await expect(shown).toHaveCount(5);
+  await expect(shown.first()).toContainText(/ttl_4 [\d.]+ 1/);
+  await expect(shown.first().locator("mark")).toHaveText(/^[\d.]+$/);
+  await expect(preview.locator("li.gap").first()).toHaveText("…");
+  await expect(panel.getByRole("link", { name: /Full syntax/ })).toHaveAttribute(
     "href",
     /docs\.rs\/regex-lite/,
   );
+  // With no rule that matches, the file's first and last lines.
+  await panel.getByLabel("Rule 1 pattern").fill("nothing (here)");
+  await panel.getByLabel("Rule 2 pattern").fill("nor (here)");
+  await expect(shown).toHaveCount(0);
+  await expect(preview.locator("li.other")).toHaveCount(4);
+  await expect(preview.locator("li.other").first()).toContainText("ttl_");
+  await panel.getByLabel("Rule 1 pattern").fill(String.raw`ttl_4 (\S+) 1`);
+  await panel.getByLabel("Rule 2 pattern").fill(String.raw`ttl_4 (\S+) 0`);
+  await expect(shown).toHaveCount(5);
+  // Times that aren't numbers, or run outside the trial (beyond 10 s either side), are
+  // flagged; the labels are still made.
+  await panel.getByLabel("Rule 1 pattern").fill(String.raw`(ttl)_4 \S+ 1`);
+  await expect(matched.nth(0)).toHaveText(/3 times aren't numbers/);
+  await panel.getByLabel("Rule 1 pattern").fill(String.raw`ttl_4 \d+\.(\d+) 1`);
+  await expect(matched.nth(0)).toHaveText(/outside the trial/);
+  await expect(pane.getByRole("alert")).toContainText("outside the trial (0 to 600 s)");
+  await expect(total).toBeVisible();
+  await panel.getByLabel("Rule 1 pattern").fill(String.raw`ttl_4 (\S+) 1`);
+  await expect(matched.nth(0)).toHaveClass(/found/);
 
   // Any rows can be shown in plots; Total alone (the default) is no labelling.
   await expect(total).toHaveText(/^Total\s*10:00\s*100\.0%\s*\d+$/);
-  const show = (name: string) => panel.getByLabel(`Show ${name} in plots`);
+  const show = (name: string) => pane.getByLabel(`Show ${name} in plots`);
   await expect(show("Total")).toBeChecked();
   await expect(show("1")).not.toBeChecked();
   await show("1").check();
@@ -140,7 +202,25 @@ test("timeline labels: equal sections, log rules against a simulated .ttl, plot 
   // The second trial has no log.
   await page.getByRole("button", { name: /^demo_box-b \d+$/ }).click();
   await ready(page, 60000);
-  await expect(panel.getByRole("alert")).toHaveText("This trial has no log file.");
-  await expect(panel.getByText("No match in demo_box-b")).toBeVisible();
+  await expect(panel.getByRole("alert")).toHaveText("No file of demo_box-b matches");
+  await expect(summary).toHaveText("2 rules on no log file");
+
+  // Closing the window leaves the pane; its cog opens the window again.
+  await panel.getByRole("button", { name: "Close panel" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(pane).toBeVisible();
+  await expect(cog).toHaveAttribute("aria-pressed", "false");
+  await cog.click();
+  await expect(panel).toBeVisible();
+  await expect(cog).toHaveAttribute("aria-pressed", "true");
+  // It toggles the window: pressed again, it closes it.
+  await cog.click();
+  await expect(panel).toHaveCount(0);
+  await cog.click();
+  await expect(panel).toBeVisible();
+  // The toggle hides both.
+  await button.click();
+  await expect(pane).toHaveCount(0);
+  await expect(panel).toHaveCount(0);
   expect(errors).toEqual([]);
 });

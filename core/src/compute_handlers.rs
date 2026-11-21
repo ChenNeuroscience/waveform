@@ -894,6 +894,8 @@ pub(crate) struct LogChanges;
 pub(crate) struct Changes {
     names: Vec<String>,
     changes: Result<time_labels::Changes, String>,
+    /// Each rule that can't be used as given, and why (see `Rules::problems`).
+    problems: Vec<(usize, String)>,
 }
 impl Handler for LogChanges {
     type Value = Changes;
@@ -906,6 +908,7 @@ impl Handler for LogChanges {
                 return Ok(Changes {
                     names: vec![],
                     changes: Err(e),
+                    problems: vec![],
                 })
             }
         };
@@ -913,19 +916,21 @@ impl Handler for LogChanges {
             return Ok(Changes {
                 names: rules.names,
                 changes: Err("These rules don't read a log.".into()),
+                problems: vec![],
             });
         };
         let log = cx.call::<RawLog>()?;
         Ok(Changes {
             changes: Ok(time_labels::log_changes(list, &log)),
             names: rules.names,
+            problems: rules.problems,
         })
     }
 }
 
 /// The trial's labelled segments (see `time_labels::segments`), each label's name, total
-/// seconds and segment count, how many lines each log rule matched, and any error (with no
-/// segments).
+/// seconds and segment count, how many lines each log rule matched and a preview of them, and
+/// any error (with no segments).
 pub(crate) struct TimeLabels;
 pub(crate) struct Labelled {
     segments: Vec<(f64, f64, u16)>,
@@ -939,6 +944,14 @@ pub(crate) struct Labelled {
     seconds: Vec<f64>,
     counts: Vec<u32>,
     text: Vec<u8>,
+    /// A line per previewed log line: the rule that took it and its label (each 65535 for
+    /// none), line number, kind (`m` a match, `o` another line, `g` a gap), the time's span in
+    /// characters, then the text; tab-separated.
+    preview: Vec<u8>,
+    /// The log's data lines, for the share each rule matched.
+    lines: usize,
+    /// A line per rule that can't be used as given: its index and why, tab-separated.
+    problems: Vec<u8>,
 }
 impl Labelled {
     fn new(
@@ -960,7 +973,37 @@ impl Labelled {
             names,
             matched,
             error,
+            preview: vec![],
+            lines: 0,
+            problems: vec![],
         }
+    }
+    fn with_problems(mut self, problems: &[(usize, String)]) -> Self {
+        self.problems = problems
+            .iter()
+            .map(|(rule, why)| format!("{rule}\t{why}\n"))
+            .collect::<String>()
+            .into_bytes();
+        self
+    }
+    fn with_preview(mut self, preview: &[time_labels::Preview], lines: usize) -> Self {
+        self.lines = lines;
+        use std::fmt::Write;
+        let mut text = String::new();
+        for p in preview {
+            let (kind, a, b) = match p.kind {
+                time_labels::Shown::Match(a, b) => ("m", a, b),
+                time_labels::Shown::Other => ("o", 0, 0),
+                time_labels::Shown::Gap => ("g", 0, 0),
+            };
+            let _ = writeln!(
+                text,
+                "{}\t{}\t{}\t{kind}\t{a}\t{b}\t{}",
+                p.rule, p.label, p.line, p.text
+            );
+        }
+        self.preview = text.into_bytes();
+        self
     }
 }
 impl Handler for TimeLabels {
@@ -993,13 +1036,26 @@ impl Handler for TimeLabels {
             Method::Log(_) => {
                 let changes = cx.call::<LogChanges>()?;
                 return match &changes.changes {
+                    // Rules that can't be used are reported; the others still label.
                     Ok(c) => Ok(Labelled::new(
                         time_labels::segments(0, &c.points, duration),
                         duration,
                         changes.names.clone(),
                         c.matched.clone(),
                         String::new(),
-                    )),
+                    )
+                    .with_preview(&c.preview, c.lines)
+                    .with_problems(&{
+                        // Times that look wrong, for rules without a worse problem.
+                        let mut all = changes.problems.clone();
+                        for p in time_labels::time_problems(c, duration) {
+                            if !all.iter().any(|(r, _)| *r == p.0) {
+                                all.push(p);
+                            }
+                        }
+                        all.sort_by_key(|p| p.0);
+                        all
+                    })),
                     Err(e) => failed(changes.names.clone(), vec![], e.clone()),
                 };
             }
@@ -1023,7 +1079,9 @@ impl Answer for Labelled {
             ("counts", u32s(&self.counts)),
             ("matched", u32s(&self.matched)),
             ("error", u8s(self.error.as_bytes())),
-            ("stats", Buffer::F64(vec![self.duration])),
+            ("preview", u8s(&self.preview)),
+            ("problems", u8s(&self.problems)),
+            ("stats", Buffer::F64(vec![self.duration, self.lines as f64])),
         ]
     }
 }
@@ -1370,6 +1428,11 @@ mod tests {
         assert_eq!(labelled.matched, [2, 1]);
         assert_eq!(labelled.seconds, [4., 6.]);
         assert_eq!(labelled.counts, [2, 2]);
+        let preview = String::from_utf8(labelled.preview.clone()).unwrap();
+        assert!(
+            preview.starts_with("0\t1\t1\tm\t6\t7\tttl_4 2 1\n"),
+            "{preview}"
+        );
         let mask = |i: &Inputs| Request::new(i.clone()).call::<TimeMask>().unwrap();
         // No label: the whole trial.
         assert_eq!(mask(&i).intervals, [0., 10.]);
@@ -1427,9 +1490,29 @@ mod tests {
         // Bad rules are an answer, not a failure.
         let bad = Inputs {
             time_rules: "log\tx\n1\ty\t(".into(),
-            ..i
+            ..i.clone()
         };
         let labelled = Request::new(bad).call::<TimeLabels>().unwrap();
-        assert!(labelled.error.starts_with("Rule 1:"));
+        assert_eq!(labelled.error, "");
+        assert!(String::from_utf8_lossy(&labelled.problems).starts_with("0\tRule 1:"));
+        // A rule without a capture group can't label, but its matches are still answered.
+        let ungrouped = Inputs {
+            time_rules: "log\toff\n1\ton\tttl_4 2".into(),
+            ..i.clone()
+        };
+        let labelled = Request::new(ungrouped).call::<TimeLabels>().unwrap();
+        assert!(String::from_utf8_lossy(&labelled.problems).contains("capture group"));
+        assert_eq!((labelled.matched.clone(), labelled.lines), (vec![1], 3));
+        assert!(!labelled.preview.is_empty());
+        // A rule that can't be used leaves the others labelling.
+        let mixed = Inputs {
+            time_rules: "log\toff\n1\ton\t^ttl_4 (\\S+) 1$\n1\toff\t(".into(),
+            ..i.clone()
+        };
+        let labelled = Request::new(mixed).call::<TimeLabels>().unwrap();
+        assert_eq!(labelled.error, "");
+        assert_eq!(labelled.matched, [2, 0]);
+        assert_eq!(labelled.seconds, [2., 8.]);
+        assert!(String::from_utf8_lossy(&labelled.problems).starts_with("1\tRule 2:"));
     }
 }

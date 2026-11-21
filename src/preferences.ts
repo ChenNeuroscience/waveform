@@ -84,21 +84,34 @@ export interface PaneLayout {
   left: number;
   files: number;
   features: number;
+  /** The timeline pane's height, when it's shown (layouts saved before it lack it). */
+  timeline?: number;
 }
 export const defaultLayout: PaneLayout = {
   left: 350,
   files: 200,
   features: 300,
+  timeline: 170,
 };
-export function fitPaneLayout(layout: PaneLayout, width: number, height: number): PaneLayout {
+/** `layout` fitted to the workspace, with room for the timeline pane if `timeline` is shown
+ * (shrinking it before the feature pane when space is short). */
+export function fitPaneLayout(
+  layout: PaneLayout,
+  width: number,
+  height: number,
+  timeline = false,
+): PaneLayout {
   const h = Math.max(352, height);
   const clamp = (v: number, min: number, max: number) =>
     Math.max(min, Math.min(max, Number.isFinite(v) ? v : min));
   const files = clamp(layout.files, 90, h - 262);
+  const saved = clamp(layout.timeline ?? 170, 80, 600);
+  const line = timeline ? clamp(saved, 80, Math.max(80, h - files - 268)) : saved;
   return {
     left: clamp(layout.left, 240, Math.max(240, width - 337)),
     files,
-    features: clamp(layout.features, 160, h - files - 102),
+    features: clamp(layout.features, 160, h - files - 102 - (timeline ? line + 6 : 0)),
+    timeline: line,
   };
 }
 

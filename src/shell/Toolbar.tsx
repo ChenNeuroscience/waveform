@@ -58,6 +58,9 @@ export function Toolbar(p: {
   headersChanged: boolean;
   /** Whether plots show time labels, not just the whole trial. */
   timeLabelsOn: boolean;
+  /** Whether the timeline pane is shown, and its toggle. */
+  timeline: boolean;
+  onTimeline: () => void;
   message: string;
   onOperation: (type: "undo" | "redo") => void;
   onPanel: (panel: PanelName) => void;
@@ -122,15 +125,16 @@ export function Toolbar(p: {
       <button title="Settings" aria-label="Settings" onClick={() => p.onPanel("settings")}>
         <SettingsIcon size={17} />
       </button>
-      <button
+      <ToggleButton
         title={`Timeline labels${p.timeLabelsOn ? ": plots show selected labels" : ""}`}
         aria-label={`Timeline labels${p.timeLabelsOn ? " (on)" : ""}`}
-        className="headers-button"
-        onClick={() => p.onPanel("labels")}
+        className="headers-button timeline-toggle"
+        pressed={p.timeline}
+        onClick={p.onTimeline}
       >
         <TimelineIcon />
         {p.timeLabelsOn && <span className="headers-changed" />}
-      </button>
+      </ToggleButton>
       <span className="tool-separator" />
       {(["waveforms", "spatial", "sc", "direction", "speed", "ac", "phase"] as PlotMode[]).map(
         (m) => (

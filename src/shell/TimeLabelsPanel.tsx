@@ -1,8 +1,18 @@
-/** The Timeline labels window: how a trial's time is labelled, what that gives for the loaded
- * trial, and which labels plots use. */
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronUp, ClipboardPaste, Copy, Plus, RotateCcw, X } from "lucide-react";
-import type { TimeLabelsData } from "../types";
+/** The Timeline labels window: how a trial's time is labelled (what that gives, and which
+ * labels plots use, are in the timeline pane: TimelinePane.tsx). */
+import { useRef, useState, type ReactNode } from "react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  ClipboardPaste,
+  Copy,
+  FileText,
+  Plus,
+  RotateCcw,
+  X,
+} from "lucide-react";
+import type { LogPreviewLine, TimeLabelsData } from "../types";
 import {
   decodeTimeLabels,
   defaultTimeLabels,
@@ -18,6 +28,7 @@ import {
   type TimeRule,
 } from "../app/time-label-config";
 import { ToggleButton } from "./ToggleButton";
+import { duration } from "./TimelinePane";
 
 /** What the Timeline labels window reads and changes, assembled by App. */
 export interface TimeLabelsContext {
@@ -25,30 +36,22 @@ export interface TimeLabelsContext {
   setConfig: (update: (c: TimeLabelConfig) => TimeLabelConfig) => void;
   /** The loaded trial's labels, once the worker answers. */
   data: TimeLabelsData | null;
-  /** The trial's name; its log file's, if one matches; and how many match. */
+  /** The trial's name, and the names of its files the log glob matches (the log, if exactly
+   * one does). */
   trialName?: string;
-  logName?: string;
-  logMatches: number;
+  logNames: string[];
   notify: (message: string, isError?: boolean) => void;
 }
 
 const REGEX_REFERENCE = "https://docs.rs/regex-lite/latest/regex_lite/#syntax";
-const pct = (part: number, whole: number) =>
-  whole > 0 ? `${((100 * part) / whole).toFixed(1)}%` : "–";
+/** How many of the log's lines a rule matched. */
+const matchedText = (n: number, total: number) =>
+  `matched ${n.toLocaleString()}/${total.toLocaleString()} lines`;
 /** Seconds as `m:ss`, to the nearest second. */
 function clock(s: number) {
   const whole = Math.round(s);
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
-/** Seconds as `12.3 s`, or `m:ss` from a minute. */
-function duration(s: number) {
-  if (s < 60) {
-    return `${s.toFixed(1)} s`;
-  }
-  const m = Math.floor(s / 60);
-  return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-}
-
 export function TimeLabelsPanel({ c }: { c: TimeLabelsContext }) {
   const { config, setConfig, data } = c;
   const set = <K extends keyof TimeLabelConfig>(k: K, v: TimeLabelConfig[K]) =>
@@ -86,18 +89,6 @@ export function TimeLabelsPanel({ c }: { c: TimeLabelsContext }) {
       c.notify(`Could not restore timeline labels: ${(error as Error).message}`, true);
     }
   };
-  // A row of the table: a label, or null for the whole trial.
-  const toggleRow = (label: number | null) =>
-    setConfig((x) =>
-      label === null
-        ? { ...x, total: !x.total }
-        : {
-            ...x,
-            selected: x.selected.includes(label)
-              ? x.selected.filter((n) => n !== label)
-              : [...x.selected, label],
-          },
-    );
   return (
     <div className="time-labels">
       <div className="time-header">
@@ -151,21 +142,6 @@ export function TimeLabelsPanel({ c }: { c: TimeLabelsContext }) {
       ) : (
         <LogRules c={c} setRule={setRule} set={set} />
       )}
-
-      <h3>This trial</h3>
-      {!data ? (
-        <p className="muted">Load a tetrode to see its trial's labels.</p>
-      ) : data.error ? (
-        <p className="time-error" role="alert">
-          {data.error}
-        </p>
-      ) : (
-        <LabelSummary data={data} config={config} onToggle={toggleRow} />
-      )}
-      <p className="muted">
-        Tick the rows plots show: Total for the whole trial, a label for only its times. Total alone
-        is no labelling. Plots don't use timeline labels yet.
-      </p>
     </div>
   );
 }
@@ -437,6 +413,140 @@ function CustomTimes({
   );
 }
 
+/**
+ * The log as the rules take it (see `TimeLabelsData.preview`): each label's first two and last
+ * lines, in its colour with the time picked out, and "…" where lines are left out; then a
+ * regular expression cheat sheet.
+ */
+function LogPreview({ lines }: { lines: LogPreviewLine[] }) {
+  return (
+    <>
+      {lines.length > 0 && (
+        <ol className="regex-preview" aria-label="Log preview">
+          {lines.map((l, i) =>
+            l.kind === "gap" ? (
+              <li key={i} className="gap">
+                …
+              </li>
+            ) : (
+              <li key={i} className={l.kind}>
+                <span className="regex-line">{l.line}</span>
+                <span
+                  className="regex-label"
+                  style={l.label !== null ? { background: labelColor(l.label) } : undefined}
+                />
+                <code>
+                  {l.kind === "match" ? (
+                    <>
+                      {[...l.text].slice(0, l.start).join("")}
+                      <mark>{[...l.text].slice(l.start, l.end).join("")}</mark>
+                      {[...l.text].slice(l.end).join("")}
+                    </>
+                  ) : (
+                    l.text
+                  )}
+                </code>
+              </li>
+            ),
+          )}
+        </ol>
+      )}
+      <table className="regex-cheatsheet">
+        <tbody>
+          <tr>
+            <td>
+              <code>.</code>
+            </td>
+            <td>any character</td>
+            <td>
+              <code>\d</code>
+            </td>
+            <td>a digit</td>
+          </tr>
+          <tr>
+            <td>
+              <code>* + ?</code>
+            </td>
+            <td>0+, 1+, optional</td>
+            <td>
+              <code>\s \S</code>
+            </td>
+            <td>space, not space</td>
+          </tr>
+          <tr>
+            <td>
+              <code>^ $</code>
+            </td>
+            <td>line start, end</td>
+            <td>
+              <code>\.</code>
+            </td>
+            <td>a literal .</td>
+          </tr>
+          <tr>
+            <td>
+              <code>[abc]</code>
+            </td>
+            <td>any of a, b, c</td>
+            <td>
+              <code>a|b</code>
+            </td>
+            <td>a or b</td>
+          </tr>
+          <tr>
+            <td>
+              <code>(…)</code>
+            </td>
+            <td>the time (captured)</td>
+            <td>
+              <code>(?:…)</code>
+            </td>
+            <td>a group, not captured</td>
+          </tr>
+        </tbody>
+      </table>
+      <a href={REGEX_REFERENCE} target="_blank" rel="noreferrer">
+        Full syntax (regex-lite)
+      </a>
+    </>
+  );
+}
+
+/**
+ * How a rule did: green with a check, as the log file's, when it's valid and matches; orange
+ * when it matches nothing; and its error when it can't be used (cut short, in full on hover),
+ * with its matches too when it matches but has no capture group.
+ */
+function RuleStatus({
+  matched,
+  lines,
+  problem,
+}: {
+  matched: number;
+  lines: number;
+  problem?: string;
+}) {
+  if (problem) {
+    // On the rule's own row, its number needn't be said.
+    const why = problem.replace(/^Rule \d+: /, "");
+    // A missing group says what matched too; several groups say how to choose one.
+    const text = /needs a capture group/.test(why)
+      ? `${matchedText(matched, lines)}, no time group`
+      : why.replace(/\.$/, "");
+    return (
+      <span className="time-matched bad" title={problem}>
+        {text}
+      </span>
+    );
+  }
+  return (
+    <span className={`time-matched ${matched ? "found" : "none"}`}>
+      {matched > 0 && <Check size={12} strokeWidth={3} aria-label="Valid" />}
+      {matchedText(matched, lines)}
+    </span>
+  );
+}
+
 /** The log file and its rules, tried in order on each line. */
 function LogRules({
   c,
@@ -448,29 +558,45 @@ function LogRules({
   set: SetField;
 }) {
   const { config, data } = c;
-  const matched = data && !data.error ? data.matched : null;
+  // Matches are answered even when the rules can't label (a rule without a capture group).
+  const matched = data?.matched.length ? data.matched : null;
+  // Rules without a capture group: they match, but give no time.
+  const untimed = (i: number) =>
+    !!data?.problems.some((p) => p.rule === i && /capture group/.test(p.message));
+  // A rule just added, whose pattern box takes the focus when it appears.
+  const focusRule = useRef<number | null>(null);
+  const names = c.logNames;
+  const listed = names.slice(0, 3).join(", ") + (names.length > 3 ? ", …" : "");
   return (
     <>
-      <div className="time-log-file">
-        <input
-          className="time-glob"
-          value={config.glob}
-          aria-label="Log file"
-          placeholder="*.ttl"
-          title="A glob for the log file's name, among the trial's files: * any characters, ? one, [abc] a set, {a,b} either"
-          spellCheck={false}
-          onChange={(e) => set("glob", e.target.value)}
-        />
-        <span
-          className={`muted time-log-name ${c.logName ? "" : "none"}`}
-          title={c.logMatches > 1 ? `${c.logMatches} files match; the first is used` : undefined}
-        >
-          {c.logName
-            ? `${c.logName}${c.logMatches > 1 ? ` (1 of ${c.logMatches})` : ""}`
-            : c.trialName
-              ? `No match in ${c.trialName}`
-              : ""}
+      <div className="label-row file-row">
+        <span className="label-row-key" title="Log file">
+          <FileText size={15} aria-hidden="true" />
         </span>
+        <div className="time-file">
+          <input
+            className="time-glob"
+            value={config.glob}
+            aria-label="Log file"
+            placeholder="*.ttl"
+            title="A glob for the log file's name, among the trial's files: * any characters, ? one, [abc] a set, {a,b} either"
+            spellCheck={false}
+            onChange={(e) => set("glob", e.target.value)}
+          />
+          {names.length === 1 ? (
+            <span className="time-file-status found">
+              <Check size={12} strokeWidth={3} aria-label="Matched" /> {names[0]}
+            </span>
+          ) : (
+            c.trialName && (
+              <span className="time-file-status" role="alert">
+                {names.length
+                  ? `${names.length} files match: ${listed}`
+                  : `No file of ${c.trialName} matches`}
+              </span>
+            )
+          )}
+        </div>
       </div>
       <ol className="label-rows">
         <LabelRow
@@ -491,11 +617,19 @@ function LogRules({
               <div className="time-rule-row">
                 <input
                   className="time-pattern"
+                  aria-invalid={!!data?.problems.some((p) => p.rule === i)}
+                  title={data?.problems.find((p) => p.rule === i)?.message}
                   value={r.pattern}
                   aria-label={`Rule ${i + 1} pattern`}
-                  placeholder={String.raw`^ttl_4 (\S+) 1$`}
+                  placeholder={String.raw`ttl_4 (\S+) 1`}
                   spellCheck={false}
                   onChange={(e) => setRule(i, { pattern: e.target.value })}
+                  ref={(box) => {
+                    if (box && focusRule.current === i) {
+                      focusRule.current = null;
+                      box.focus();
+                    }
+                  }}
                 />
                 <Remove
                   label={`Remove rule ${i + 1}`}
@@ -511,6 +645,8 @@ function LogRules({
                 <select
                   value={r.unit}
                   aria-label={`Rule ${i + 1} time unit`}
+                  // Without a capture group there's no time for a unit to apply to.
+                  disabled={untimed(i)}
                   onChange={(e) => setRule(i, { unit: e.target.value as TimeRule["unit"] })}
                 >
                   {TIME_UNITS.map((u) => (
@@ -520,11 +656,12 @@ function LogRules({
                   ))}
                 </select>
                 {r.unit === "ticks" && (
-                  <label className="time-rate">
+                  <label className={`time-rate ${untimed(i) ? "disabled" : ""}`}>
                     at{" "}
                     <input
                       type="number"
                       min={1}
+                      disabled={untimed(i)}
                       value={r.rate}
                       aria-label={`Rule ${i + 1} ticks per second`}
                       onChange={(e) => +e.target.value > 0 && setRule(i, { rate: +e.target.value })}
@@ -532,10 +669,13 @@ function LogRules({
                     Hz
                   </label>
                 )}
-                {matched && (
-                  <span className={`time-matched ${matched[i] ? "" : "none"}`}>
-                    {matched[i] ? `${matched[i].toLocaleString()} lines` : "no lines"}
-                  </span>
+                {/* A rule just added has no count until the next answer. */}
+                {matched?.[i] !== undefined && (
+                  <RuleStatus
+                    matched={matched[i]}
+                    lines={data!.lines}
+                    problem={data!.problems.find((p) => p.rule === i)?.message}
+                  />
                 )}
               </div>
             </div>
@@ -544,196 +684,17 @@ function LogRules({
       </ol>
       <button
         className="secondary time-add"
-        onClick={() =>
+        onClick={() => {
+          focusRule.current = config.rules.length;
           set("rules", [
             ...config.rules,
             newRule(nextLabel([config.initial, ...config.rules.map((r) => r.label)])),
-          ])
-        }
+          ]);
+        }}
       >
         <Plus size={12} /> Add rule
       </button>
-      <details className="time-cheatsheet">
-        <summary>Regular expression help</summary>
-        <p>
-          A rule matches anywhere in a line. Its time is the group named <code>time</code>, or else
-          the first group: <code>{String.raw`^ttl_4 (\S+) 1$`}</code> takes 12.5 from{" "}
-          <code>ttl_4 12.5 1</code>.
-        </p>
-        <table>
-          <tbody>
-            <tr>
-              <td>
-                <code>.</code>
-              </td>
-              <td>any character</td>
-              <td>
-                <code>\d</code>
-              </td>
-              <td>a digit</td>
-            </tr>
-            <tr>
-              <td>
-                <code>* + ?</code>
-              </td>
-              <td>0+, 1+, optional</td>
-              <td>
-                <code>\s \S</code>
-              </td>
-              <td>space, not space</td>
-            </tr>
-            <tr>
-              <td>
-                <code>^ $</code>
-              </td>
-              <td>line start, end</td>
-              <td>
-                <code>\.</code>
-              </td>
-              <td>a literal .</td>
-            </tr>
-            <tr>
-              <td>
-                <code>[abc]</code>
-              </td>
-              <td>any of a, b, c</td>
-              <td>
-                <code>a|b</code>
-              </td>
-              <td>a or b</td>
-            </tr>
-            <tr>
-              <td>
-                <code>(…)</code>
-              </td>
-              <td>a group</td>
-              <td>
-                <code>(?:…)</code>
-              </td>
-              <td>not captured</td>
-            </tr>
-          </tbody>
-        </table>
-        <p>
-          A time: <code>{String.raw`([\d.]+)`}</code>. Named:{" "}
-          <code>{String.raw`(?<time>[\d.]+)`}</code>. Catch-all:{" "}
-          <code>{String.raw`^\S+ (\S+)`}</code>.
-        </p>
-        <a href={REGEX_REFERENCE} target="_blank" rel="noreferrer">
-          Full syntax (regex-lite)
-        </a>
-      </details>
-    </>
-  );
-}
-
-/** The graph names labels as text; here they are the numbers they were given as. */
-const labelValues = (data: TimeLabelsData) => data.names.map(Number);
-
-/** The labels across the trial, each one's time and segments and the total's, and which
- * of them plots show. */
-function LabelSummary({
-  data,
-  config,
-  onToggle,
-}: {
-  data: TimeLabelsData;
-  config: TimeLabelConfig;
-  /** Ticks or unticks a row: a label, or null for the total. */
-  onToggle: (label: number | null) => void;
-}) {
-  const selected = new Set(config.selected);
-  // The last ticked row stays ticked: plots always show something.
-  const ticked = (config.total ? 1 : 0) + labelValues(data).filter((v) => selected.has(v)).length;
-  const values = labelValues(data);
-  const canvas = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const el = canvas.current;
-    const g = el?.getContext("2d");
-    if (!el || !g) {
-      return;
-    }
-    const ratio = window.devicePixelRatio || 1;
-    el.width = Math.round(el.clientWidth * ratio);
-    el.height = Math.round(el.clientHeight * ratio);
-    g.clearRect(0, 0, el.width, el.height);
-    const scale = el.width / Math.max(data.duration, 1e-9);
-    // With labels ticked, the rest fade.
-    const chosen = new Set(config.selected);
-    for (let i = 0; i < data.labels.length; i++) {
-      const label = data.labels[i];
-      const [a, b] = [data.segments[i * 2], data.segments[i * 2 + 1]];
-      const value = Number(data.names[label]);
-      g.globalAlpha = chosen.size && !chosen.has(value) ? 0.18 : 1;
-      g.fillStyle = labelColor(value);
-      // At least a pixel, so brief segments still show.
-      g.fillRect(a * scale, 0, Math.max(1, (b - a) * scale), el.height);
-    }
-  }, [data, config.selected]);
-  const total = data.labels.length;
-  const row = (
-    key: string,
-    label: number | null,
-    seconds: number,
-    segments: number,
-    name: string,
-  ) => {
-    const on = label === null ? config.total : selected.has(label);
-    return (
-      <tr key={key} className={`${on ? "chosen" : ""} ${label === null ? "total" : ""}`}>
-        <td>
-          <label>
-            <input
-              type="checkbox"
-              checked={on}
-              aria-label={`Show ${name} in plots`}
-              title={on && ticked === 1 ? "Plots always show at least one row" : undefined}
-              // The last ticked row stays ticked, looking like the rest (not disabled).
-              onChange={() => !(on && ticked === 1) && onToggle(label)}
-            />
-            {label !== null && (
-              <span className="time-swatch" style={{ background: labelColor(label) }} />
-            )}
-            {name}
-          </label>
-        </td>
-        <td>{duration(seconds)}</td>
-        <td>{pct(seconds, data.duration)}</td>
-        <td>{segments.toLocaleString()}</td>
-      </tr>
-    );
-  };
-  return (
-    <>
-      <canvas
-        ref={canvas}
-        className="time-strip"
-        role="img"
-        aria-label={`${total.toLocaleString()} segments over ${duration(data.duration)}`}
-      />
-      <div className="time-strip-limits">
-        <span>0</span>
-        <span>{duration(data.duration)}</span>
-      </div>
-      <table className="time-stats">
-        <thead>
-          <tr>
-            <th>Label</th>
-            <th>Time</th>
-            <th>Trial</th>
-            <th>Segments</th>
-          </tr>
-        </thead>
-        <tbody>
-          {values
-            .map((value, i) => [value, i])
-            .sort((a, b) => a[0] - b[0])
-            .map(([value, i]) =>
-              row(String(i), value, data.seconds[i], data.counts[i], String(value)),
-            )}
-          {row("total", null, data.duration, total, "Total")}
-        </tbody>
-      </table>
+      {data && c.logNames.length === 1 && <LogPreview lines={data.preview} />}
     </>
   );
 }

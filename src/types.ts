@@ -321,6 +321,8 @@ export interface TimeLabelsData {
   key: string;
   /** The trial's duration (s). */
   duration: number;
+  /** The log's data lines (0 without a log). */
+  lines: number;
   /** Contiguous segments as (start, end) pairs (s), and each one's label (into `names`). */
   segments: Float64Array;
   labels: Uint16Array;
@@ -332,6 +334,23 @@ export interface TimeLabelsData {
   matched: Uint32Array;
   /** Why the rules can't be used ("" when they can); with no segments. */
   error: string;
+  /** The log, previewed: each label's first two and last lines, in file order, with gaps
+   * where lines are left out; with none matched, its first three and last lines. */
+  preview: LogPreviewLine[];
+  /** Log rules that can't be used as given, and why: the others still label. */
+  problems: { rule: number; message: string }[];
+}
+export interface LogPreviewLine {
+  /** The rule that took the line, and the label it gives; null for neither. */
+  rule: number | null;
+  label: number | null;
+  /** The file's line number, from 1 (0 for a gap). */
+  line: number;
+  kind: "match" | "other" | "gap";
+  /** For a match, its time's span in `text` (characters). */
+  start: number;
+  end: number;
+  text: string;
 }
 /** The times one label covers (or the whole trial), for plots made from those times. */
 export interface TimeMask {

@@ -10,9 +10,11 @@ use regex_lite::Regex;
 
 /// One log rule: lines it matches set `label` from the time its capture gives.
 pub(crate) struct Rule {
-    pattern: Regex,
-    /// The capture group with the time.
-    group: usize,
+    /// None for a rule that isn't valid, which matches nothing (the others still apply).
+    pattern: Option<Regex>,
+    /// The capture group with the time; none, and the rule still matches lines (to preview
+    /// them) but can't label.
+    group: Option<usize>,
     /// Seconds per unit of the captured time.
     scale: f64,
     label: u16,
@@ -43,6 +45,10 @@ pub(crate) struct Rules {
     pub(crate) method: Method,
     /// Label names, in the order rules first give them (the initial label first).
     pub(crate) names: Vec<String>,
+    /// Each log rule that can't be used as given, by index, and why: one that isn't valid
+    /// matches nothing, and one without a capture group matches but gives no times. The
+    /// other rules still apply.
+    pub(crate) problems: Vec<(usize, String)>,
 }
 impl Rules {
     /// Parses the rules' text input: empty for none; `split\t<n>` followed by each section's
@@ -57,6 +63,7 @@ impl Rules {
             return Ok(Rules {
                 method: Method::Off,
                 names: vec!["all".into()],
+                problems: vec![],
             });
         };
         let (kind, arg) = head.split_once('\t').unwrap_or((head, ""));
@@ -75,6 +82,7 @@ impl Rules {
                 Ok(Rules {
                     method: Method::Split(labels),
                     names,
+                    problems: vec![],
                 })
             }
             "times" => {
@@ -99,44 +107,66 @@ impl Rules {
                 Ok(Rules {
                     method: Method::Times(times),
                     names,
+                    problems: vec![],
                 })
             }
             "log" => {
+                let mut problems = vec![];
                 let mut names = vec![arg.to_string()];
                 let mut rules = vec![];
                 for (i, line) in lines.enumerate() {
-                    let fail = |why: &str| format!("Rule {}: {why}", i + 1);
                     let mut fields = line.splitn(3, '\t');
-                    let (Some(scale), Some(label), Some(pattern)) =
-                        (fields.next(), fields.next(), fields.next())
-                    else {
-                        return Err(fail("incomplete."));
-                    };
+                    let (scale, label, pattern) = (fields.next(), fields.next(), fields.next());
+                    let label = index(&mut names, label.unwrap_or(arg));
+                    let mut problem =
+                        |why: &str| problems.push((i, format!("Rule {}: {why}", i + 1)));
                     let scale = scale
-                        .parse::<f64>()
-                        .ok()
-                        .filter(|s| s.is_finite() && *s > 0.)
-                        .ok_or_else(|| fail("the time unit must be positive."))?;
-                    if pattern.is_empty() {
-                        return Err(fail("needs a pattern."));
-                    }
-                    let pattern = Regex::new(pattern).map_err(|e| fail(&e.to_string()))?;
-                    let group = match pattern.capture_names().position(|n| n == Some("time")) {
-                        Some(g) => g,
-                        None if pattern.captures_len() > 1 => 1,
-                        None => return Err(fail("needs a capture group for the time.")),
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .filter(|s| s.is_finite() && *s > 0.);
+                    let pattern = match (scale, pattern) {
+                        (_, None) => {
+                            problem("incomplete.");
+                            None
+                        }
+                        (None, _) => {
+                            problem("the time unit must be positive.");
+                            None
+                        }
+                        (_, Some("")) => {
+                            problem("needs a pattern.");
+                            None
+                        }
+                        (_, Some(p)) => Regex::new(p).map_err(|e| problem(&e.to_string())).ok(),
                     };
-                    let label = index(&mut names, label);
+                    let group = pattern.as_ref().and_then(|p| {
+                        match p.capture_names().position(|n| n == Some("time")) {
+                            Some(g) => Some(g),
+                            None if p.captures_len() == 2 => Some(1),
+                            // Which is the time isn't known.
+                            None if p.captures_len() > 2 => {
+                                problem(&format!(
+                                    "{} capture groups: make the others (?:…), or name the time's (?<time>…).",
+                                    p.captures_len() - 1
+                                ));
+                                None
+                            }
+                            None => {
+                                problem("needs a capture group for the time.");
+                                None
+                            }
+                        }
+                    });
                     rules.push(Rule {
                         pattern,
                         group,
-                        scale,
+                        scale: scale.unwrap_or(1.),
                         label,
                     });
                 }
                 Ok(Rules {
                     method: Method::Log(rules),
                     names,
+                    problems,
                 })
             }
             _ => Err("Unknown labelling method.".into()),
@@ -145,7 +175,12 @@ impl Rules {
 }
 /// A log file's data lines: between `data_start` and `data_end` markers at the starts of
 /// lines when it has them (as LTX files do), else every line.
+#[cfg(test)]
 pub(crate) fn data_lines(bytes: &[u8]) -> impl Iterator<Item = &str> {
+    data_section(bytes).1.lines()
+}
+/// The file's line number (from 1) of the data's first line, and the data.
+fn data_section(bytes: &[u8]) -> (usize, &str) {
     let text = std::str::from_utf8(bytes).unwrap_or_else(|e| {
         // Logs are text; whatever follows bytes that aren't isn't read.
         std::str::from_utf8(&bytes[..e.valid_up_to()]).unwrap()
@@ -166,28 +201,120 @@ pub(crate) fn data_lines(bytes: &[u8]) -> impl Iterator<Item = &str> {
         }
         None => text,
     };
-    body.lines()
+    let before = body.as_ptr() as usize - text.as_ptr() as usize;
+    (
+        1 + text.as_bytes()[..before]
+            .iter()
+            .filter(|&&b| b == b'\n')
+            .count(),
+        body,
+    )
 }
 
-/// Where a log's rules change the label: (seconds, label) in time order, and how many lines
-/// each rule matched (a line counts for the first rule that matches it).
+/// Where a log's rules change the label: (seconds, label) in time order, how many lines each
+/// rule matched (a line counts for the first rule that matches it), and a preview of each
+/// rule's lines (see `preview`).
 pub(crate) struct Changes {
     pub(crate) points: Vec<(f64, u16)>,
     pub(crate) matched: Vec<u32>,
+    pub(crate) preview: Vec<Preview>,
+    /// The log's data lines.
+    pub(crate) lines: usize,
+    /// Each rule's captures that aren't numbers: how many, and the first.
+    pub(crate) unparsed: Vec<(u32, Option<String>)>,
+    /// Each rule's earliest and latest time (s), if it gave any.
+    pub(crate) range: Vec<Option<(f64, f64)>>,
 }
+/// How far before a trial's start or after its end a rule's times may run before they look
+/// wrong (a log can start a little before the recording, or end a little after).
+pub(crate) const BLEED: f64 = 10.;
+/// Each rule's times that look wrong for a trial of `duration` s, and why: captures that aren't
+/// numbers, or times outside the trial by more than `BLEED` (a wrong unit, say). The labels
+/// are still made; these may only look wrong.
+pub(crate) fn time_problems(c: &Changes, duration: f64) -> Vec<(usize, String)> {
+    let s = |t: f64| {
+        if t.abs() >= 10. {
+            format!("{t:.0}")
+        } else {
+            format!("{t:.2}")
+        }
+    };
+    let mut out = vec![];
+    for r in 0..c.matched.len() {
+        let rule = r + 1;
+        if let (n @ 1.., Some(first)) = (c.unparsed[r].0, &c.unparsed[r].1) {
+            let many = if n == 1 {
+                "time isn't a number"
+            } else {
+                "times aren't numbers"
+            };
+            out.push((r, format!("Rule {rule}: {n} {many} (\"{first}\").")));
+        } else if let Some((lo, hi)) = c.range[r] {
+            if lo < -BLEED || hi > duration + BLEED {
+                out.push((
+                    r,
+                    format!(
+                        "Rule {rule}: times run {} to {} s, outside the trial (0 to {} s).",
+                        s(lo),
+                        s(hi),
+                        s(duration)
+                    ),
+                ));
+            }
+        }
+    }
+    out
+}
+/// One line of the log's preview.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Preview {
+    /// The rule that took the line, and the label it gives (`NONE` for neither).
+    pub(crate) rule: u16,
+    pub(crate) label: u16,
+    /// The file's line number, from 1.
+    pub(crate) line: u32,
+    pub(crate) kind: Shown,
+    /// The line, at most `PREVIEW_CHARS` characters (empty for a gap).
+    pub(crate) text: String,
+}
+#[derive(Debug, PartialEq)]
+pub(crate) enum Shown {
+    /// A line a rule took, with its time's span (in characters; empty without one).
+    Match(u32, u32),
+    /// A line none did.
+    Other,
+    /// Lines left out.
+    Gap,
+}
+const PREVIEW_CHARS: usize = 160;
+pub(crate) const NONE: u16 = u16::MAX;
 pub(crate) fn log_changes(rules: &[Rule], log: &[u8]) -> Changes {
     let mut points = vec![];
     let mut matched = vec![0; rules.len()];
-    for line in data_lines(log) {
-        let line = line.trim();
+    let mut unparsed: Vec<(u32, Option<String>)> = vec![(0, None); rules.len()];
+    let mut range: Vec<Option<(f64, f64)>> = vec![None; rules.len()];
+    let (first, body) = data_section(log);
+    let lines: Vec<&str> = body.lines().map(str::trim).collect();
+    // The rule that took each line.
+    let mut taken = vec![NONE; lines.len()];
+    for (i, &line) in lines.iter().enumerate() {
         for (r, rule) in rules.iter().enumerate() {
-            if let Some(c) = rule.pattern.captures(line) {
+            if let Some(c) = rule.pattern.as_ref().and_then(|p| p.captures(line)) {
                 matched[r] += 1;
-                let time = c
-                    .get(rule.group)
-                    .and_then(|m| m.as_str().trim().parse::<f64>().ok());
-                if let Some(t) = time.map(|t| t * rule.scale).filter(|t| t.is_finite()) {
-                    points.push((t, rule.label));
+                taken[i] = r as u16;
+                if let Some(text) = rule.group.and_then(|g| c.get(g)).map(|m| m.as_str().trim()) {
+                    match text.parse::<f64>().map(|t| t * rule.scale) {
+                        Ok(t) if t.is_finite() => {
+                            points.push((t, rule.label));
+                            let (lo, hi) = range[r].get_or_insert((t, t));
+                            (*lo, *hi) = (lo.min(t), hi.max(t));
+                        }
+                        _ => {
+                            let (n, first) = &mut unparsed[r];
+                            *n += 1;
+                            first.get_or_insert_with(|| text.chars().take(20).collect());
+                        }
+                    }
                 }
                 break;
             }
@@ -195,7 +322,90 @@ pub(crate) fn log_changes(rules: &[Rule], log: &[u8]) -> Changes {
     }
     // Stable: lines at one time keep their order, so the later one wins.
     points.sort_by(|a, b| a.0.total_cmp(&b.0));
-    Changes { points, matched }
+    let preview = preview(rules, &lines, &taken, first);
+    Changes {
+        points,
+        matched,
+        preview,
+        lines: lines.len(),
+        unparsed,
+        range,
+    }
+}
+/// The log as the window previews it: for each label, the first two and last lines its rules
+/// take, and the last line before the first taken (in the label held before any match), in
+/// file order, with a gap wherever lines are left out (before the first and after the last
+/// too). With none taken, the first three and last lines that aren't blank.
+fn preview(rules: &[Rule], lines: &[&str], taken: &[u16], first: usize) -> Vec<Preview> {
+    // Each label's first two and last lines.
+    let mut by_label: std::collections::BTreeMap<u16, (Vec<usize>, usize)> = Default::default();
+    for (i, &r) in taken.iter().enumerate() {
+        if r != NONE {
+            let (firsts, last) = by_label.entry(rules[r as usize].label).or_default();
+            if firsts.len() < 2 {
+                firsts.push(i);
+            }
+            *last = i;
+        }
+    }
+    let mut picked: Vec<usize> = by_label
+        .values()
+        .flat_map(|(firsts, last)| firsts.iter().copied().chain([*last]))
+        .collect();
+    // The last line before the first match, in the label held until then (label 0).
+    let mut before = None;
+    if let Some(first_taken) = taken.iter().position(|&r| r != NONE) {
+        before = (0..first_taken).rev().find(|&i| !lines[i].is_empty());
+        picked.extend(before);
+    } else {
+        let filled: Vec<usize> = (0..lines.len()).filter(|&i| !lines[i].is_empty()).collect();
+        picked = filled
+            .iter()
+            .take(3)
+            .chain(filled.last())
+            .copied()
+            .collect();
+    }
+    picked.sort_unstable();
+    picked.dedup();
+    let gap = || Preview {
+        rule: NONE,
+        label: NONE,
+        line: 0,
+        kind: Shown::Gap,
+        text: String::new(),
+    };
+    let mut out = vec![];
+    let mut next = 0;
+    for &i in &picked {
+        if i > next {
+            out.push(gap());
+        }
+        next = i + 1;
+        let (line, r) = (lines[i], taken[i]);
+        let (kind, label) = if r == NONE {
+            (Shown::Other, if Some(i) == before { 0 } else { NONE })
+        } else {
+            let rule = &rules[r as usize];
+            let span = rule
+                .group
+                .and_then(|g| rule.pattern.as_ref()?.captures(line)?.get(g));
+            let chars = |at: usize| line[..at].chars().count() as u32;
+            let (a, b) = span.map_or((0, 0), |m| (chars(m.start()), chars(m.end())));
+            (Shown::Match(a, b), rule.label)
+        };
+        out.push(Preview {
+            rule: r,
+            label,
+            line: (first + i) as u32,
+            kind,
+            text: line.chars().take(PREVIEW_CHARS).collect(),
+        });
+    }
+    if !picked.is_empty() && next < lines.len() {
+        out.push(gap());
+    }
+    out
 }
 
 /// Contiguous segments covering 0 to `duration` s: each (start, end, label), no two
@@ -306,18 +516,118 @@ mod tests {
         assert_eq!(c.points, [(0.0005, 1), (0.002, 1)]);
         let (_, c) = log("log\tx\n0.001\ton\t^ttl_(\\d) (?<time>[\\d.]+) 1$").unwrap();
         assert_eq!(c.points, [(0.0005, 1), (0.001, 1), (0.002, 1)]);
-        let (_, c) = log("log\tx\n0.5\ton\tttl_(\\d) ([\\d.e]+) 0").unwrap();
-        // Group 1 is the channel: 4 → 2 s, twice.
-        assert_eq!(c.points, [(2., 1), (2., 1)]);
-        assert!(log("log\tx\n1\ton\tttl_4")
-            .err()
-            .unwrap()
-            .contains("capture group"));
-        assert!(log("log\tx\n1\ton\t(")
-            .err()
-            .unwrap()
-            .starts_with("Rule 1:"));
-        assert!(log("log\tx\n1\ton\t").err().unwrap().contains("pattern"));
+        // With several groups, which is the time must be said: by naming it, or by making the
+        // others not capture.
+        let (r, c) = log("log\tx\n0.5\ton\tttl_(\\d) ([\\d.e]+) 0").unwrap();
+        assert!(r.problems[0]
+            .1
+            .starts_with("Rule 1: 2 capture groups: make the others (?:…)"));
+        assert_eq!((c.matched[0], c.points.len()), (2, 0));
+        let (r, c) = log("log\tx\n0.5\ton\tttl_(?:\\d) ([\\d.e]+) 0").unwrap();
+        assert!(r.problems.is_empty());
+        assert_eq!(c.points, [(0.3, 1), (1.5, 1)]);
+        // Without a group a rule still matches (for its preview) but can't label.
+        let (r, c) = log("log\tx\n1\ton\tttl_4").unwrap();
+        assert_eq!(
+            r.problems,
+            [(0, "Rule 1: needs a capture group for the time.".to_string())]
+        );
+        assert_eq!((c.matched[0], c.points.len(), c.lines), (4, 0, 6));
+        assert_eq!(c.preview[0].kind, Shown::Match(0, 0));
+        // A rule that isn't valid matches nothing, and is reported; the others still apply.
+        let (r, c) = log("log\tx\n1\ton\t(\n1\toff\t\n1\ton\t^ttl_4 (\\S+) 1$").unwrap();
+        assert_eq!(r.problems.len(), 2);
+        assert!(r.problems[0].1.starts_with("Rule 1:"));
+        assert_eq!(r.problems[1], (1, "Rule 2: needs a pattern.".to_string()));
+        assert_eq!(c.matched, [0, 0, 2]);
+        assert_eq!(c.points.len(), 2);
+    }
+
+    #[test]
+    fn the_preview_shows_each_labels_first_two_and_last_lines_with_gaps() {
+        let log = "header\ndata_start\na 1\nx\nb 1\na 2\nb 2\na 3\nb 3\nz\na 4\nb 4\ndata_end";
+        let shown = |rules: &str| {
+            let r = Rules::parse(rules).unwrap();
+            let Method::Log(list) = &r.method else {
+                panic!("not log rules");
+            };
+            log_changes(list, log.as_bytes())
+                .preview
+                .iter()
+                .map(|p| match p.kind {
+                    Shown::Gap => "…".to_string(),
+                    _ if p.label == NONE => format!("{}", p.line),
+                    _ => format!("{}:{}", p.line, p.label),
+                })
+                .collect::<Vec<_>>()
+        };
+        // Label 1 from `a` lines, 2 from `b`: each one's first two and last, in file order.
+        assert_eq!(
+            shown("log\t0\n1\t1\t^a (\\d)\n1\t2\t^b (\\d)"),
+            ["…", "3:1", "…", "5:2", "6:1", "7:2", "…", "11:1", "12:2"]
+        );
+        // Two rules giving one label share its lines.
+        assert_eq!(
+            shown("log\t0\n1\t1\t^a (\\d)\n1\t1\t^b (\\d)"),
+            ["…", "3:1", "…", "5:1", "…", "12:1"]
+        );
+        // With nothing matched, the first three and last lines that aren't blank.
+        assert_eq!(shown("log\t0\n1\t1\t("), ["…", "3", "4", "5", "…", "12"]);
+        assert_eq!(shown("log\t0"), ["…", "3", "4", "5", "…", "12"]);
+        // Lines before the first match: the last of them, in the label held until then.
+        let log = "data_start\nh 1\nh 2\na 1\nb 1\ndata_end";
+        let r = Rules::parse("log\t0\n1\t1\t^a (\\d)\n1\t2\t^b (\\d)").unwrap();
+        let Method::Log(list) = &r.method else {
+            panic!("not log rules");
+        };
+        let p = log_changes(list, log.as_bytes()).preview;
+        let kinds: Vec<(&str, u16)> = p
+            .iter()
+            .map(|p| {
+                (
+                    if p.kind == Shown::Gap {
+                        "…"
+                    } else {
+                        p.text.as_str()
+                    },
+                    p.label,
+                )
+            })
+            .collect();
+        assert_eq!(kinds, [("…", NONE), ("h 2", 0), ("a 1", 1), ("b 1", 2)]);
+        // The data starts on `data_start`'s line, so `a 1` is line 3.
+        let (first, _) = data_section(LOG.as_bytes());
+        assert_eq!(first, 3);
+    }
+
+    #[test]
+    fn times_that_arent_numbers_or_run_outside_the_trial_are_reported() {
+        let log = "data_start\nt -5 a\nt 20 a\nt x a\nu 3000 b\nu 9 b\nv 105 c\ndata_end";
+        let r =
+            Rules::parse("log\t0\n1\t1\t^t (\\S+)\n0.001\t2\t^u (\\S+)\n1\t3\t^v (\\S+)").unwrap();
+        let Method::Log(list) = &r.method else {
+            panic!("not log rules");
+        };
+        let c = log_changes(list, log.as_bytes());
+        assert_eq!(c.unparsed[0], (1, Some("x".into())));
+        let (lo, hi) = c.range[1].unwrap();
+        assert!((lo - 0.009).abs() < 1e-12 && hi == 3.);
+        // In a 100 s trial: `t` has a capture that isn't a number; `u`'s times fit (ms); `v`
+        // runs 5 s past the end, within the bleed allowed.
+        assert_eq!(
+            time_problems(&c, 100.),
+            [(0, "Rule 1: 1 time isn't a number (\"x\").".to_string())]
+        );
+        // In a 2 s trial, `u` runs past the end, and `v` well past it.
+        let late = time_problems(&c, 2.);
+        assert_eq!(late.len(), 2);
+        assert_eq!(
+            late[1],
+            (
+                2,
+                "Rule 3: times run 105 to 105 s, outside the trial (0 to 2.00 s).".into()
+            )
+        );
     }
 
     #[test]

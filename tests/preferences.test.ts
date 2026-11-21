@@ -27,6 +27,19 @@ it("clamps saved dividers and tool windows to a smaller screen", () => {
   expect(window.y + window.height).toBeLessThanOrEqual(600);
   expect(fitPaneLayout(defaultLayout, 1440, 995)).toEqual(defaultLayout);
 });
+it("makes room for the timeline pane, shrinking it before the feature pane", () => {
+  // Layouts saved before the pane get its default height.
+  expect(fitPaneLayout({ left: 350, files: 200, features: 300 }, 1440, 995, true).timeline).toBe(
+    170,
+  );
+  const tight = fitPaneLayout({ ...defaultLayout, timeline: 400 }, 1440, 600, true);
+  expect(tight.files + tight.features + tight.timeline! + 108).toBeLessThanOrEqual(600);
+  expect(tight.features).toBeGreaterThanOrEqual(160);
+  expect(tight.timeline).toBeGreaterThanOrEqual(80);
+  // Hidden, it takes no room and keeps its height for next time.
+  const hidden = fitPaneLayout({ ...defaultLayout, timeline: 400 }, 1440, 995);
+  expect([hidden.timeline, hidden.features]).toEqual([400, 300]);
+});
 it("shows acquisition clock time and duration, including midnight rollover", () => {
   expect(
     experimentTiming(

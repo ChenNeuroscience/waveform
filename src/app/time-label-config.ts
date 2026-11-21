@@ -3,7 +3,8 @@
  * compute graph (core/src/time_labels.rs); this holds the configuration, writes it as the
  * graph's inputs and copies it as a compact versioned code (`useTimeLabels` asks for the
  * labels). */
-import { color, fileId, type Trial } from "../types";
+import { fileId, type Trial } from "../types";
+import { groupRgb8 } from "../palette";
 
 export const TIME_UNITS = ["s", "ms", "us", "ticks"] as const;
 export type TimeUnit = (typeof TIME_UNITS)[number];
@@ -49,8 +50,16 @@ export interface TimeLabelConfig {
 export const MAX_SECTIONS = 100;
 /** Labels are small whole numbers, each with its own colour (see `labelColor`). */
 export const MAX_LABEL = 99;
-/** A label's colour: always the same for the same label, from the cell palette. */
-export const labelColor = (label: number) => color(label + 1);
+/**
+ * A label's colour: always the same for the same label. The cell palette's sequence (grey,
+ * blue, green, red, magenta…), so 0, 1, 2… read as they do there, but pastel, so labels
+ * aren't taken for cells: they have nothing to do with them. Grey starts darker, so its
+ * pastel still shows against white.
+ */
+export function labelColor(label: number) {
+  const base = label === 0 ? [150, 150, 150] : groupRgb8(label);
+  return `rgb(${base.map((c) => Math.round(c + (255 - c) * 0.4)).join(",")})`;
+}
 /** One more than the largest label in use (at most MAX_LABEL), for a new entry. */
 export const nextLabel = (labels: number[]) => Math.min(MAX_LABEL, Math.max(-1, ...labels) + 1);
 const rule = (pattern: string, label: number): TimeRule => ({
@@ -70,7 +79,7 @@ export const defaultTimeLabels: TimeLabelConfig = {
   ],
   glob: "*.ttl",
   initial: 0,
-  rules: [rule(String.raw`^ttl_4 (\S+) 1$`, 1), rule(String.raw`^ttl_4 (\S+) 0$`, 0)],
+  rules: [rule(String.raw`ttl_4 (\S+) 1`, 1), rule(String.raw`ttl_4 (\S+) 0`, 0)],
 };
 /** `labels` for `n` sections: those there are, then new ones numbered by position. */
 export function resizeSections(labels: number[], n: number) {
@@ -139,9 +148,12 @@ export function logFiles(trial: Trial | undefined, c: TimeLabelConfig) {
     .filter((f) => pattern.test(f.name))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
-/** The trial's log file: the first whose name matches the glob, if any does. */
-export const logFile = (trial: Trial | undefined, c: TimeLabelConfig) =>
-  logFiles(trial, c)[0] as File | undefined;
+/** The trial's log file: the one whose name matches the glob, if exactly one does (with
+ * several, which is meant isn't known). */
+export function logFile(trial: Trial | undefined, c: TimeLabelConfig): File | undefined {
+  const files = logFiles(trial, c);
+  return files.length === 1 ? files[0] : undefined;
+}
 /** The compute graph's inputs for `trial`'s time labels (as the window shows them). */
 export function timeLabelSource(trial: Trial | undefined, c: TimeLabelConfig) {
   const log = c.method === "log" ? logFile(trial, c) : undefined;

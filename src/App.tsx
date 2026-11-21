@@ -50,6 +50,7 @@ import { useCopies } from "./app/copies";
 import { useFeatureSpace } from "./app/features";
 import { useSplit } from "./app/split";
 import { CopyWindow } from "./shell/CopyWindow";
+import { TimelinePane } from "./shell/TimelinePane";
 import { useTimeLabels } from "./app/time-labels";
 import {
   defaultTimeLabels,
@@ -245,7 +246,9 @@ export default function App() {
   // Bumped when a cut file finishes preparing, to re-render its export-ready marker.
   const [, setDownloadVersion] = useState(0);
 
-  const panes = usePaneLayout();
+  // The timeline pane (the toolbar's timeline toggle), between the position and feature panes.
+  const [timeline, setTimeline] = usePreference("timeline-pane", false);
+  const panes = usePaneLayout(timeline);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   // Bumped per recording load; async edits, loads and progress updates compare
@@ -482,7 +485,7 @@ export default function App() {
     trial,
     recording: data?.key,
     config: timeLabelConfig,
-    show: panels.includes("labels"),
+    show: timeline || panels.includes("labels"),
     onError: setError,
   });
   const chooseEgf = (t: Trial, n: number) => {
@@ -940,8 +943,7 @@ export default function App() {
       setConfig: (change) => setTimeLabelPreference(change(timeLabelConfig)),
       data: timeLabels,
       trialName: trial?.name,
-      logName: logFiles(trial, timeLabelConfig)[0]?.name,
-      logMatches: logFiles(trial, timeLabelConfig).length,
+      logNames: logFiles(trial, timeLabelConfig).map((f) => f.name),
       notify: showTimedNotice,
     },
   };
@@ -991,6 +993,16 @@ export default function App() {
               {...{ data, ready, busy, progress, message, shown }}
               headersChanged={headersChanged(headerFiles, headerEdits, estimatedHeaders)}
               timeLabelsOn={labelsInUse(timeLabelConfig)}
+              timeline={timeline}
+              // On, the pane shows and its window opens; off, both go.
+              onTimeline={() => {
+                setTimeline(!timeline);
+                if (timeline) {
+                  closePanel("labels");
+                } else {
+                  setPane("labels");
+                }
+              }}
               onHome={goHome}
               onOpenFiles={openFiles}
               onOpenFolder={openFolder}
@@ -1057,6 +1069,18 @@ export default function App() {
                 }
               />
               <Divider part="position" onDrag={panes.dragDivider} />
+              {timeline && (
+                <>
+                  <TimelinePane
+                    c={panelContext.timeLabels}
+                    settingsOpen={panels.includes("labels")}
+                    onSettings={() =>
+                      panels.includes("labels") ? closePanel("labels") : setPane("labels")
+                    }
+                  />
+                  <Divider part="timeline" onDrag={panes.dragDivider} />
+                </>
+              )}
               <FeaturePane
                 {...{ data, settings, cell, painting, grabMode }}
                 threeD={feature3D}
@@ -1172,7 +1196,7 @@ export default function App() {
             x={panel.x}
             y={panel.y}
             height={panel.height}
-            autoHeight={name === "settings"}
+            autoHeight={name === "settings" || name === "labels"}
             onFocus={() => setPane(name)}
             onClose={() => closePanel(name)}
           >

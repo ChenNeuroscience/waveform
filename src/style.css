@@ -2649,6 +2649,15 @@ kbd {
   background: white;
   font-size: 11px;
 }
+/* A little room after the drop-down's arrow. */
+.time-labels select {
+  padding-right: 9px;
+}
+/* A rule's unit without a time to apply to. */
+.time-labels select:disabled,
+.time-rate.disabled {
+  opacity: 0.35;
+}
 /* The methods, equal choices, share the top line with the actions. */
 .time-header {
   display: flex;
@@ -2670,33 +2679,53 @@ kbd {
   padding: 0 8px;
   white-space: nowrap;
 }
-.time-log-file,
 .time-rule-row {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 11px;
 }
-.time-log-file {
-  margin-bottom: 8px;
+/* The file's glob, in the rows' columns: a key where labels are, then the box. */
+.file-row {
+  font-size: 11px;
+}
+.label-row-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--label-picker-width);
+  height: 23px;
+  flex-shrink: 0;
+  color: #8a9099;
+}
+.time-file {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
 }
 .time-labels input.time-glob {
-  flex: 1;
   font-family: ui-monospace, Menlo, monospace;
 }
-.time-log-name {
-  flex-shrink: 1;
-}
-.time-log-name.none {
-  color: #b35c00;
-}
-.time-log-file .muted {
+.time-file-status {
+  display: flex;
+  align-items: center;
+  gap: 3px;
   overflow: hidden;
+  color: #c62828;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.time-file-status.found {
+  color: #2e7d32;
+}
 .time-rule-row + .time-rule-row {
   margin-top: 4px;
+}
+.time-labels input.time-pattern[aria-invalid="true"] {
+  border-color: #c62828;
 }
 .time-pattern {
   flex: 1;
@@ -2714,38 +2743,25 @@ kbd {
 .time-matched.none {
   color: #b35c00;
 }
+.time-matched.found {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+/* As the log file's status: green with a check when valid and matching. */
+.time-matched.found {
+  color: #2e7d32;
+}
+.time-matched.bad {
+  min-width: 0;
+  overflow: hidden;
+  color: #c62828;
+  text-overflow: ellipsis;
+}
 .time-add {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-.time-cheatsheet {
-  margin-top: 10px;
-  font-size: 10px;
-  line-height: 1.5;
-  color: #444;
-}
-.time-cheatsheet summary {
-  cursor: pointer;
-  font-size: 11px;
-  color: #343a43;
-}
-.time-cheatsheet p {
-  margin: 6px 0;
-}
-.time-cheatsheet table {
-  border-collapse: collapse;
-}
-.time-cheatsheet td {
-  padding: 1px 8px 1px 0;
-}
-.time-cheatsheet code {
-  font-family: ui-monospace, Menlo, monospace;
-  background: #eceef1;
-  padding: 0 3px;
-  border-radius: 2px;
-  user-select: text;
-  -webkit-user-select: text;
 }
 .time-error {
   font-size: 11px;
@@ -2823,10 +2839,14 @@ kbd {
   text-align: right;
   color: #626972;
 }
+.time-labels {
+  --label-picker-width: 46px;
+}
 .label-picker {
   display: inline-flex;
   align-items: stretch;
   flex-shrink: 0;
+  width: var(--label-picker-width);
   height: 23px;
   border: 1px solid #c7ccd2;
   border-radius: var(--toggle-radius);
@@ -2840,7 +2860,9 @@ kbd {
   width: 7px;
 }
 .time-labels .label-picker input {
-  width: 2.6ch;
+  flex: 1;
+  width: 0;
+  min-width: 0;
   height: auto;
   padding: 0 1px;
   border: 0;
@@ -2917,4 +2939,110 @@ kbd {
 }
 .time-matched + .label-row-remove {
   margin-left: 0;
+}
+.time-divider {
+  margin: 12px 0 10px;
+  border: 0;
+  border-top: 1px solid #ccc;
+}
+/* The log as the rules take it, at the foot of the log rules. */
+.regex-preview {
+  margin: 10px 0;
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 4px 0;
+  list-style: none;
+  border: 1px solid #e3e6e9;
+  border-radius: 3px;
+  background: white;
+}
+.regex-preview li {
+  display: flex;
+  gap: 8px;
+  padding: 0 6px;
+  white-space: pre;
+  overflow: hidden;
+}
+.regex-preview code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.regex-preview li.other code {
+  color: #9aa0a6;
+}
+/* Skipped lines: a short row, not a full line. */
+.regex-preview li.gap {
+  height: 8px;
+  padding-left: 46px;
+  color: #9aa0a6;
+  font-size: 9px;
+  line-height: 4px;
+}
+.regex-preview mark {
+  background: #ffe58a;
+  color: inherit;
+  border-radius: 2px;
+}
+.regex-label {
+  flex-shrink: 0;
+  width: 4px;
+  margin: 2px -4px 2px 0;
+  border-radius: 1px;
+}
+.regex-line {
+  flex-shrink: 0;
+  width: 28px;
+  text-align: right;
+  color: #9aa0a6;
+  font-variant-numeric: tabular-nums;
+}
+.regex-cheatsheet {
+  border-collapse: collapse;
+  margin: 10px 0 6px;
+  font-size: 10px;
+  color: #343a43;
+}
+.regex-cheatsheet td {
+  padding: 1px 8px 1px 0;
+}
+.regex-cheatsheet code {
+  font-family: ui-monospace, Menlo, monospace;
+  background: #eceef1;
+  padding: 0 3px;
+  border-radius: 2px;
+}
+/* The timeline pane: what's configured (opening its window), then the labels. */
+.timeline-pane {
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 10px 8px;
+  font-size: 11px;
+}
+.timeline-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: #343a43;
+  font-weight: 600;
+}
+.timeline-summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-summary .timeline-settings {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 0;
+  width: 27px;
+  height: 25px;
+  padding: 0;
+}
+.timeline-pane > p {
+  margin: 4px 6px;
 }

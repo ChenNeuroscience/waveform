@@ -131,17 +131,43 @@ export async function timeLabels(w: Core, inputs: ComputeInputs): Promise<TimeLa
   const { key, buffers: b } = await ask(w, inputs, "timeLabels");
   const text = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes);
   const counts = b.counts as Uint32Array;
+  // One name per label; a lone empty name is still a label.
+  const names = counts.length ? text(b.names as Uint8Array).split("\n") : [];
   const result: TimeLabelsData = {
     key,
     duration: b.stats[0],
+    lines: b.stats[1],
     segments: b.segments as Float64Array,
     labels: b.labels as Uint16Array,
-    // One name per label; a lone empty name is still a label.
-    names: counts.length ? text(b.names as Uint8Array).split("\n") : [],
+    names,
     seconds: b.seconds as Float64Array,
     counts,
     matched: b.matched as Uint32Array,
     error: text(b.error as Uint8Array),
+    problems: text(b.problems as Uint8Array)
+      .split("\n")
+      .filter(Boolean)
+      .map((row) => {
+        const [rule, ...message] = row.split("\t");
+        return { rule: +rule, message: message.join("\t") };
+      }),
+    preview: text(b.preview as Uint8Array)
+      .split("\n")
+      .filter(Boolean)
+      .map((row) => {
+        // The text is last, and may hold tabs itself. 65535 is no rule or label.
+        const [rule, label, line, kind, start, end, ...rest] = row.split("\t");
+        const none = (v: string) => v === "65535";
+        return {
+          rule: none(rule) ? null : +rule,
+          label: none(label) ? null : Number(names[+label]),
+          line: +line,
+          kind: ({ m: "match", o: "other", g: "gap" } as const)[kind as "m" | "o" | "g"],
+          start: +start,
+          end: +end,
+          text: rest.join("\t"),
+        };
+      }),
   };
   return result;
 }
